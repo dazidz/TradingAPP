@@ -1,22 +1,24 @@
 import streamlit as st
 from supabase import create_client
+import os
 
-# Verbindung zu Supabase (aus den Secrets geladen)
-# Nutze die Secrets statt fest im Code eingetragene Keys!
-URL = st.secrets["SUPABASE_URL"]
-KEY = st.secrets["SUPABASE_KEY"]
-supabase = create_client(URL, KEY)
+# Verbindung zu Supabase
+URL = "https://pyyyrbhxqpsngslazzpq.supabase.co/"
+KEY = "sb_publishable_aHdbyoX1tnJZStUvry2w5A_jrTeA1jC"
+supabase = create_client(url, key)
 
-# Passwort-Konfiguration
+# Passwort-Konfiguration (Setze hier dein Wunsch-Passwort)
 PASSWORD = st.secrets["APP_PASSWORD"]
 
 def check_password():
+    """Gibt True zurück, wenn das Passwort korrekt ist."""
     if "password_correct" not in st.session_state:
         st.session_state["password_correct"] = False
 
     if st.session_state["password_correct"]:
         return True
 
+    # Login-Formular
     st.title("🔐 Ticker-Screener Login")
     input_pwd = st.text_input("Passwort eingeben", type="password")
     if st.button("Anmelden"):
@@ -29,8 +31,9 @@ def check_password():
 
 # Hauptprogramm starten
 if check_password():
-    st.title("📊 Ticker-Screener Dashboard")
 
-    # Daten laden
-    response = supabase.table("signals").select("*").execute()
-    st.dataframe(response.data, use_container_width=True)
+st.title("Ticker-Screener Dashboard")
+
+# Daten laden
+response = supabase.table("signals").select("*").execute()
+st.dataframe(response.data)
