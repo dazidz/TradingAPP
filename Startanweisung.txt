@@ -1,0 +1,7 @@
+Jetzt, wo das Frontend sauber läuft, sieht dein Arbeitsablauf für die Zukunft so aus:
+
+Screener-Modus: Du startest python screener.py. Er prüft deine Watchlist und schreibt bei einem "Elite Purple" Setup ein neues Signal in die Tabelle signals.
+
+Dashboard-Modus: Du startest python app.py (dein Gradio-Frontend).
+
+Live-Check: Mit einem Klick auf "Signale aktualisieren" siehst du sofort, ob der Screener in der Zwischenzeit etwas gefunden hat.

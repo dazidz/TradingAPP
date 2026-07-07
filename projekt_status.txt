@@ -1,0 +1,46 @@
+Sprint-Log zum Abschluss (Stand: 01.07.2026)
+[Manifest]
+
+Ziel: Trading OS (Web + native App) mit zentraler Cloud-DB.
+
+Status: Phase 1 (Grundlagen & Infrastruktur).
+
+Kern-Stack: Cloud-Datenbank (PostgreSQL geplant), Backend-Logik für 5 Seiten (Dashboard, Watchlist, Screener, Journal, Depot).
+
+[Erreicht heute]
+
+Fehlersuche: Lokales System stabilisiert (Streamlit läuft via python -m).
+
+Architektur: Konsens über die 5-Seiten-Struktur erreicht.
+
+Roadmap: Projekt-Manifest fixiert.
+
+[Nächster offener Punkt]
+
+Entscheidung über Cloud-Hosting (AWS/Supabase/etc.) für den Übergang von lokaler Datei zur zentralen Datenbank.
+
+--------------
+
+[Manifest] Ziel: Trading OS (Web + PWA) mit zentraler Cloud-DB (Supabase/PostgreSQL).  [Status] Phase 1: Datenbankmodell definiert (Watchlist, Trades, Portfolio, Signals).  [Nächster Schritt] Supabase-Projekt anlegen und Datenbank-Tabellen über SQL-Editor initialisieren.
+
+-----------------------
+
+[Status] Phase 1: Verbindung zur Cloud-Datenbank (Supabase) erfolgreich hergestellt.  [Erreicht] Python-Skript db.py kommuniziert korrekt mit der PostgreSQL-Datenbank.  [Nächster Schritt] Integration der Datenbank-Aufrufe in die app.py, um die alte lokale Dateiverarbeitung (Watchlist) vollständig durch Cloud-Daten zu ersetzen.  
+
+----------
+
+[Manifest] Ziel: Trading OS (Web + PWA) mit zentraler Cloud-DB (Supabase/PostgreSQL).
+
+[Status] Phase 1 abgeschlossen: Infrastruktur steht. App ist erfolgreich mit Supabase verbunden.
+
+[Erreicht] Lokale watchlist.txt durch cloud-basierte PostgreSQL-Tabelle ersetzt. Fehler in der Windows-Terminal-Konfiguration behoben.
+
+[Nächster Schritt] Übergang zu Phase 2 (Die Logik): Entwicklung der Screener-Engine, die Signale erkennt und diese automatisch in die signals-Tabelle der Cloud-Datenbank schreibt.
+
+------------
+
+[Status] Phase 2: Screener-Engine (screener.py) fertiggestellt.
+
+[Erreicht] Mathematische Übersetzung von SMI und Pivot-Logik in Python implementiert.
+
+[Nächster Schritt] Integration in das Dashboard, damit die signals-Tabelle automatisch visuell ausgewertet wird.
