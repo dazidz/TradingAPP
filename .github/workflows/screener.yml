@@ -25,6 +25,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # Erst den Inhalt des aktuellen Ordners auflisten, um zu sehen, wo wir sind
+          ls -R
           pip install -r requirements.txt
 
       - name: Run Screener
