@@ -1,47 +1,39 @@
 import streamlit as st
 from supabase import create_client
-import pandas as pd
+import os
 
-# Konfiguration der Seite
-st.set_page_config(page_title="Ticker-Screener Dashboard", layout="wide")
+# Verbindung zu Supabase
+URL = "https://pyyyrbhxqpsngslazzpq.supabase.co/"
+KEY = "sb_publishable_aHdbyoX1tnJZStUvry2w5A_jrTeA1jC"
+supabase = create_client(url, key)
 
-st.title("📊 Ticker-Screener Dashboard")
+# Passwort-Konfiguration (Setze hier dein Wunsch-Passwort)
+PASSWORD = st.secrets["APP_PASSWORD"]
 
-# 1. Verbindung zu Supabase mit Fehlerprüfung
-def init_connection():
-    try:
-        url = st.secrets["SUPABASE_URL"]
-        key = st.secrets["SUPABASE_KEY"]
-        return create_client(url, key)
-    except KeyError as e:
-        st.error(f"Fehler: Secret {e} fehlt in der Streamlit-Konfiguration!")
-        st.stop()
-    except Exception as e:
-        st.error(f"Verbindungsfehler: {e}")
-        st.stop()
+def check_password():
+    """Gibt True zurück, wenn das Passwort korrekt ist."""
+    if "password_correct" not in st.session_state:
+        st.session_state["password_correct"] = False
 
-supabase = init_connection()
+    if st.session_state["password_correct"]:
+        return True
 
-# 2. Daten laden (ersetze 'DEINE_TABELLE' durch deinen echten Tabellennamen)
-@st.cache_data(ttl=600) # Cacht die Daten für 10 Minuten
-def load_data():
-    try:
-        response = supabase.table("signals").select("*").execute()
-        return pd.DataFrame(response.data)
-    except Exception as e:
-        st.error(f"Fehler beim Laden der Daten: {e}")
-        return pd.DataFrame()
+    # Login-Formular
+    st.title("🔐 Ticker-Screener Login")
+    input_pwd = st.text_input("Passwort eingeben", type="password")
+    if st.button("Anmelden"):
+        if input_pwd == PASSWORD:
+            st.session_state["password_correct"] = True
+            st.rerun()
+        else:
+            st.error("Falsches Passwort!")
+    return False
 
-df = load_data()
+# Hauptprogramm starten
+if check_password():
 
-# 3. Anzeige
-if not df.empty:
-    st.write("### Aktuelle Signale")
-    st.dataframe(df, use_container_width=True)
-else:
-    st.warning("Keine Daten gefunden oder Tabelle leer.")
+st.title("Ticker-Screener Dashboard")
 
-# Debug-Bereich (Nur sichtbar, wenn es Probleme gibt)
-if st.checkbox("Debug: Verbindung prüfen"):
-    st.write("Verbindung zu Supabase steht.")
-    st.write("Spalten in der DB:", df.columns.tolist() if not df.empty else "Keine")
+# Daten laden
+response = supabase.table("signals").select("*").execute()
+st.dataframe(response.data)
