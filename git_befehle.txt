@@ -1,0 +1,20 @@
+1. git add . – Der "Pack"-Schritt (Staging Area)
+Stell dir vor, dein Projektordner ist ein Schreibtisch mit vielen verschiedenen Dateien. Einige sind fertig, andere sind nur Notizen. Mit git add . sagst du Git: „Nimm alles, was ich geändert habe, und leg es in den Versandkarton (die sogenannte Staging Area).“
+
+Der Punkt (.) steht für "alle Dateien im aktuellen Verzeichnis".
+
+In diesem Schritt wird noch nichts hochgeladen, es wird nur eine Liste erstellt: „Diese Änderungen sollen gleich übernommen werden.“
+
+2. git commit -m "Deine Nachricht" – Der "Versiegelungs"-Schritt
+Das ist der wichtigste Schritt. Ein Commit ist wie ein Schnappschuss (Snapshot) deines Projekts zu diesem genauen Zeitpunkt.
+
+Mit -m "..." fügst du eine Nachricht hinzu. Das ist extrem wichtig, damit du später in der Historie nachlesen kannst: „Was habe ich da eigentlich gemacht?“ (z.B. git commit -m "Screener Logik verbessert").
+
+Jetzt ist die Änderung offiziell in deiner lokalen Historie gespeichert. Du hast den Karton zugeklebt und einen Absender-Aufkleber draufgeklebt.
+
+3. git push – Der "Absende"-Schritt
+Jetzt ist der Moment, in dem die Daten tatsächlich dein Haus verlassen.
+
+git push überträgt deine lokalen Commits auf den Server von GitHub.
+
+Erst jetzt gelangen die Dateien in die Cloud. GitHub nimmt den "Karton" an und aktualisiert das Repository.
