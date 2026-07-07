@@ -10,5 +10,5 @@ supabase = create_client(url, key)
 st.title("Ticker-Screener Dashboard")
 
 # Daten laden
-response = supabase.table("DEINE_TABELLE").select("*").execute()
+response = supabase.table("signals").select("*").execute()
 st.dataframe(response.data)
