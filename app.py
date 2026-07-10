@@ -1,8 +1,11 @@
 import streamlit as st
 from supabase import create_client
+import pandas as pd
 
-# Verbindung zu Supabase (aus den Secrets geladen)
-# Nutze die Secrets statt fest im Code eingetragene Keys!
+# 1. Konfiguration
+st.set_page_config(page_title="Ticker-Screener", layout="wide")
+
+# Verbindung zu Supabase
 URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(URL, KEY)
@@ -27,10 +30,35 @@ def check_password():
             st.error("Falsches Passwort!")
     return False
 
-# Hauptprogramm starten
+# Hauptprogramm
 if check_password():
     st.title("📊 Ticker-Screener Dashboard")
 
-    # Daten laden
-    response = supabase.table("signals").select("*").execute()
-    st.dataframe(response.data, use_container_width=True)
+    # 2. Daten laden
+    try:
+        response = supabase.table("signals").select("*").execute()
+        df = pd.DataFrame(response.data)
+
+        if not df.empty:
+            # Spalte 'signal' zu 'signal_type' umbenennen, falls vorhanden
+            if 'signal' in df.columns:
+                df = df.rename(columns={'signal': 'signal_type'})
+            
+            # Wunsch-Reihenfolge definieren
+            cols_to_show = ['company_name', 'signal_type', 'candle_time', 'ticker', 'sector']
+            
+            # Filtern: Nur existierende Spalten wählen, die auch in der Liste sind
+            existing_cols = [c for c in cols_to_show if c in df.columns]
+            df = df[existing_cols]
+            
+            # Leere Werte in candle_time füllen
+            if 'candle_time' in df.columns:
+                df['candle_time'] = df['candle_time'].fillna("Keine Zeit")
+            
+            # Anzeige
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.write("Keine Daten in der Tabelle 'signals' gefunden.")
+            
+    except Exception as e:
+        st.error(f"Fehler beim Laden der Daten: {e}")
