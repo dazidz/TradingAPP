@@ -45,7 +45,7 @@ if check_password():
                 df = df.rename(columns={'signal': 'signal_type'})
             
             # Wunsch-Reihenfolge definieren
-            cols_to_show = ['company_name', 'signal_type', 'candle_time', 'ticker', 'sector']
+            cols_to_show = ['signal_type', 'company_name', 'sector', 'candle_time', 'ticker']
             
             # Filtern: Nur existierende Spalten wählen, die auch in der Liste sind
             existing_cols = [c for c in cols_to_show if c in df.columns]
