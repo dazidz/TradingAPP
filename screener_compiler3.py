@@ -49,7 +49,7 @@ def scan_ticker(ticker_info):
     sector = ticker_info.get('sector', 'N/A')
     gettex_ticker = ticker_info.get('gettex_ticker', '')
     
-    print(f"🔍 Prüfe: {ticker}...")
+    print(f"DEBUG: Ticker={ticker}, Sector={sector}, Gettex={gettex_ticker}")
     
     data = yf.download(ticker, period="10d", interval="1h", progress=False, auto_adjust=True)
     
