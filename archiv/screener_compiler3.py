@@ -11,9 +11,9 @@ supabase = get_db_client()
 
 def get_ticker_list_with_names():
     try:
-        # Lädt Ticker, Name, Sektor und Gettex-Ticker aus der Watchlist
+        # Lädt Ticker und Name aus der Watchlist
         response = supabase.table("watchlist").select("ticker, company_name, sector, gettex_ticker").execute()
-        return response.data 
+        return response.data # Liste von Dicts: [{'ticker': 'AAPL', 'company_name': 'Apple Inc'}, ...]
     except Exception as e:
         print(f"❌ Fehler beim Laden der 'watchlist': {e}")
         return []
@@ -34,20 +34,18 @@ def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, get
             "company_name": company_name,
             "signal_type": signal_type,
             "candle_time": candle_time.isoformat(),
-            "sector": sector,
-            "gettex_ticker": gettex_ticker,
+            "sector": sector,              # NEU
+            "gettex_ticker": gettex_ticker, # NEU
             "created_at": datetime.datetime.now(pytz.UTC).isoformat()
         }
         supabase.table("signals").insert(data).execute()
-        print(f"✅ {ticker} ({company_name}) -> Signal gespeichert: {signal_type}")
+        print(f"✅ {ticker} ({company_name}) -> Signal gespeichert (Kerze: {candle_time})")
     except Exception as e:
         print(f"❌ Fehler beim Speichern von {ticker}: {e}")
 
 def scan_ticker(ticker_info):
     ticker = ticker_info['ticker']
     name = ticker_info.get('company_name', 'N/A')
-    sector = ticker_info.get('sector', 'N/A')
-    gettex_ticker = ticker_info.get('gettex_ticker', '')
     
     print(f"🔍 Prüfe: {ticker}...")
     
@@ -60,13 +58,12 @@ def scan_ticker(ticker_info):
     if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
     data.columns = [str(c).lower() for c in data.columns]
     
-    # Preisanpassung (wie im Original)
     for col in ['open', 'high', 'low', 'close']:
         if col in data.columns: data[col] = data[col] * 1.016
     
     high, low, close = data['high'], data['low'], data['close']
     
-    # Indikatoren
+    # Indikatoren (Synchronisiert)
     tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
     def rma(series, length): return series.ewm(alpha=1/length, adjust=False).mean()
     atr = rma(tr, 14)
@@ -96,12 +93,10 @@ def scan_ticker(ticker_info):
     signal_found = False
     for i in reversed(range(len(data))):
         if sE.iloc[i]:
-            save_to_supabase(ticker, name, "ELITE", data.index[i], sector, gettex_ticker)
-            signal_found = True
+            save_to_supabase(ticker, name, "ELITE", data.index[i])
             break
         elif sK.iloc[i]:
-            save_to_supabase(ticker, name, "KAUFEN", data.index[i], sector, gettex_ticker)
-            signal_found = True
+            save_to_supabase(ticker, name, "KAUFEN", data.index[i])
             break
             
     if not signal_found: print(f"ℹ️ {ticker}: Kein Signal.")
