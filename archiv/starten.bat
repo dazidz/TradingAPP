@@ -1,6 +1,0 @@
-@echo off
-echo Berechne frische Marktdaten...
-python precalc.py
-echo Starte App...
-python -m streamlit run app.py
-pause
