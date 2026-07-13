@@ -3,6 +3,9 @@ from supabase import create_client
 import pandas as pd
 import plotly.express as px
 
+# Ganz oben in der app.py (vor dem restlichen Code)
+st.set_page_config(layout="wide")
+
 # Verbindung zu Supabase
 URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
