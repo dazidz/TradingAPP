@@ -42,25 +42,21 @@ def scan_ticker(ticker_info):
     
     if data.empty or len(data) < 30: return
 
-    # --- ROBUSTE DATENVORBEREITUNG (Fix für HON/DOW) ---
-    # Entferne Multi-Ebenen und erzwinge 1D-Struktur
+    # --- TOTALE 1D-ENTKOPPLUNG (Fix für HON, DOW, ENVA) ---
+    # Entferne Multi-Ebenen
     if isinstance(data.columns, pd.MultiIndex):
-        # Bei auto_adjust=True liegen die Daten oft in Level 1
-        data.columns = data.columns.get_level_values(1) if len(data.columns.levels) > 1 else data.columns.get_level_values(0)
+        data.columns = [c[1] if isinstance(c, tuple) else c for c in data.columns]
     
-    data = data.copy()
     data.columns = [str(c).lower() for c in data.columns]
     
-    # Aggressives Flattening: Falls Spalten noch Dimensionen > 1 haben
-    for col in data.columns:
-        if hasattr(data[col], 'values') and data[col].values.ndim > 1:
-            data[col] = data[col].values.flatten()
-            
-    # Preisanpassung
-    for col in ['open', 'high', 'low', 'close']:
-        if col in data.columns: data[col] = data[col] * 1.016
+    # Erzwinge 1D Series für High, Low, Close
+    def force_series(col_name):
+        # .values.flatten() zwingt ndarray (n,1) zu (n,)
+        return pd.Series(data[col_name].values.flatten(), index=data.index)
 
-    high, low, close = data['high'], data['low'], data['close']
+    high = force_series('high') * 1.016
+    low = force_series('low') * 1.016
+    close = force_series('close') * 1.016
     
     # --- INDIKATOREN (Pine Script Logik) ---
     def rma(series, length): return series.ewm(alpha=1/length, adjust=False).mean()
@@ -84,7 +80,7 @@ def scan_ticker(ticker_info):
     smi_s = pd.Series(smiV, index=data.index).rolling(5).mean()
     sigN = smi_s.ewm(span=sigL, adjust=False).mean()
 
-    # Pivot-Logik (suche ta.pivotlow(5, 2))
+    # Pivot-Logik
     is_pivot = (smi_s.shift(2) < smi_s.shift(3)) & (smi_s.shift(2) < smi_s.shift(4)) & \
                (smi_s.shift(2) < smi_s.shift(5)) & (smi_s.shift(2) < smi_s.shift(6)) & \
                (smi_s.shift(2) < smi_s.shift(1)) & (smi_s.shift(2) < smi_s)
@@ -100,7 +96,7 @@ def scan_ticker(ticker_info):
     sE = (cUp & regD & (adxV > 18)) | (cUp & hidD & (adxV > 25))
     sK = (~sE) & cUp & (smi_s < -35) & ((adxV > 18) | (adxV > adxV.shift(1)))
     
-    # Speichern (letzte Kerze prüfen)
+    # Speichern
     if sE.iloc[-1]: save_to_supabase(ticker, name, "ELITE", data.index[-1], sector, gettex_ticker)
     elif sK.iloc[-1]: save_to_supabase(ticker, name, "KAUFEN", data.index[-1], sector, gettex_ticker)
 
