@@ -12,7 +12,7 @@ supabase = get_db_client()
 def get_ticker_list_with_names():
     try:
         response = supabase.table("watchlist").select("ticker, company_name, sector, gettex_ticker").execute()
-        return [t for t in response.data if t.get('ticker') and str(t['ticker']).strip()]
+        return response.data
     except Exception as e:
         print(f"❌ Fehler beim Laden der 'watchlist': {e}")
         return []
@@ -29,8 +29,9 @@ def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, get
             "created_at": datetime.datetime.now(pytz.UTC).isoformat()
         }
         supabase.table("signals").insert(data).execute()
-        print(f"✅ {ticker} -> {signal_type} gespeichert.")
-    except Exception as e: print(f"❌ Fehler beim Speichern von {ticker}: {e}")
+        print(f"✅ {ticker} ({company_name}) -> Signal gespeichert: {signal_type}")
+    except Exception as e:
+        print(f"❌ Fehler beim Speichern von {ticker}: {e}")
 
 def scan_ticker(ticker_info):
     ticker = ticker_info['ticker']
@@ -38,27 +39,25 @@ def scan_ticker(ticker_info):
     sector = ticker_info.get('sector', 'N/A')
     gettex_ticker = ticker_info.get('gettex_ticker', '')
     
+    # 1. Daten laden
     data = yf.download(ticker, period="1mo", interval="1h", progress=False, auto_adjust=True)
-    
     if data.empty or len(data) < 30: return
 
-    # --- TOTALE 1D-ENTKOPPLUNG (Fix für HON, DOW, ENVA) ---
-    # Entferne Multi-Ebenen
-    if isinstance(data.columns, pd.MultiIndex):
-        data.columns = [c[1] if isinstance(c, tuple) else c for c in data.columns]
-    
+    # 2. STRUKTUR-FIX (Exakt wie dein alter Code, plus Dimension-Check)
+    if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
     data.columns = [str(c).lower() for c in data.columns]
     
-    # Erzwinge 1D Series für High, Low, Close
-    def force_series(col_name):
-        # .values.flatten() zwingt ndarray (n,1) zu (n,)
-        return pd.Series(data[col_name].values.flatten(), index=data.index)
-
-    high = force_series('high') * 1.016
-    low = force_series('low') * 1.016
-    close = force_series('close') * 1.016
+    # Preisanpassung
+    for col in ['open', 'high', 'low', 'close']:
+        if col in data.columns: 
+            # Sicherstellen, dass wir 1D-Daten haben (der Fix für HON/DOW/ENVA)
+            if data[col].ndim > 1:
+                data[col] = data[col].iloc[:, 0]
+            data[col] = data[col] * 1.016
     
-    # --- INDIKATOREN (Pine Script Logik) ---
+    high, low, close = data['high'], data['low'], data['close']
+    
+    # 3. INDIKATOREN
     def rma(series, length): return series.ewm(alpha=1/length, adjust=False).mean()
 
     # ADX
@@ -101,11 +100,9 @@ def scan_ticker(ticker_info):
     elif sK.iloc[-1]: save_to_supabase(ticker, name, "KAUFEN", data.index[-1], sector, gettex_ticker)
 
 if __name__ == "__main__":
-    print("🚀 Starte Batch-Scan...")
     ticker_liste = get_ticker_list_with_names()
     for t_info in ticker_liste:
         try:
             scan_ticker(t_info)
-            time.sleep(0.1)
+            time.sleep(0.5)
         except Exception as e: print(f"❌ Fehler bei {t_info['ticker']}: {e}")
-    print("🏁 Scan abgeschlossen.")
