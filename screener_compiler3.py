@@ -42,12 +42,20 @@ def scan_ticker(ticker_info):
     
     if data.empty or len(data) < 30: return
 
-    # --- ROBUSTE DATENVORBEREITUNG ---
-    if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
-    data.columns = [str(c).lower() for c in data.columns]
-    for col in data.columns:
-        if len(data[col].shape) > 1: data[col] = data[col].iloc[:, 0]
+    # --- ROBUSTE DATENVORBEREITUNG (Fix für HON/DOW) ---
+    # Entferne Multi-Ebenen und erzwinge 1D-Struktur
+    if isinstance(data.columns, pd.MultiIndex):
+        # Bei auto_adjust=True liegen die Daten oft in Level 1
+        data.columns = data.columns.get_level_values(1) if len(data.columns.levels) > 1 else data.columns.get_level_values(0)
     
+    data = data.copy()
+    data.columns = [str(c).lower() for c in data.columns]
+    
+    # Aggressives Flattening: Falls Spalten noch Dimensionen > 1 haben
+    for col in data.columns:
+        if hasattr(data[col], 'values') and data[col].values.ndim > 1:
+            data[col] = data[col].values.flatten()
+            
     # Preisanpassung
     for col in ['open', 'high', 'low', 'close']:
         if col in data.columns: data[col] = data[col] * 1.016
@@ -73,10 +81,10 @@ def scan_ticker(ticker_info):
     aR = rel.ewm(span=smiS1, adjust=False).mean().ewm(span=smiS2, adjust=False).mean()
     aD = df_val.ewm(span=smiS1, adjust=False).mean().ewm(span=smiS2, adjust=False).mean()
     smiV = np.where(aD != 0, (aR / (aD / 2) * 100), 0)
-    sigN = pd.Series(smiV).ewm(span=sigL, adjust=False).mean()
+    smi_s = pd.Series(smiV, index=data.index).rolling(5).mean()
+    sigN = smi_s.ewm(span=sigL, adjust=False).mean()
 
     # Pivot-Logik (suche ta.pivotlow(5, 2))
-    smi_s = pd.Series(smiV, index=data.index)
     is_pivot = (smi_s.shift(2) < smi_s.shift(3)) & (smi_s.shift(2) < smi_s.shift(4)) & \
                (smi_s.shift(2) < smi_s.shift(5)) & (smi_s.shift(2) < smi_s.shift(6)) & \
                (smi_s.shift(2) < smi_s.shift(1)) & (smi_s.shift(2) < smi_s)
