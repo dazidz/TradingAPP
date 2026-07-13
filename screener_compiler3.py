@@ -51,7 +51,7 @@ def scan_ticker(ticker_info):
     
     print(f"DEBUG: Ticker={ticker}, Sector={sector}, Gettex={gettex_ticker}")
     
-    data = yf.download(ticker, period="10d", interval="1h", progress=False, auto_adjust=True)
+    data = yf.download(ticker, period="5d", interval="1h", progress=False, auto_adjust=True)
     
     if data.empty or len(data) < 20:
         print(f"⚠️ {ticker}: Zu wenig Daten.")
