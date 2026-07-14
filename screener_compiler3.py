@@ -11,6 +11,7 @@ supabase = get_db_client()
 
 def get_ticker_list_with_names():
     try:
+        # Lädt Ticker, Name, Sektor und Gettex-Ticker aus der Watchlist
         response = supabase.table("watchlist").select("ticker, company_name, sector, gettex_ticker").execute()
         return response.data 
     except Exception as e:
@@ -19,6 +20,7 @@ def get_ticker_list_with_names():
 
 def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker):
     try:
+        # Prüfen, ob für diesen Ticker heute schon ein Signal existiert
         date_str = datetime.datetime.now(pytz.UTC).strftime('%Y-%m-%d')
         check = supabase.table("signals").select("id") \
             .eq("ticker", ticker) \
@@ -47,26 +49,23 @@ def scan_ticker(ticker_info):
     sector = ticker_info.get('sector', 'N/A')
     gettex_ticker = ticker_info.get('gettex_ticker', '')
     
-    # 1. Daten laden
+    
     data = yf.download(ticker, period="5d", interval="1h", progress=False, auto_adjust=True)
     
-    # Sicherstellung, dass wir genug Daten haben
     if data.empty or len(data) < 20:
+        print(f"⚠️ {ticker}: Zu wenig Daten.")
         return
 
-    # MultiIndex Fix für moderne yfinance Versionen
-    if isinstance(data.columns, pd.MultiIndex): 
-        data.columns = data.columns.get_level_values(0)
+    if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
     data.columns = [str(c).lower() for c in data.columns]
     
-    # Preisanpassung
+    # Preisanpassung (wie im Original)
     for col in ['open', 'high', 'low', 'close']:
-        if col in data.columns: 
-            # Fix für ndarray Probleme: .squeeze() erzwingt 1D-Format
-            data[col] = data[col].squeeze() * 1.016
+        if col in data.columns: data[col] = data[col] * 1.016
     
     high, low, close = data['high'], data['low'], data['close']
     
+    # Indikatoren
     # --- OPTIMIERTER INDIKATOR-BLOCK ---
     def rma(series, length): return series.ewm(alpha=1/length, adjust=False).mean()
     
@@ -100,7 +99,6 @@ def scan_ticker(ticker_info):
     sE = (cUp & regD & (adxV > 12)) | (cUp & hidD & (adxV > 18))
     sK = (~sE) & cUp & (smiV < -30) & ((adxV > 12) | (adxV > adxV.shift(1)))
     
-    # SIGNAL_FOUND INITIALISIERUNG
     signal_found = False
     for i in reversed(range(len(data))):
         if sE.iloc[i]:
@@ -112,8 +110,7 @@ def scan_ticker(ticker_info):
             signal_found = True
             break
             
-    if not signal_found:
-        pass # Signal-Logik beendet
+    if not signal_found: print(f"ℹ️ {ticker}: Kein Signal.")
 
 if __name__ == "__main__":
     print("🧹 Bereinige alte Signale...")
@@ -128,5 +125,5 @@ if __name__ == "__main__":
         try:
             scan_ticker(t_info)
             time.sleep(0.5)
-        except Exception as e: print(f"❌ Fehler bei {t_info.get('ticker')}: {e}")
+        except Exception as e: print(f"❌ Fehler bei {t_info['ticker']}: {e}")
     print("🏁 Scan abgeschlossen.")
