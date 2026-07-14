@@ -50,7 +50,7 @@ def scan_ticker(ticker_info):
     gettex_ticker = ticker_info.get('gettex_ticker', '')
     
     
-    data = yf.download(ticker, period="5d", interval="1h", progress=False, auto_adjust=True)
+    data = yf.download(ticker, period="3mo", interval="1h", progress=False, auto_adjust=True)
     
     if data.empty or len(data) < 20:
         print(f"⚠️ {ticker}: Zu wenig Daten.")
@@ -59,65 +59,78 @@ def scan_ticker(ticker_info):
     if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
     data.columns = [str(c).lower() for c in data.columns]
     
-    # Preisanpassung (wie im Original)
+    # Preisanpassung
     for col in ['open', 'high', 'low', 'close']:
         if col in data.columns: data[col] = data[col] * 1.016
     
     high, low, close = data['high'], data['low'], data['close']
     
     # --- INDIKATOREN & SCORING LOGIK ---
-    
-    # Indikatoren-Berechnung
+
+    # ADX Berechnung
     tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
     def rma(series, length): return series.ewm(alpha=1/length, adjust=False).mean()
     atr = rma(tr, 14)
     plus_di = 100 * (rma((high - high.shift()).clip(lower=0), 14) / atr)
     minus_di = 100 * (rma((low.shift() - low).clip(lower=0), 14) / atr)
-    adxV = 100 * rma(abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 0.0001), 14)
+    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 0.0001)
+    adxV = rma(dx, 14)
     
+    # Indikatoren-Berechnung
+   # --- 2. Indikatoren & PIVOT LOGIK (Exakt wie Pine Script) ---
     smiL, smiS1, smiS2, sigL = 10, 3, 10, 5
     hi, lo = high.rolling(smiL).max(), low.rolling(smiL).min()
     diff, rdiff = hi - lo, close - (hi + lo) / 2
+    
+    # EMAs für Stabilität
     aR = rdiff.ewm(span=smiS1, adjust=False).mean().ewm(span=smiS2, adjust=False).mean()
     aD = diff.ewm(span=smiS1, adjust=False).mean().ewm(span=smiS2, adjust=False).mean()
-    smiV = pd.Series(np.where(aD != 0, (aR / (aD / 2) * 100), 0), index=data.index).rolling(5).mean()
+    
+    # SMI normalisiert
+    smiV = pd.Series(np.where(aD != 0, (aR / (aD / 2) * 100), 0), index=data.index)
     sigN = smiV.ewm(span=sigL, adjust=False).mean()
 
-    # Robuste Pivot-Logik (5er Fenster)
-    smi_rolling = smiV.rolling(window=5, center=False).min()
-    is_pivot = (smiV == smi_rolling) & (smiV < -10)
-    lSL = pd.Series(np.where(is_pivot, smiV, np.nan), index=data.index).ffill()
-    lPL = pd.Series(np.where(is_pivot, low, np.nan), index=data.index).ffill()
+    # Korrekte Pivot-Logik (ta.pivotlow Simulation)
+    # Wir schauen auf die Kerze 'i-2' als potenzielles Tief
+    smiV_s = smiV.shift(2)
+    is_pivot = (smiV_s < smiV.shift(3)) & (smiV_s < smiV.shift(4)) & \
+               (smiV_s < smiV.shift(1)) & (smiV_s < smiV)
     
-    # --- 3. Scoring & Signal-Logik (Strikte Trennung) ---
+    # Pivot-Werte festschreiben
+    lSL = pd.Series(np.where(is_pivot, smiV_s, np.nan), index=data.index).ffill()
+    lPL = pd.Series(np.where(is_pivot, low.shift(2), np.nan), index=data.index).ffill()
+
+    # --- 3. Strikte Signal-Logik ---
     cUp = (smiV.shift(1) < sigN.shift(1)) & (smiV > sigN)
     
-    # Divergenzen für ELITE (Stärker, tiefer im SMI)
-    regD_elite = (low < lPL) & (smiV > lSL) & (smiV < -30)
-    hidD_elite = (low > lPL) & (smiV < lSL) & (lSL < -20)
-    is_elite_div = regD_elite | hidD_elite
+    # Divergenz-Bedingungen aus Pine
+    regD = (low < lPL) & (smiV > lSL) & (smiV < -40)
+    hidD = (low > lPL) & (smiV < lSL) & (lSL < -20)
     
-    # ELITE Definition: Divergenz + Crossover + Trendbestätigung
-    # Wir nehmen den ADX als hartes Filter-Kriterium für ELITE
-    is_elite = cUp & is_elite_div & (adxV > 18)
-    
-    # KAUFEN Definition: Alles andere, was das Crossover hat
-    # Das bedeutet, wenn es ein Crossover gibt, aber die Divergenz zu schwach 
-    # oder der ADX zu niedrig ist, landet es automatisch hier.
-    is_buy = cUp & (~is_elite)
-    
-    # 4. Signal-Suche mit Meta-Daten-Generierung
+    # ELITE & KAUFEN
+    is_elite = cUp & (regD | hidD) & (adxV > 18)
+    is_buy = (~is_elite) & cUp & (smiV < -35) & (adxV > 18)
+
+    # --- 4. Signal-Suche (Mit 5-Tage-Filter) ---
     signal_found = False
+    heute = pd.Timestamp.now(tz='UTC')
+    
+    # Wir gehen rückwärts durch die Daten
     for i in reversed(range(len(data))):
-        # Meta-Daten erfassen
+        candle_time = data.index[i].tz_localize(None).tz_localize('UTC') # Sicherstellung UTC
+        
+        # Stopp, wenn Signal älter als 5 Tage
+        if (heute - candle_time).days > 5:
+            break
+            
         meta = {"smi": round(float(smiV.iloc[i]), 2), "adx": round(float(adxV.iloc[i]), 2)}
         
         if is_elite.iloc[i]:
-            save_to_supabase(ticker, name, "ELITE", data.index[i], sector, gettex_ticker, meta)
+            save_to_supabase(ticker, name, "ELITE", candle_time, sector, gettex_ticker, meta)
             signal_found = True
-            break
+            break # Nur das aktuellste Signal pro Ticker speichern
         elif is_buy.iloc[i]:
-            save_to_supabase(ticker, name, "KAUFEN", data.index[i], sector, gettex_ticker, meta)
+            save_to_supabase(ticker, name, "KAUFEN", candle_time, sector, gettex_ticker, meta)
             signal_found = True
             break
             
