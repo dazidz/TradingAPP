@@ -87,12 +87,12 @@ def scan_ticker(ticker_info):
     lPL = pd.Series(np.where(is_pivot, low.shift(2), np.nan), index=data.index).ffill()
     
     cUp = (smiV.shift(1) < sigN.shift(1)) & (smiV > sigN)
-    regD = (low < lPL) & (smiV > lSL) & (smiV < -40)
-    hidD = (low > lPL) & (smiV < lSL) & (lSL < -20)
+    regD = (low < lPL) & (smiV > lSL) & (smiV < -20) # Gelockert von -40 auf -20
+    hidD = (low > lPL) & (smiV < lSL) & (lSL < -10)  # Gelockert von -20 auf -10
     
     # ELITE: ADX Filter nun "realistischer" (18 und 25)
-    sE = (cUp & regD & (adxV > 18)) | (cUp & hidD & (adxV > 25))
-    sK = (~sE) & cUp & (smiV < -35) & ((adxV > 18) | (adxV > adxV.shift(1)))
+    sE = (cUp & regD & (adxV > 10)) | (cUp & hidD & (adxV > 15))
+    sK = (~sE) & cUp & (smiV < -25) & ((adxV > 10) | (adxV > adxV.shift(1)))
     
     # Speichern der aktuellsten Kerze (bei Bedarf auf alle Kerzen ausweiten)
     if sE.iloc[-1]: 
