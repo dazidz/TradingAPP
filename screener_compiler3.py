@@ -65,16 +65,14 @@ def scan_ticker(ticker_info):
     
     high, low, close = data['high'], data['low'], data['close']
     
-    # Indikatoren
-    # --- OPTIMIERTER INDIKATOR-BLOCK ---
-    def rma(series, length): return series.ewm(alpha=1/length, adjust=False).mean()
+    # --- INDIKATOREN & SCORING LOGIK ---
     
+    # Indikatoren-Berechnung
     tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
+    def rma(series, length): return series.ewm(alpha=1/length, adjust=False).mean()
     atr = rma(tr, 14)
     plus_di = 100 * (rma((high - high.shift()).clip(lower=0), 14) / atr)
     minus_di = 100 * (rma((low.shift() - low).clip(lower=0), 14) / atr)
-    
-    # 1. OPTIMIERUNG: Echter ADX ohne künstliche Multiplikation
     adxV = 100 * rma(abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 0.0001), 14)
     
     smiL, smiS1, smiS2, sigL = 10, 3, 10, 5
@@ -85,38 +83,38 @@ def scan_ticker(ticker_info):
     smiV = pd.Series(np.where(aD != 0, (aR / (aD / 2) * 100), 0), index=data.index).rolling(5).mean()
     sigN = smiV.ewm(span=sigL, adjust=False).mean()
 
-    is_pivot = (smiV.shift(2) < smiV.shift(3)) & (smiV.shift(2) < smiV.shift(4)) & (smiV.shift(2) < smiV.shift(5)) & (smiV.shift(2) < smiV.shift(6)) & (smiV.shift(2) < smiV.shift(7)) & (smiV.shift(2) < smiV.shift(1)) & (smiV.shift(2) < smiV)
-    lSL = pd.Series(np.where(is_pivot, smiV.shift(2), np.nan), index=data.index).ffill()
-    lPL = pd.Series(np.where(is_pivot, low.shift(2), np.nan), index=data.index).ffill()
+    # Robuste Pivot-Logik (5er Fenster)
+    smi_rolling = smiV.rolling(window=5, center=True).min()
+    is_pivot = (smiV == smi_rolling) & (smiV < -10)
+    lSL = pd.Series(np.where(is_pivot, smiV, np.nan), index=data.index).ffill()
+    lPL = pd.Series(np.where(is_pivot, low, np.nan), index=data.index).ffill()
     
-    # 3. Logik & Signal-Trennung (Logik-Synchronisation)
-    # SMI Crossover
+    # Logik-Komponenten
     cUp = (smiV.shift(1) < sigN.shift(1)) & (smiV > sigN)
+    regD = (low < lPL) & (smiV > lSL) & (smiV < -20)
+    hidD = (low > lPL) & (smiV < lSL) & (lSL < -10)
+    has_div = regD | hidD
     
-    # ELITE-Bedingungen (strenge Definition)
-    regD = (low < lPL) & (smiV > lSL) & (smiV < -25)
-    hidD = (low > lPL) & (smiV < lSL) & (lSL < -15)
+    # Scoring (Punkte-System)
+    score = pd.Series(0, index=data.index)
+    score += cUp.astype(int) * 1
+    score += has_div.astype(int) * 1
+    score += (adxV > 10).astype(int) * 1
     
-    # Wir definieren IS_ELITE explizit
-    is_elite = (cUp & regD & (adxV > 12)) | (cUp & hidD & (adxV > 18))
+    # Definition der Signale
+    is_elite = (score >= 2) & has_div
+    is_buy = (~is_elite) & (score >= 1)
     
-    # KAUFEN-Bedingung: Nur wenn NICHT ELITE
-    is_buy = (~is_elite) & cUp & (smiV < -30) & ((adxV > 10) | (adxV > adxV.shift(1)))
-    
-   # 4. Signal-Suche mit Priorisierung
     signal_found = False
     for i in reversed(range(len(data))):
-        # Wir prüfen ZUERST auf ELITE
-        if is_elite.iloc[i]:
+        if sE.iloc[i]:
             save_to_supabase(ticker, name, "ELITE", data.index[i], sector, gettex_ticker)
             signal_found = True
-            break # ELITE gefunden -> Signal beendet
-        
-        # Erst WENN kein ELITE, prüfen wir auf KAUFEN
-        elif is_buy.iloc[i]:
+            break
+        elif sK.iloc[i]:
             save_to_supabase(ticker, name, "KAUFEN", data.index[i], sector, gettex_ticker)
             signal_found = True
-            break # KAUFEN gefunden -> Signal beendet
+            break
             
     if not signal_found: print(f"ℹ️ {ticker}: Kein Signal.")
 
