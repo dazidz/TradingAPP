@@ -105,18 +105,23 @@ def scan_ticker(ticker_info):
     is_elite = (score >= 2) & has_div
     is_buy = (~is_elite) & (score >= 1)
     
+    # --- 4. Signal-Suche (Korrekt mit Scoring-Variablen) ---
     signal_found = False
     for i in reversed(range(len(data))):
-        if sE.iloc[i]:
+        # Wir prüfen ZUERST auf ELITE (basierend auf is_elite)
+        if is_elite.iloc[i]:
             save_to_supabase(ticker, name, "ELITE", data.index[i], sector, gettex_ticker)
             signal_found = True
-            break
-        elif sK.iloc[i]:
+            break # Wenn ELITE gefunden, dann abbrechen
+        
+        # Erst WENN kein ELITE, prüfen wir auf KAUFEN (basierend auf is_buy)
+        elif is_buy.iloc[i]:
             save_to_supabase(ticker, name, "KAUFEN", data.index[i], sector, gettex_ticker)
             signal_found = True
-            break
+            break # Wenn KAUFEN gefunden, dann abbrechen
             
-    if not signal_found: print(f"ℹ️ {ticker}: Kein Signal.")
+    if not signal_found:
+        print(f"ℹ️ {ticker}: Kein Signal.")
 
 if __name__ == "__main__":
     print("🧹 Bereinige alte Signale...")
