@@ -3,12 +3,15 @@ from supabase import create_client
 import pandas as pd
 import ast
 
+# Seiteneinstellungen
+st.set_page_config(layout="wide", page_title="Ticker-Screener Dashboard")
+
 # Verbindung zu Supabase
 URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(URL, KEY)
 
-# Passwort-Schutz Funktion (deine Logik bleibt)
+# Passwort-Schutz
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
@@ -27,34 +30,49 @@ if check_password():
     st.title("📊 Ticker-Screener Dashboard")
 
     try:
+        # 1. Daten holen
         response = supabase.table("signals").select("*").execute()
         df = pd.DataFrame(response.data)
 
         if not df.empty:
-            # 1. Metadaten verarbeiten (SMI/ADX aus String-JSON ziehen)
+            # Spalten-Mapping
+            if 'signal' in df.columns: df = df.rename(columns={'signal': 'signal_type'})
+            
+            # 2. Metadaten verarbeiten (SMI/ADX aus String-JSON)
             if 'meta_data' in df.columns:
-                # String zu Dict umwandeln
                 df['meta_data'] = df['meta_data'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else {})
                 meta_df = pd.json_normalize(df['meta_data'])
                 df = pd.concat([df.drop('meta_data', axis=1), meta_df], axis=1)
 
-            # 2. Bestehende Tabellen-Logik
-            if 'signal' in df.columns: df = df.rename(columns={'signal': 'signal_type'})
-            
+            # TV-Link Logik
             if 'gettex_ticker' in df.columns:
                 df['TV_Link'] = df['gettex_ticker'].apply(
                     lambda x: f"https://www.tradingview.com/chart/?symbol={x}" if x else ""
                 )
-
-            # 3. Visualisierung (NEU: Analyse-Bereich)
-            if 'smi' in df.columns and 'adx' in df.columns:
-                st.subheader("🔍 Signal-Analyse: SMI vs. ADX")
-                st.scatter_chart(df, x='smi', y='adx', color='signal_type')
-                st.caption("Suche nach KAUFEN-Punkten, die tief im SMI-Bereich liegen (SMI < -25).")
+            
+            # 3. Visualisierung
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("🔍 SMI vs. ADX Analyse")
+                if 'smi' in df.columns and 'adx' in df.columns:
+                    st.scatter_chart(df, x='smi', y='adx', color='signal_type')
+                else:
+                    st.info("Noch keine Metadaten vorhanden.")
+            
+            with col2:
+                st.subheader("🏢 Signale nach Sektor")
+                if 'sector' in df.columns:
+                    sector_counts = df['sector'].value_counts()
+                    st.bar_chart(sector_counts)
+                else:
+                    st.write("Keine Sektoren-Daten.")
 
             # 4. Tabelle anzeigen
-            cols_to_show = ['company_name', 'signal_type', 'smi', 'adx', 'candle_time', 'ticker', 'TV_Link']
-            # Sicherstellen, dass nur existierende Spalten gewählt werden
+            st.subheader("📋 Signal-Liste")
+            
+            # Spalten-Konfiguration
+            cols_to_show = ['company_name', 'signal_type', 'smi', 'adx', 'sector', 'candle_time', 'ticker', 'TV_Link']
             existing_cols = [c for c in cols_to_show if c in df.columns]
             
             st.dataframe(
@@ -71,4 +89,4 @@ if check_password():
             st.write("Tabelle 'signals' ist leer.")
             
     except Exception as e:
-        st.error(f"Fehler beim Laden: {e}")
+        st.error(f"Fehler beim Laden der Daten: {e}")
