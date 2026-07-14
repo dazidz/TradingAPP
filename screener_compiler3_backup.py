@@ -65,13 +65,13 @@ def scan_ticker(ticker_info):
     
     high, low, close = data['high'], data['low'], data['close']
     
-    # Indikatoren
+    # --- 1. Indikatoren-Berechnung ---
     tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
     def rma(series, length): return series.ewm(alpha=1/length, adjust=False).mean()
     atr = rma(tr, 14)
     plus_di = 100 * (rma((high - high.shift()).clip(lower=0), 14) / atr)
     minus_di = 100 * (rma((low.shift() - low).clip(lower=0), 14) / atr)
-    adxV = 100 * rma(abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 0.0001), 14) * 1.25
+    adxV = 100 * rma(abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 0.0001), 14)
     
     smiL, smiS1, smiS2, sigL = 10, 3, 10, 5
     hi, lo = high.rolling(smiL).max(), low.rolling(smiL).min()
@@ -81,18 +81,29 @@ def scan_ticker(ticker_info):
     smiV = pd.Series(np.where(aD != 0, (aR / (aD / 2) * 100), 0), index=data.index).rolling(5).mean()
     sigN = smiV.ewm(span=sigL, adjust=False).mean()
 
-    is_pivot = (smiV.shift(2) < smiV.shift(3)) & (smiV.shift(2) < smiV.shift(4)) & (smiV.shift(2) < smiV.shift(5)) & (smiV.shift(2) < smiV.shift(6)) & (smiV.shift(2) < smiV.shift(7)) & (smiV.shift(2) < smiV.shift(1)) & (smiV.shift(2) < smiV)
+    # --- 2. Robuste Pivot-Logik (Rückwärtsgewandt) ---
+    is_pivot = (smiV.shift(2) < smiV.shift(3)) & (smiV.shift(2) < smiV.shift(4)) & \
+               (smiV.shift(2) < smiV.shift(5)) & (smiV.shift(2) < smiV.shift(6)) & \
+               (smiV.shift(2) < smiV.shift(1)) & (smiV.shift(2) < smiV)
+               
     lSL = pd.Series(np.where(is_pivot, smiV.shift(2), np.nan), index=data.index).ffill()
-    lPL = pd.Series(np.where(is_pivot, data['low'].shift(2), np.nan), index=data.index).ffill()
+    lPL = pd.Series(np.where(is_pivot, low.shift(2), np.nan), index=data.index).ffill()
     
+    # --- 3. Scoring & Signal-Logik ---
     cUp = (smiV.shift(1) < sigN.shift(1)) & (smiV > sigN)
-    regD = (data['low'] < lPL) & (smiV > lSL) & (smiV < -40)
-    hidD = (data['low'] > lPL) & (smiV < lSL) & (lSL < -20)
+    regD = (low < lPL) & (smiV > lSL) & (smiV < -10)
+    hidD = (low > lPL) & (smiV < lSL) & (lSL < -5)
+    has_div = regD | hidD
     
-    sE = (cUp & regD & (adxV > 18)) | (cUp & hidD & (adxV > 25))
-    sK = (~sE) & cUp & (smiV < -35) & ((adxV > 18) | (adxV > adxV.shift(1)))
+    score = pd.Series(0, index=data.index)
+    score += cUp.astype(int) * 1
+    score += has_div.astype(int) * 1
+    score += (adxV > 5).astype(int) * 1
     
-    signal_found = False
+    is_elite = (score >= 2) & has_div
+    is_buy = (~is_elite) & (score >= 1)
+    
+    
     for i in reversed(range(len(data))):
         if sE.iloc[i]:
             save_to_supabase(ticker, name, "ELITE", data.index[i], sector, gettex_ticker)
