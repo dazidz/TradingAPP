@@ -89,26 +89,34 @@ def scan_ticker(ticker_info):
     lSL = pd.Series(np.where(is_pivot, smiV.shift(2), np.nan), index=data.index).ffill()
     lPL = pd.Series(np.where(is_pivot, low.shift(2), np.nan), index=data.index).ffill()
     
+    # 3. Logik & Signal-Trennung (Logik-Synchronisation)
+    # SMI Crossover
     cUp = (smiV.shift(1) < sigN.shift(1)) & (smiV > sigN)
     
-    # 2. OPTIMIERUNG: Schwellenwerte für Divergenz und Trend etwas gelockert
-    regD = (low < lPL) & (smiV > lSL) & (smiV < -25) 
+    # ELITE-Bedingungen (strenge Definition)
+    regD = (low < lPL) & (smiV > lSL) & (smiV < -25)
     hidD = (low > lPL) & (smiV < lSL) & (lSL < -15)
     
-    # 3. OPTIMIERUNG: Angepasste ADX-Schwellen auf den "echten" ADX
-    sE = (cUp & regD & (adxV > 12)) | (cUp & hidD & (adxV > 18))
-    sK = (~sE) & cUp & (smiV < -30) & ((adxV > 12) | (adxV > adxV.shift(1)))
+    # Wir definieren IS_ELITE explizit
+    is_elite = (cUp & regD & (adxV > 12)) | (cUp & hidD & (adxV > 18))
     
+    # KAUFEN-Bedingung: Nur wenn NICHT ELITE
+    is_buy = (~is_elite) & cUp & (smiV < -30) & ((adxV > 10) | (adxV > adxV.shift(1)))
+    
+   # 4. Signal-Suche mit Priorisierung
     signal_found = False
     for i in reversed(range(len(data))):
-        if sE.iloc[i]:
+        # Wir prüfen ZUERST auf ELITE
+        if is_elite.iloc[i]:
             save_to_supabase(ticker, name, "ELITE", data.index[i], sector, gettex_ticker)
             signal_found = True
-            break
-        elif sK.iloc[i]:
+            break # ELITE gefunden -> Signal beendet
+        
+        # Erst WENN kein ELITE, prüfen wir auf KAUFEN
+        elif is_buy.iloc[i]:
             save_to_supabase(ticker, name, "KAUFEN", data.index[i], sector, gettex_ticker)
             signal_found = True
-            break
+            break # KAUFEN gefunden -> Signal beendet
             
     if not signal_found: print(f"ℹ️ {ticker}: Kein Signal.")
 
