@@ -18,9 +18,8 @@ def get_ticker_list_with_names():
         print(f"❌ Fehler beim Laden der 'watchlist': {e}")
         return []
 
-def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker):
+def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker, meta_data):
     try:
-        # Prüfen, ob für diesen Ticker heute schon ein Signal existiert
         date_str = datetime.datetime.now(pytz.UTC).strftime('%Y-%m-%d')
         check = supabase.table("signals").select("id") \
             .eq("ticker", ticker) \
@@ -36,10 +35,11 @@ def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, get
             "candle_time": candle_time.isoformat(),
             "sector": sector,
             "gettex_ticker": gettex_ticker,
-            "created_at": datetime.datetime.now(pytz.UTC).isoformat()
+            "created_at": datetime.datetime.now(pytz.UTC).isoformat(),
+            "meta_data": str(meta_data) # Speichert die Werte als String/JSON
         }
         supabase.table("signals").insert(data).execute()
-        print(f"✅ {ticker} ({company_name}) -> Signal gespeichert: {signal_type}")
+        print(f"✅ {ticker} -> {signal_type} gespeichert (Meta: {meta_data})")
     except Exception as e:
         print(f"❌ Fehler beim Speichern von {ticker}: {e}")
 
@@ -84,7 +84,7 @@ def scan_ticker(ticker_info):
     sigN = smiV.ewm(span=sigL, adjust=False).mean()
 
     # Robuste Pivot-Logik (5er Fenster)
-    smi_rolling = smiV.rolling(window=5, center=True).min()
+    smi_rolling = smiV.rolling(window=5, center=False).min()
     is_pivot = (smiV == smi_rolling) & (smiV < -10)
     lSL = pd.Series(np.where(is_pivot, smiV, np.nan), index=data.index).ffill()
     lPL = pd.Series(np.where(is_pivot, low, np.nan), index=data.index).ffill()
@@ -106,20 +106,20 @@ def scan_ticker(ticker_info):
     # oder der ADX zu niedrig ist, landet es automatisch hier.
     is_buy = cUp & (~is_elite)
     
-    # --- 4. Signal-Suche (Korrekt mit Scoring-Variablen) ---
+    # 4. Signal-Suche mit Meta-Daten-Generierung
     signal_found = False
     for i in reversed(range(len(data))):
-        # Wir prüfen ZUERST auf ELITE (basierend auf is_elite)
-        if is_elite.iloc[i]:
-            save_to_supabase(ticker, name, "ELITE", data.index[i], sector, gettex_ticker)
-            signal_found = True
-            break # Wenn ELITE gefunden, dann abbrechen
+        # Meta-Daten erfassen
+        meta = {"smi": round(float(smiV.iloc[i]), 2), "adx": round(float(adxV.iloc[i]), 2)}
         
-        # Erst WENN kein ELITE, prüfen wir auf KAUFEN (basierend auf is_buy)
-        elif is_buy.iloc[i]:
-            save_to_supabase(ticker, name, "KAUFEN", data.index[i], sector, gettex_ticker)
+        if is_elite.iloc[i]:
+            save_to_supabase(ticker, name, "ELITE", data.index[i], sector, gettex_ticker, meta)
             signal_found = True
-            break # Wenn KAUFEN gefunden, dann abbrechen
+            break
+        elif is_buy.iloc[i]:
+            save_to_supabase(ticker, name, "KAUFEN", data.index[i], sector, gettex_ticker, meta)
+            signal_found = True
+            break
             
     if not signal_found:
         print(f"ℹ️ {ticker}: Kein Signal.")
