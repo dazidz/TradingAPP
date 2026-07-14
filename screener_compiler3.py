@@ -103,8 +103,6 @@ def scan_ticker(ticker_info):
         save_to_supabase(ticker, name, "KAUFEN", data.index[-1], sector, gettex_ticker)
 
 
-    if not signal_found: print(f"ℹ️ {ticker}: Kein Signal.")
-
 if __name__ == "__main__":
     print("🧹 Bereinige alte Signale...")
     try:
