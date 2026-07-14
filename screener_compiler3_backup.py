@@ -6,6 +6,7 @@ import pytz
 import time
 from db import get_db_client
 
+# Verbindung zur DB
 supabase = get_db_client()
 
 def get_ticker_list_with_names():
@@ -48,31 +49,30 @@ def scan_ticker(ticker_info):
     sector = ticker_info.get('sector', 'N/A')
     gettex_ticker = ticker_info.get('gettex_ticker', '')
     
-    # Download
+    
     data = yf.download(ticker, period="5d", interval="1h", progress=False, auto_adjust=True)
-    if data.empty or len(data) < 20: return
+    
+    if data.empty or len(data) < 20:
+        print(f"⚠️ {ticker}: Zu wenig Daten.")
+        return
 
     if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
     data.columns = [str(c).lower() for c in data.columns]
     
-    # Preisanpassung
+    # Preisanpassung (wie im Original)
     for col in ['open', 'high', 'low', 'close']:
         if col in data.columns: data[col] = data[col] * 1.016
     
     high, low, close = data['high'], data['low'], data['close']
     
-    # 1. Indikatoren - RMA Funktion
-    def rma(series, length): return series.ewm(alpha=1/length, adjust=False).mean()
-    
-    # 2. ADX (Ohne 1.25 Faktor!)
+    # Indikatoren
     tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
+    def rma(series, length): return series.ewm(alpha=1/length, adjust=False).mean()
     atr = rma(tr, 14)
     plus_di = 100 * (rma((high - high.shift()).clip(lower=0), 14) / atr)
     minus_di = 100 * (rma((low.shift() - low).clip(lower=0), 14) / atr)
-    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 0.0001)
-    adxV = rma(dx, 14) # Standard ADX
+    adxV = 100 * rma(abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 0.0001), 14) * 1.25
     
-    # 3. SMI
     smiL, smiS1, smiS2, sigL = 10, 3, 10, 5
     hi, lo = high.rolling(smiL).max(), low.rolling(smiL).min()
     diff, rdiff = hi - lo, close - (hi + lo) / 2
@@ -81,28 +81,28 @@ def scan_ticker(ticker_info):
     smiV = pd.Series(np.where(aD != 0, (aR / (aD / 2) * 100), 0), index=data.index).rolling(5).mean()
     sigN = smiV.ewm(span=sigL, adjust=False).mean()
 
-    # 4. PIVOT & SIGNALE
     is_pivot = (smiV.shift(2) < smiV.shift(3)) & (smiV.shift(2) < smiV.shift(4)) & (smiV.shift(2) < smiV.shift(5)) & (smiV.shift(2) < smiV.shift(6)) & (smiV.shift(2) < smiV.shift(7)) & (smiV.shift(2) < smiV.shift(1)) & (smiV.shift(2) < smiV)
     lSL = pd.Series(np.where(is_pivot, smiV.shift(2), np.nan), index=data.index).ffill()
-    lPL = pd.Series(np.where(is_pivot, low.shift(2), np.nan), index=data.index).ffill()
+    lPL = pd.Series(np.where(is_pivot, data['low'].shift(2), np.nan), index=data.index).ffill()
     
     cUp = (smiV.shift(1) < sigN.shift(1)) & (smiV > sigN)
-    regD = (low < lPL) & (smiV > lSL) & (smiV < -40)
-    hidD = (low > lPL) & (smiV < lSL) & (lSL < -20)
+    regD = (data['low'] < lPL) & (smiV > lSL) & (smiV < -40)
+    hidD = (data['low'] > lPL) & (smiV < lSL) & (lSL < -20)
     
-    # ELITE: ADX Filter nun "realistischer" (18 und 25)
     sE = (cUp & regD & (adxV > 18)) | (cUp & hidD & (adxV > 25))
     sK = (~sE) & cUp & (smiV < -35) & ((adxV > 18) | (adxV > adxV.shift(1)))
     
-    # Speichern der aktuellsten Kerze (bei Bedarf auf alle Kerzen ausweiten)
-    if sE.iloc[-1]: 
-        print(f"✨ Elite Signal bei {ticker}!")
-        save_to_supabase(ticker, name, "ELITE", data.index[-1], sector, gettex_ticker)
-    elif sK.iloc[-1]: 
-        print(f"📈 Kaufen Signal bei {ticker}!")
-        save_to_supabase(ticker, name, "KAUFEN", data.index[-1], sector, gettex_ticker)
-
-
+    signal_found = False
+    for i in reversed(range(len(data))):
+        if sE.iloc[i]:
+            save_to_supabase(ticker, name, "ELITE", data.index[i], sector, gettex_ticker)
+            signal_found = True
+            break
+        elif sK.iloc[i]:
+            save_to_supabase(ticker, name, "KAUFEN", data.index[i], sector, gettex_ticker)
+            signal_found = True
+            break
+            
     if not signal_found: print(f"ℹ️ {ticker}: Kein Signal.")
 
 if __name__ == "__main__":
