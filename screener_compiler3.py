@@ -89,21 +89,22 @@ def scan_ticker(ticker_info):
     lSL = pd.Series(np.where(is_pivot, smiV, np.nan), index=data.index).ffill()
     lPL = pd.Series(np.where(is_pivot, low, np.nan), index=data.index).ffill()
     
-    # Logik-Komponenten
+    # --- 3. Scoring & Signal-Logik (Strikte Trennung) ---
     cUp = (smiV.shift(1) < sigN.shift(1)) & (smiV > sigN)
-    regD = (low < lPL) & (smiV > lSL) & (smiV < -20)
-    hidD = (low > lPL) & (smiV < lSL) & (lSL < -10)
-    has_div = regD | hidD
     
-    # Scoring (Punkte-System)
-    score = pd.Series(0, index=data.index)
-    score += cUp.astype(int) * 1
-    score += has_div.astype(int) * 1
-    score += (adxV > 10).astype(int) * 1
+    # Divergenzen für ELITE (Stärker, tiefer im SMI)
+    regD_elite = (low < lPL) & (smiV > lSL) & (smiV < -30)
+    hidD_elite = (low > lPL) & (smiV < lSL) & (lSL < -20)
+    is_elite_div = regD_elite | hidD_elite
     
-    # Definition der Signale
-    is_elite = (score >= 2) & has_div
-    is_buy = (~is_elite) & (score >= 1)
+    # ELITE Definition: Divergenz + Crossover + Trendbestätigung
+    # Wir nehmen den ADX als hartes Filter-Kriterium für ELITE
+    is_elite = cUp & is_elite_div & (adxV > 18)
+    
+    # KAUFEN Definition: Alles andere, was das Crossover hat
+    # Das bedeutet, wenn es ein Crossover gibt, aber die Divergenz zu schwach 
+    # oder der ADX zu niedrig ist, landet es automatisch hier.
+    is_buy = cUp & (~is_elite)
     
     # --- 4. Signal-Suche (Korrekt mit Scoring-Variablen) ---
     signal_found = False
