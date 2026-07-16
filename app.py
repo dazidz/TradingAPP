@@ -94,7 +94,7 @@ if check_password():
             df['Performance (%)'] = df.apply(get_perf_val, axis=1)
             
             # 3. Spalten festlegen
-            cols_to_show = ['company_name', 'signal_type', 'Performance (%)', 'smi', 'adx', 'entry_price', 'candle_time', 'TV_Link']
+            cols_to_show = ['company_name', 'signal_type', 'Performance (%)', 'sector', 'entry_price', 'candle_time', 'TV_Link', 'smi', 'adx']
             existing_cols = [c for c in cols_to_show if c in df.columns]
             
             # 4. Tabelle OHNE Styler-Objekt, dafür mit bedingter Formatierung in column_config
