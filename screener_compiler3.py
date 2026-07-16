@@ -18,7 +18,7 @@ def get_ticker_list_with_names():
         print(f"❌ Fehler beim Laden der 'watchlist': {e}")
         return []
 
-def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker, meta_data):
+def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker, meta_data, entry_price):
     try:
         date_str = datetime.datetime.now(pytz.UTC).strftime('%Y-%m-%d')
         check = supabase.table("signals").select("id") \
@@ -35,6 +35,7 @@ def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, get
             "candle_time": candle_time.isoformat(),
             "sector": sector,
             "gettex_ticker": gettex_ticker,
+            "entry_price": float(entry_price),
             "created_at": datetime.datetime.now(pytz.UTC).isoformat(),
             "meta_data": str(meta_data) # Speichert die Werte als String/JSON
         }
@@ -126,10 +127,12 @@ def scan_ticker(ticker_info):
         meta = {"smi": round(float(smiV.iloc[i]), 2), "adx": round(float(adxV.iloc[i]), 2)}
         
         if is_elite.iloc[i]:
+            current_price = data['close'].iloc[i]
             save_to_supabase(ticker, name, "ELITE", candle_time, sector, gettex_ticker, meta)
             signal_found = True
             break # Nur das aktuellste Signal pro Ticker speichern
         elif is_buy.iloc[i]:
+            current_price = data['close'].iloc[i]
             save_to_supabase(ticker, name, "KAUFEN", candle_time, sector, gettex_ticker, meta)
             signal_found = True
             break

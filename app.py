@@ -2,6 +2,15 @@ import streamlit as st
 from supabase import create_client
 import pandas as pd
 import ast
+import yfinance as yf
+
+def get_current_price(ticker):
+    try:
+        # Kurzer Abruf des aktuellen Preises
+        data = yf.download(ticker, period="1d", interval="1h", progress=False)
+        return float(data['Close'].iloc[-1])
+    except:
+        return None
 
 # Seiteneinstellungen
 st.set_page_config(layout="wide", page_title="Ticker-Screener Dashboard")
@@ -71,8 +80,12 @@ if check_password():
             # 4. Tabelle anzeigen
             st.subheader("📋 Signal-Liste")
             
+            # Performance berechnen
+            df['current_price'] = df['ticker'].apply(get_current_price)
+            df['Performance (%)'] = ((df['current_price'] - df['entry_price']) / df['entry_price'] * 100)
+            
             # Spalten-Konfiguration
-            cols_to_show = ['company_name', 'signal_type', 'smi', 'adx', 'sector', 'candle_time', 'ticker', 'TV_Link']
+            cols_to_show = ['company_name', 'signal_type', 'Performance (%)', 'smi', 'adx', 'entry_price', 'candle_time', 'TV_Link']
             existing_cols = [c for c in cols_to_show if c in df.columns]
             
             st.dataframe(
@@ -81,6 +94,12 @@ if check_password():
                 hide_index=True,
                 column_config={
                     "TV_Link": st.column_config.LinkColumn("TradingView", display_text="Analyse"),
+                    "Performance (%)": st.column_config.NumberColumn(
+                        "Performance (%)",
+                        format="%.2f%%",
+                        # Bedingte Formatierung durch Schwellenwerte
+                        help="Performance seit dem Signal-Zeitpunkt"
+                    ),
                     "smi": st.column_config.NumberColumn(format="%.2f"),
                     "adx": st.column_config.NumberColumn(format="%.2f")
                 }
