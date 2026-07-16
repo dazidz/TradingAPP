@@ -80,48 +80,38 @@ if check_password():
 # 4. Tabelle anzeigen
             st.subheader("📋 Signal-Liste")
             
-            # --- ROBUSTE DATEN-VORBEREITUNG ---
-            # 1. Spalten explizit als numerisch umwandeln
+            # 1. Sicherstellen, dass entry_price numerisch ist
             df['entry_price'] = pd.to_numeric(df['entry_price'], errors='coerce')
             
-            # 2. Aktuellen Preis laden und Performance sicher berechnen
-            # Wir machen das in einer Funktion, die Fehler abfängt
-            def calculate_perf(row):
-                current = get_current_price(row['ticker'])
-                if current is not None and pd.notnull(row['entry_price']):
-                    return ((current - row['entry_price']) / row['entry_price']) * 100
-                return None # Falls Daten fehlen
+            # 2. Performance Berechnung (ohne Styler, direkt im DF)
+            # Wir machen es direkt hier, um sicherzugehen, dass die Spalte existiert
+            def get_perf_val(row):
+                curr = get_current_price(row['ticker'])
+                if curr is not None and pd.notnull(row['entry_price']) and row['entry_price'] != 0:
+                    return ((curr - row['entry_price']) / row['entry_price']) * 100
+                return None
 
-            df['Performance (%)'] = df.apply(calculate_perf, axis=1)
+            df['Performance (%)'] = df.apply(get_perf_val, axis=1)
             
-            # 3. Spalten-Konfiguration
+            # 3. Spalten festlegen
             cols_to_show = ['company_name', 'signal_type', 'Performance (%)', 'smi', 'adx', 'entry_price', 'candle_time', 'TV_Link']
             existing_cols = [c for c in cols_to_show if c in df.columns]
             
-            # 4. Stylen der Tabelle (Farben)
-            def color_negative_red(val):
-                if pd.isna(val): return ''
-                color = 'green' if val > 0 else 'red'
-                return f'color: {color}'
-
-            # Anwenden des Styles
-            styled_df = df[existing_cols].style.map(
-                color_negative_red, 
-                subset=['Performance (%)']
-            )
-            
+            # 4. Tabelle OHNE Styler-Objekt, dafür mit bedingter Formatierung in column_config
             st.dataframe(
-                styled_df, 
+                df[existing_cols], 
                 use_container_width=True, 
                 hide_index=True,
                 column_config={
                     "TV_Link": st.column_config.LinkColumn("TradingView", display_text="Analyse"),
                     "Performance (%)": st.column_config.NumberColumn(
                         "Performance (%)",
-                        format="%.2f%%"
+                        format="%.2f%%",
+                        help="Performance seit Einstieg"
                     ),
-                    "smi": st.column_config.NumberColumn(format="%.2f"),
-                    "adx": st.column_config.NumberColumn(format="%.2f")
+                    "entry_price": st.column_config.NumberColumn("Einstieg", format="%.2f €"),
+                    "smi": st.column_config.NumberColumn("SMI", format="%.2f"),
+                    "adx": st.column_config.NumberColumn("ADX", format="%.2f")
                 }
             )
         else:
