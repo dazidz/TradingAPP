@@ -77,28 +77,48 @@ if check_password():
                 else:
                     st.write("Keine Sektoren-Daten.")
 
-            # 4. Tabelle anzeigen
+# 4. Tabelle anzeigen
             st.subheader("📋 Signal-Liste")
             
-            # Performance berechnen
-            df['current_price'] = df['ticker'].apply(get_current_price)
-            df['Performance (%)'] = ((df['current_price'] - df['entry_price']) / df['entry_price'] * 100)
+            # --- ROBUSTE DATEN-VORBEREITUNG ---
+            # 1. Spalten explizit als numerisch umwandeln
+            df['entry_price'] = pd.to_numeric(df['entry_price'], errors='coerce')
             
-            # Spalten-Konfiguration
+            # 2. Aktuellen Preis laden und Performance sicher berechnen
+            # Wir machen das in einer Funktion, die Fehler abfängt
+            def calculate_perf(row):
+                current = get_current_price(row['ticker'])
+                if current is not None and pd.notnull(row['entry_price']):
+                    return ((current - row['entry_price']) / row['entry_price']) * 100
+                return None # Falls Daten fehlen
+
+            df['Performance (%)'] = df.apply(calculate_perf, axis=1)
+            
+            # 3. Spalten-Konfiguration
             cols_to_show = ['company_name', 'signal_type', 'Performance (%)', 'smi', 'adx', 'entry_price', 'candle_time', 'TV_Link']
             existing_cols = [c for c in cols_to_show if c in df.columns]
             
+            # 4. Stylen der Tabelle (Farben)
+            def color_negative_red(val):
+                if pd.isna(val): return ''
+                color = 'green' if val > 0 else 'red'
+                return f'color: {color}'
+
+            # Anwenden des Styles
+            styled_df = df[existing_cols].style.applymap(
+                color_negative_red, 
+                subset=['Performance (%)']
+            )
+            
             st.dataframe(
-                df[existing_cols], 
+                styled_df, 
                 use_container_width=True, 
                 hide_index=True,
                 column_config={
                     "TV_Link": st.column_config.LinkColumn("TradingView", display_text="Analyse"),
                     "Performance (%)": st.column_config.NumberColumn(
                         "Performance (%)",
-                        format="%.2f%%",
-                        # Bedingte Formatierung durch Schwellenwerte
-                        help="Performance seit dem Signal-Zeitpunkt"
+                        format="%.2f%%"
                     ),
                     "smi": st.column_config.NumberColumn(format="%.2f"),
                     "adx": st.column_config.NumberColumn(format="%.2f")

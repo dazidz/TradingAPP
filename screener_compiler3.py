@@ -6,8 +6,34 @@ import pytz
 import time
 from db import get_db_client
 
-# Verbindung zur DB
 supabase = get_db_client()
+
+def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker, meta_data, entry_price):
+    try:
+        # Check: Existiert bereits ein solches Signal in den letzten 48h?
+        cutoff_time = (datetime.datetime.now(pytz.UTC) - datetime.timedelta(hours=48)).isoformat()
+        check = supabase.table("signals").select("id") \
+            .eq("ticker", ticker) \
+            .eq("signal_type", signal_type) \
+            .gte("created_at", cutoff_time).execute()
+        
+        if len(check.data) > 0: return 
+
+        data = {
+            "ticker": ticker,
+            "company_name": company_name,
+            "signal_type": signal_type,
+            "candle_time": candle_time.isoformat(),
+            "sector": sector,
+            "gettex_ticker": gettex_ticker,
+            "entry_price": float(entry_price),
+            "created_at": datetime.datetime.now(pytz.UTC).isoformat(),
+            "meta_data": str(meta_data)
+        }
+        supabase.table("signals").insert(data).execute()
+        print(f"✅ {ticker} -> {signal_type} gespeichert (Einstieg: {entry_price:.2f})")
+    except Exception as e:
+        print(f"❌ Fehler beim Speichern von {ticker}: {e}")
 
 def get_ticker_list_with_names():
     try:
