@@ -11,7 +11,6 @@ supabase = get_db_client()
 
 def get_ticker_list_with_names():
     try:
-        # Lädt Ticker, Name, Sektor und Gettex-Ticker aus der Watchlist
         response = supabase.table("watchlist").select("ticker, company_name, sector, gettex_ticker").execute()
         return response.data 
     except Exception as e:
@@ -37,10 +36,10 @@ def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, get
             "gettex_ticker": gettex_ticker,
             "entry_price": float(entry_price),
             "created_at": datetime.datetime.now(pytz.UTC).isoformat(),
-            "meta_data": str(meta_data) # Speichert die Werte als String/JSON
+            "meta_data": str(meta_data)
         }
         supabase.table("signals").insert(data).execute()
-        print(f"✅ {ticker} -> {signal_type} gespeichert (Meta: {meta_data})")
+        print(f"✅ {ticker} -> {signal_type} gespeichert (Einstieg: {entry_price})")
     except Exception as e:
         print(f"❌ Fehler beim Speichern von {ticker}: {e}")
 
@@ -49,7 +48,6 @@ def scan_ticker(ticker_info):
     name = ticker_info.get('company_name', 'N/A')
     sector = ticker_info.get('sector', 'N/A')
     gettex_ticker = ticker_info.get('gettex_ticker', '')
-    
     
     data = yf.download(ticker, period="3mo", interval="1h", progress=False, auto_adjust=True)
     
@@ -60,14 +58,11 @@ def scan_ticker(ticker_info):
     if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
     data.columns = [str(c).lower() for c in data.columns]
     
-    # Preisanpassung
     for col in ['open', 'high', 'low', 'close']:
         if col in data.columns: data[col] = data[col] * 1.016
     
     high, low, close = data['high'], data['low'], data['close']
     
-    # --- INDIKATOREN & SCORING LOGIK ---
-
     # ADX Berechnung
     tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
     def rma(series, length): return series.ewm(alpha=1/length, adjust=False).mean()
@@ -77,63 +72,46 @@ def scan_ticker(ticker_info):
     dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 0.0001)
     adxV = rma(dx, 14)
     
-    # Indikatoren-Berechnung
-   # --- 2. Indikatoren & PIVOT LOGIK (Exakt wie Pine Script) ---
+    # SMI Berechnung
     smiL, smiS1, smiS2, sigL = 10, 3, 10, 5
     hi, lo = high.rolling(smiL).max(), low.rolling(smiL).min()
     diff, rdiff = hi - lo, close - (hi + lo) / 2
-    
-    # EMAs für Stabilität
     aR = rdiff.ewm(span=smiS1, adjust=False).mean().ewm(span=smiS2, adjust=False).mean()
     aD = diff.ewm(span=smiS1, adjust=False).mean().ewm(span=smiS2, adjust=False).mean()
-    
-    # SMI normalisiert
     smiV = pd.Series(np.where(aD != 0, (aR / (aD / 2) * 100), 0), index=data.index)
     sigN = smiV.ewm(span=sigL, adjust=False).mean()
 
-    # Korrekte Pivot-Logik (ta.pivotlow Simulation)
-    # Wir schauen auf die Kerze 'i-2' als potenzielles Tief
+    # Pivot-Logik
     smiV_s = smiV.shift(2)
     is_pivot = (smiV_s < smiV.shift(3)) & (smiV_s < smiV.shift(4)) & \
                (smiV_s < smiV.shift(1)) & (smiV_s < smiV)
-    
-    # Pivot-Werte festschreiben
     lSL = pd.Series(np.where(is_pivot, smiV_s, np.nan), index=data.index).ffill()
     lPL = pd.Series(np.where(is_pivot, low.shift(2), np.nan), index=data.index).ffill()
 
-    # --- 3. Strikte Signal-Logik ---
+    # Signal-Logik
     cUp = (smiV.shift(1) < sigN.shift(1)) & (smiV > sigN)
-    
-    # Divergenz-Bedingungen aus Pine
     regD = (low < lPL) & (smiV > lSL) & (smiV < -40)
     hidD = (low > lPL) & (smiV < lSL) & (lSL < -20)
-    
-    # ELITE & KAUFEN
     is_elite = cUp & (regD | hidD) & (adxV > 18)
     is_buy = (~is_elite) & cUp & (smiV < -35) & (adxV > 18)
 
-    # --- 4. Signal-Suche (Mit 5-Tage-Filter) ---
+    # Signal-Suche
     signal_found = False
     heute = pd.Timestamp.now(tz='UTC')
     
-    # Wir gehen rückwärts durch die Daten
     for i in reversed(range(len(data))):
-        candle_time = data.index[i].tz_localize(None).tz_localize('UTC') # Sicherstellung UTC
-        
-        # Stopp, wenn Signal älter als 5 Tage
-        if (heute - candle_time).days > 5:
-            break
+        candle_time = data.index[i].tz_localize(None).tz_localize('UTC')
+        if (heute - candle_time).days > 5: break
             
         meta = {"smi": round(float(smiV.iloc[i]), 2), "adx": round(float(adxV.iloc[i]), 2)}
+        current_price = float(data['close'].iloc[i])
         
         if is_elite.iloc[i]:
-            current_price = data['close'].iloc[i]
-            save_to_supabase(ticker, name, "ELITE", candle_time, sector, gettex_ticker, meta)
+            save_to_supabase(ticker, name, "ELITE", candle_time, sector, gettex_ticker, meta, current_price)
             signal_found = True
-            break # Nur das aktuellste Signal pro Ticker speichern
+            break
         elif is_buy.iloc[i]:
-            current_price = data['close'].iloc[i]
-            save_to_supabase(ticker, name, "KAUFEN", candle_time, sector, gettex_ticker, meta)
+            save_to_supabase(ticker, name, "KAUFEN", candle_time, sector, gettex_ticker, meta, current_price)
             signal_found = True
             break
             
