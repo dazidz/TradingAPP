@@ -105,7 +105,7 @@ if check_password():
                 return f'color: {color}'
 
             # Anwenden des Styles
-            styled_df = df[existing_cols].style.applymap(
+            styled_df = df[existing_cols].style.map(
                 color_negative_red, 
                 subset=['Performance (%)']
             )
