@@ -107,6 +107,9 @@ def scan_ticker(ticker_info):
         current_price = float(data['close'].iloc[i])
         
         if is_elite.iloc[i]:
+            current_price = float(data['close'].iloc[i])
+            # DEBUG-PRINT:
+            print(f"DEBUG: Ticker {ticker} wird mit Preis {current_price} gespeichert.")
             save_to_supabase(ticker, name, "ELITE", candle_time, sector, gettex_ticker, meta, current_price)
             signal_found = True
             break
