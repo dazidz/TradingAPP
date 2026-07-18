@@ -4,14 +4,6 @@ import pandas as pd
 import ast
 import yfinance as yf
 
-def get_current_price(ticker):
-    try:
-        # Kurzer Abruf des aktuellen Preises
-        data = yf.download(ticker, period="1d", interval="1h", progress=False)
-        return float(data['Close'].iloc[-1])
-    except:
-        return None
-
 # Seiteneinstellungen
 st.set_page_config(layout="wide", page_title="Ticker-Screener Dashboard")
 
@@ -19,6 +11,21 @@ st.set_page_config(layout="wide", page_title="Ticker-Screener Dashboard")
 URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(URL, KEY)
+
+# Caching für Live-Kurse (30 Minuten)
+@st.cache_data(ttl=1800)
+def get_all_prices(tickers):
+    prices = {}
+    for ticker in tickers:
+        try:
+            # Einzel-Abruf ist bei 50 Ticker im Cache unproblematisch
+            ticker_obj = yf.Ticker(ticker)
+            hist = ticker_obj.history(period="1d")
+            if not hist.empty:
+                prices[ticker] = float(hist['Close'].iloc[-1])
+        except Exception:
+            continue
+    return prices
 
 # Passwort-Schutz
 def check_password():
@@ -39,80 +46,53 @@ if check_password():
     st.title("📊 Ticker-Screener Dashboard")
 
     try:
-        # 1. Daten holen
         response = supabase.table("signals").select("*").execute()
         df = pd.DataFrame(response.data)
 
         if not df.empty:
-            # Spalten-Mapping
             if 'signal' in df.columns: df = df.rename(columns={'signal': 'signal_type'})
             
-            # 2. Metadaten verarbeiten (SMI/ADX aus String-JSON)
             if 'meta_data' in df.columns:
                 df['meta_data'] = df['meta_data'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else {})
                 meta_df = pd.json_normalize(df['meta_data'])
                 df = pd.concat([df.drop('meta_data', axis=1), meta_df], axis=1)
 
-            # TV-Link Logik
             if 'gettex_ticker' in df.columns:
-                df['TV_Link'] = df['gettex_ticker'].apply(
-                    lambda x: f"https://www.tradingview.com/chart/?symbol={x}" if x else ""
-                )
+                df['TV_Link'] = df['gettex_ticker'].apply(lambda x: f"https://www.tradingview.com/chart/?symbol={x}" if x else "")
             
-            # 3. Visualisierung
+            # Performance Berechnung
+            df['entry_price'] = pd.to_numeric(df['entry_price'], errors='coerce')
+            unique_tickers = df['ticker'].unique().tolist()
+            
+            with st.spinner("Lade Live-Kurse..."):
+                price_map = get_all_prices(unique_tickers)
+            
+            df['current_price'] = df['ticker'].map(price_map)
+            df['Performance (%)'] = ((df['current_price'] - df['entry_price']) / df['entry_price']) * 100
+            
+            # Visualisierung
             col1, col2 = st.columns(2)
-            
             with col1:
                 st.subheader("🔍 SMI vs. ADX Analyse")
                 if 'smi' in df.columns and 'adx' in df.columns:
                     st.scatter_chart(df, x='smi', y='adx', color='signal_type')
-                else:
-                    st.info("Noch keine Metadaten vorhanden.")
             
             with col2:
                 st.subheader("🏢 Signale nach Sektor")
                 if 'sector' in df.columns:
-                    sector_counts = df['sector'].value_counts()
-                    st.bar_chart(sector_counts)
-                else:
-                    st.write("Keine Sektoren-Daten.")
+                    st.bar_chart(df['sector'].value_counts())
 
-# 4. Tabelle anzeigen
             st.subheader("📋 Signal-Liste")
-            
-            # 1. Sicherstellen, dass entry_price numerisch ist
-            df['entry_price'] = pd.to_numeric(df['entry_price'], errors='coerce')
-            
-            # 2. Performance Berechnung (ohne Styler, direkt im DF)
-            # Wir machen es direkt hier, um sicherzugehen, dass die Spalte existiert
-            def get_perf_val(row):
-                curr = get_current_price(row['ticker'])
-                if curr is not None and pd.notnull(row['entry_price']) and row['entry_price'] != 0:
-                    return ((curr - row['entry_price']) / row['entry_price']) * 100
-                return None
-
-            df['Performance (%)'] = df.apply(get_perf_val, axis=1)
-            
-            
-            st.write("Diagnose: Erster Ticker:", df['ticker'].iloc[0])
-            st.write("Diagnose: Erster Preis:", get_current_price(df['ticker'].iloc[0]))
-
-            # 3. Spalten festlegen
-            cols_to_show = ['company_name', 'signal_type', 'Performance (%)', 'sector', 'entry_price', 'candle_time', 'TV_Link', 'smi', 'adx']
+            cols_to_show = ['company_name', 'sector', 'signal_type', 'Performance (%)', 'smi', 'adx', 'entry_price', 'candle_time', 'TV_Link']
             existing_cols = [c for c in cols_to_show if c in df.columns]
             
-            # 4. Tabelle OHNE Styler-Objekt, dafür mit bedingter Formatierung in column_config
             st.dataframe(
                 df[existing_cols], 
                 use_container_width=True, 
                 hide_index=True,
                 column_config={
                     "TV_Link": st.column_config.LinkColumn("TradingView", display_text="Analyse"),
-                    "Performance (%)": st.column_config.NumberColumn(
-                        "Performance (%)",
-                        format="%.2f%%",
-                        help="Performance seit Einstieg"
-                    ),
+                    "Performance (%)": st.column_config.NumberColumn("Performance (%)", format="%.2f%%"),
                     "entry_price": st.column_config.NumberColumn("Einstieg", format="%.2f €"),
                     "smi": st.column_config.NumberColumn("SMI", format="%.2f"),
                     "adx": st.column_config.NumberColumn("ADX", format="%.2f")
@@ -120,6 +100,5 @@ if check_password():
             )
         else:
             st.write("Tabelle 'signals' ist leer.")
-            
     except Exception as e:
-        st.error(f"Fehler beim Laden der Daten: {e}")
+        st.error(f"Fehler: {e}")
