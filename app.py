@@ -75,21 +75,20 @@ if check_password():
             df['current_price'] = df['ticker'].map(price_map)
             df['Performance (%)'] = ((df['current_price'] - df['entry_price']) / df['entry_price']) * 100
             
-            # 4. Sektoren-Visualisierung (Sortiert nach Häufigkeit)
-            # 4. Sektoren-Visualisierung (Sortiert nach Anzahl)
+            # 4. Sektoren-Visualisierung (Altair Horizontal Bar Chart)
             st.subheader("🏢 Signale nach Sektor")
             if 'sector' in df.columns:
-                # Zählen und in DataFrame umwandeln
-                sector_data = df['sector'].value_counts().reset_index()
-                sector_data.columns = ['Sektor', 'Anzahl']
+                sector_counts = df['sector'].value_counts().reset_index()
+                sector_counts.columns = ['Sektor', 'Anzahl']
                 
-                # Jetzt sortieren wir explizit nach 'Anzahl' absteigend
-                sector_data = sector_data.sort_values(by='Anzahl', ascending=False)
+                # Altair Chart definieren (explizit sortiert!)
+                chart = alt.Chart(sector_counts).mark_bar().encode(
+                    x='Anzahl:Q',
+                    y=alt.Y('Sektor:N', sort='-x'), # Sortiert Y nach der X-Achse (Anzahl) absteigend
+                    tooltip=['Sektor', 'Anzahl']
+                )
                 
-                # Chart anzeigen: Wir setzen 'Sektor' als Index, damit er auf der X-Achse steht
-                st.bar_chart(sector_data.set_index('Sektor'))
-            else:
-                st.write("Keine Sektoren-Daten.")
+                st.altair_chart(chart, use_container_width=True)
             
             # 5. Signal-Liste
             st.subheader("📋 Signal-Liste")
