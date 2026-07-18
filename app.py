@@ -93,6 +93,10 @@ if check_password():
 
             df['Performance (%)'] = df.apply(get_perf_val, axis=1)
             
+            
+            st.write("Diagnose: Erster Ticker:", df['ticker'].iloc[0])
+            st.write("Diagnose: Erster Preis:", get_current_price(df['ticker'].iloc[0]))
+
             # 3. Spalten festlegen
             cols_to_show = ['company_name', 'signal_type', 'Performance (%)', 'sector', 'entry_price', 'candle_time', 'TV_Link', 'smi', 'adx']
             existing_cols = [c for c in cols_to_show if c in df.columns]
