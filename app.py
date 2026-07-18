@@ -76,10 +76,20 @@ if check_password():
             df['Performance (%)'] = ((df['current_price'] - df['entry_price']) / df['entry_price']) * 100
             
             # 4. Sektoren-Visualisierung (Sortiert nach Häufigkeit)
+            # 4. Sektoren-Visualisierung (Sortiert nach Anzahl)
             st.subheader("🏢 Signale nach Sektor")
             if 'sector' in df.columns:
-                sector_counts = df['sector'].value_counts().sort_values(ascending=False)
-                st.bar_chart(sector_counts)
+                # Zählen und in DataFrame umwandeln
+                sector_data = df['sector'].value_counts().reset_index()
+                sector_data.columns = ['Sektor', 'Anzahl']
+                
+                # Jetzt sortieren wir explizit nach 'Anzahl' absteigend
+                sector_data = sector_data.sort_values(by='Anzahl', ascending=False)
+                
+                # Chart anzeigen: Wir setzen 'Sektor' als Index, damit er auf der X-Achse steht
+                st.bar_chart(sector_data.set_index('Sektor'))
+            else:
+                st.write("Keine Sektoren-Daten.")
             
             # 5. Signal-Liste
             st.subheader("📋 Signal-Liste")
