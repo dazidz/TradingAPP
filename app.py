@@ -127,7 +127,28 @@ if check_password():
             else:
                 st.write("Keine Sektoren-Daten.")
             
-            # 5. Signal-Liste
+            # 6. EMA Performance
+
+            st.divider() # Eine horizontale Linie zur Trennung
+            st.subheader("📈 Performance-Check: Filter-Effizienz")
+            
+            if 'EMA20_Dist_%' in df.columns:
+                df_ueber = df[df['EMA20_Dist_%'] >= 0]
+                df_unter = df[df['EMA20_Dist_%'] < 0]
+                
+                col1, col2 = st.columns(2)
+                
+                avg_ueber = df_ueber['Performance (%)'].mean() if not df_ueber.empty else 0
+                avg_unter = df_unter['Performance (%)'].mean() if not df_unter.empty else 0
+                
+                with col1:
+                    st.metric(label="Ø Performance (Über EMA20)", value=f"{avg_ueber:.2f}%", delta=f"{avg_ueber - avg_unter:.2f}% vs. Unter EMA")
+                with col2:
+                    st.metric(label="Ø Performance (Unter EMA20)", value=f"{avg_unter:.2f}%")
+                st.caption(f"Anzahl Signale über EMA: {len(df_ueber)} | Anzahl unter EMA: {len(df_unter)}")
+            # ---------------------------
+
+            # 6. Signal-Liste
             st.subheader("📋 Signal-Liste")
             cols_to_show = ['company_name', 'sector', 'signal_type', 'Performance (%)', 'EMA20_Dist_%', 'entry_price', 'candle_time', 'TV_Link']
             existing_cols = [c for c in cols_to_show if c in df.columns]
