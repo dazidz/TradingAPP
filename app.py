@@ -82,14 +82,24 @@ if check_password():
                 sector_counts = df['sector'].value_counts().reset_index()
                 sector_counts.columns = ['Sektor', 'Anzahl']
                 
-                # Altair Chart definieren (explizit sortiert!)
-                chart = alt.Chart(sector_counts).mark_bar().encode(
-                    x='Anzahl:Q',
-                    y=alt.Y('Sektor:N', sort='-x'), # Sortiert Y nach der X-Achse (Anzahl) absteigend
+                # Wir definieren eine feste Höhe basierend auf der Anzahl der Sektoren
+                chart_height = len(sector_counts) * 35 
+                
+                chart = alt.Chart(sector_counts).mark_bar(
+                    color='#3b82f6',  # Ein schönes Blau
+                    size=20           # Die Balken selbst sind nur 20px "dick"
+                ).encode(
+                    x=alt.X('Anzahl:Q', title='Anzahl Signale'),
+                    y=alt.Y('Sektor:N', sort='-x', title=None),
                     tooltip=['Sektor', 'Anzahl']
+                ).properties(
+                    height=chart_height,
+                    width='container'
                 )
                 
                 st.altair_chart(chart, use_container_width=True)
+            else:
+                st.write("Keine Sektoren-Daten.")
             
             # 5. Signal-Liste
             st.subheader("📋 Signal-Liste")
