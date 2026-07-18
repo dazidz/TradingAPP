@@ -18,7 +18,6 @@ def get_all_prices(tickers):
     prices = {}
     for ticker in tickers:
         try:
-            # Einzel-Abruf ist bei 50 Ticker im Cache unproblematisch
             ticker_obj = yf.Ticker(ticker)
             hist = ticker_obj.history(period="1d")
             if not hist.empty:
@@ -42,22 +41,22 @@ def check_password():
         return False
     return True
 
+# --- HAUPTPROGRAMM ---
 if check_password():
     st.title("📊 Ticker-Screener Dashboard")
 
     try:
-        # 1. Daten holen
+        # Daten abrufen
         response = supabase.table("signals").select("*").execute()
         df = pd.DataFrame(response.data)
 
         if not df.empty:
-            # --- HIER: Dubletten entfernen ---
-            # Wir behalten immer den aktuellsten Eintrag pro Ticker und Signal-Typ
-            # Falls du wirklich nur den Ticker unabhängig vom Signal-Typ willst, 
-            # nutze: df = df.drop_duplicates(subset=['ticker'], keep='last')
+            # 1. Dubletten bereinigen (behält immer das aktuellste Signal pro Ticker/Typ)
             df = df.sort_values('created_at', ascending=True)
             df = df.drop_duplicates(subset=['ticker', 'signal_type'], keep='last')
-            
+
+            # 2. Spalten-Mapping & Metadaten
+            if 'signal' in df.columns: df = df.rename(columns={'signal': 'signal_type'})
             if 'meta_data' in df.columns:
                 df['meta_data'] = df['meta_data'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else {})
                 meta_df = pd.json_normalize(df['meta_data'])
@@ -66,7 +65,7 @@ if check_password():
             if 'gettex_ticker' in df.columns:
                 df['TV_Link'] = df['gettex_ticker'].apply(lambda x: f"https://www.tradingview.com/chart/?symbol={x}" if x else "")
             
-            # Performance Berechnung
+            # 3. Performance & Kurse
             df['entry_price'] = pd.to_numeric(df['entry_price'], errors='coerce')
             unique_tickers = df['ticker'].unique().tolist()
             
@@ -76,20 +75,15 @@ if check_password():
             df['current_price'] = df['ticker'].map(price_map)
             df['Performance (%)'] = ((df['current_price'] - df['entry_price']) / df['entry_price']) * 100
             
-            # Visualisierung
-            col1, col2 = st.columns(2)
-            with col1:
-                st.subheader("🔍 SMI vs. ADX Analyse")
-                if 'smi' in df.columns and 'adx' in df.columns:
-                    st.scatter_chart(df, x='smi', y='adx', color='signal_type')
+            # 4. Sektoren-Visualisierung (Sortiert nach Häufigkeit)
+            st.subheader("🏢 Signale nach Sektor")
+            if 'sector' in df.columns:
+                sector_counts = df['sector'].value_counts().sort_values(ascending=False)
+                st.bar_chart(sector_counts)
             
-            with col2:
-                st.subheader("🏢 Signale nach Sektor")
-                if 'sector' in df.columns:
-                    st.bar_chart(df['sector'].value_counts())
-
+            # 5. Signal-Liste
             st.subheader("📋 Signal-Liste")
-            cols_to_show = ['company_name', 'sector', 'signal_type', 'Performance (%)', 'smi', 'adx', 'entry_price', 'candle_time', 'TV_Link']
+            cols_to_show = ['company_name', 'sector', 'signal_type', 'Performance (%)', 'entry_price', 'candle_time', 'TV_Link']
             existing_cols = [c for c in cols_to_show if c in df.columns]
             
             st.dataframe(
@@ -99,12 +93,11 @@ if check_password():
                 column_config={
                     "TV_Link": st.column_config.LinkColumn("TradingView", display_text="Analyse"),
                     "Performance (%)": st.column_config.NumberColumn("Performance (%)", format="%.2f%%"),
-                    "entry_price": st.column_config.NumberColumn("Einstieg", format="%.2f €"),
-                    "smi": st.column_config.NumberColumn("SMI", format="%.2f"),
-                    "adx": st.column_config.NumberColumn("ADX", format="%.2f")
+                    "entry_price": st.column_config.NumberColumn("Einstieg", format="%.2f €")
                 }
             )
         else:
-            st.write("Tabelle 'signals' ist leer.")
+            st.info("Tabelle 'signals' ist leer.")
+            
     except Exception as e:
-        st.error(f"Fehler: {e}")
+        st.error(f"Fehler beim Laden der Daten: {e}")
