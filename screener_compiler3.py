@@ -3,6 +3,7 @@ from supabase import create_client
 import pandas as pd
 import ast
 import yfinance as yf
+import altair as alt
 
 # Seiteneinstellungen
 st.set_page_config(layout="wide", page_title="Ticker-Screener Dashboard")
@@ -15,15 +16,38 @@ supabase = create_client(URL, KEY)
 # Caching für Live-Kurse (30 Minuten)
 @st.cache_data(ttl=1800)
 def get_all_prices(tickers):
-    if not tickers: return {}
-    try:
-        # Bulk-Download ist massiv schneller als Einzeldownload
-        data = yf.download(tickers, period="1d", interval="1h", progress=False)['Close']
-        if isinstance(data, pd.Series):
-            return {tickers[0]: float(data.iloc[-1])}
-        return {t: float(data[t].iloc[-1]) for t in tickers if t in data.columns and not pd.isna(data[t].iloc[-1])}
-    except Exception:
-        return {}
+    prices = {}
+    for ticker in tickers:
+        try:
+            ticker_obj = yf.Ticker(ticker)
+            hist = ticker_obj.history(period="1d")
+            if not hist.empty:
+                prices[ticker] = float(hist['Close'].iloc[-1])
+        except Exception:
+            continue
+    return prices
+
+# Caching für EMA-Abstand (30 Minuten)
+@st.cache_data(ttl=1800)
+def get_ema_stats_bulk(tickers):
+    stats = {}
+    # Daten für alle Ticker gleichzeitig laden
+    data = yf.download(tickers, period="1mo", interval="1d", progress=False)['Close']
+    
+    for ticker in tickers:
+        if ticker in data.columns:
+            series = data[ticker].dropna()
+            if len(series) >= 20:
+                ema20 = series.ewm(span=20, adjust=False).mean().iloc[-1]
+                current_price = series.iloc[-1]
+                # Abstand in Prozent: (Kurs - EMA) / EMA * 100
+                dist_pct = ((current_price - ema20) / ema20) * 100
+                stats[ticker] = float(dist_pct)
+            else:
+                stats[ticker] = None
+        else:
+            stats[ticker] = None
+    return stats
 
 # Passwort-Schutz
 def check_password():
@@ -40,16 +64,22 @@ def check_password():
         return False
     return True
 
+# --- HAUPTPROGRAMM ---
 if check_password():
     st.title("📊 Ticker-Screener Dashboard")
 
     try:
+        # Daten abrufen
         response = supabase.table("signals").select("*").execute()
         df = pd.DataFrame(response.data)
 
         if not df.empty:
+            # 1. Dubletten bereinigen
+            df = df.sort_values('created_at', ascending=True)
+            df = df.drop_duplicates(subset=['ticker', 'signal_type'], keep='last')
+
+            # 2. Spalten-Mapping & Metadaten
             if 'signal' in df.columns: df = df.rename(columns={'signal': 'signal_type'})
-            
             if 'meta_data' in df.columns:
                 df['meta_data'] = df['meta_data'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else {})
                 meta_df = pd.json_normalize(df['meta_data'])
@@ -58,30 +88,48 @@ if check_password():
             if 'gettex_ticker' in df.columns:
                 df['TV_Link'] = df['gettex_ticker'].apply(lambda x: f"https://www.tradingview.com/chart/?symbol={x}" if x else "")
             
-            # Performance Berechnung
+            # 3. Performance & Kurse
             df['entry_price'] = pd.to_numeric(df['entry_price'], errors='coerce')
             unique_tickers = df['ticker'].unique().tolist()
             
-            with st.spinner("Lade Live-Kurse..."):
+            with st.spinner("Lade Marktdaten..."):
                 price_map = get_all_prices(unique_tickers)
+                ema_dist_map = get_ema_stats_bulk(unique_tickers)
             
             df['current_price'] = df['ticker'].map(price_map)
             df['Performance (%)'] = ((df['current_price'] - df['entry_price']) / df['entry_price']) * 100
+            df['EMA20_Dist_%'] = df['ticker'].map(ema_dist_map)
             
-            # Visualisierung
-            col1, col2 = st.columns(2)
-            with col1:
-                st.subheader("🔍 SMI vs. ADX Analyse")
-                if 'smi' in df.columns and 'adx' in df.columns:
-                    st.scatter_chart(df, x='smi', y='adx', color='signal_type')
+            # 4. Sektoren-Visualisierung
+            st.subheader("🏢 Signale nach Sektor")
+            if 'sector' in df.columns:
+                sector_counts = df['sector'].value_counts().reset_index()
+                sector_counts.columns = ['Sektor', 'Anzahl']
+                
+                chart_height = len(sector_counts) * 35
+                
+                chart = alt.Chart(sector_counts).mark_bar(
+                    color='#3b82f6',
+                    size=20
+                ).encode(
+                    x=alt.X('Anzahl:Q', title='Anzahl'),
+                    y=alt.Y('Sektor:N', sort='-x', title=None),
+                    tooltip=['Sektor', 'Anzahl']
+                ).properties(
+                    height=chart_height,
+                    width=600 
+                ).configure_axis(
+                    labelLimit=300 
+                )
+                
+                with st.container():
+                    st.altair_chart(chart)
+            else:
+                st.write("Keine Sektoren-Daten.")
             
-            with col2:
-                st.subheader("🏢 Signale nach Sektor")
-                if 'sector' in df.columns:
-                    st.bar_chart(df['sector'].value_counts())
-
+            # 5. Signal-Liste
             st.subheader("📋 Signal-Liste")
-            cols_to_show = ['company_name', 'sector', 'signal_type', 'Performance (%)', 'smi', 'adx', 'entry_price', 'candle_time', 'TV_Link']
+            cols_to_show = ['company_name', 'sector', 'signal_type', 'Performance (%)', 'EMA20_Dist_%', 'entry_price', 'candle_time', 'TV_Link']
             existing_cols = [c for c in cols_to_show if c in df.columns]
             
             st.dataframe(
@@ -91,12 +139,12 @@ if check_password():
                 column_config={
                     "TV_Link": st.column_config.LinkColumn("TradingView", display_text="Analyse"),
                     "Performance (%)": st.column_config.NumberColumn("Performance (%)", format="%.2f%%"),
-                    "entry_price": st.column_config.NumberColumn("Einstieg", format="%.2f €"),
-                    "smi": st.column_config.NumberColumn("SMI", format="%.2f"),
-                    "adx": st.column_config.NumberColumn("ADX", format="%.2f")
+                    "EMA20_Dist_%": st.column_config.NumberColumn("EMA20 Dist. %", format="%.2f%%"),
+                    "entry_price": st.column_config.NumberColumn("Einstieg", format="%.2f €")
                 }
             )
         else:
-            st.write("Tabelle 'signals' ist leer.")
+            st.info("Tabelle 'signals' ist leer.")
+            
     except Exception as e:
-        st.error(f"Fehler: {e}")
+        st.error(f"Fehler beim Laden der Daten: {e}")
