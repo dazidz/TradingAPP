@@ -27,6 +27,28 @@ def get_all_prices(tickers):
             continue
     return prices
 
+# Caching für EMA-Abstand (30 Minuten)
+@st.cache_data(ttl=1800)
+def get_ema_stats_bulk(tickers):
+    stats = {}
+    # Daten für alle Ticker gleichzeitig laden
+    data = yf.download(tickers, period="1mo", interval="1d", progress=False)['Close']
+    
+    for ticker in tickers:
+        if ticker in data.columns:
+            series = data[ticker].dropna()
+            if len(series) >= 20:
+                ema20 = series.ewm(span=20, adjust=False).mean().iloc[-1]
+                current_price = series.iloc[-1]
+                # Abstand in Prozent: (Kurs - EMA) / EMA * 100
+                dist_pct = ((current_price - ema20) / ema20) * 100
+                stats[ticker] = float(dist_pct)
+            else:
+                stats[ticker] = None
+        else:
+            stats[ticker] = None
+    return stats
+
 # Passwort-Schutz
 def check_password():
     if "password_correct" not in st.session_state:
@@ -52,7 +74,7 @@ if check_password():
         df = pd.DataFrame(response.data)
 
         if not df.empty:
-            # 1. Dubletten bereinigen (behält immer das aktuellste Signal pro Ticker/Typ)
+            # 1. Dubletten bereinigen
             df = df.sort_values('created_at', ascending=True)
             df = df.drop_duplicates(subset=['ticker', 'signal_type'], keep='last')
 
@@ -70,11 +92,13 @@ if check_password():
             df['entry_price'] = pd.to_numeric(df['entry_price'], errors='coerce')
             unique_tickers = df['ticker'].unique().tolist()
             
-            with st.spinner("Lade Live-Kurse..."):
+            with st.spinner("Lade Marktdaten..."):
                 price_map = get_all_prices(unique_tickers)
+                ema_dist_map = get_ema_stats_bulk(unique_tickers)
             
             df['current_price'] = df['ticker'].map(price_map)
             df['Performance (%)'] = ((df['current_price'] - df['entry_price']) / df['entry_price']) * 100
+            df['EMA20_Dist_%'] = df['ticker'].map(ema_dist_map)
             
             # 4. Sektoren-Visualisierung
             st.subheader("🏢 Signale nach Sektor")
@@ -84,25 +108,20 @@ if check_password():
                 
                 chart_height = len(sector_counts) * 35
                 
-                # Wir definieren das Chart
                 chart = alt.Chart(sector_counts).mark_bar(
                     color='#3b82f6',
                     size=20
                 ).encode(
-                    # Wir lassen die Skala dynamisch, damit sie nicht "gequetscht" wirkt
                     x=alt.X('Anzahl:Q', title='Anzahl'),
                     y=alt.Y('Sektor:N', sort='-x', title=None),
                     tooltip=['Sektor', 'Anzahl']
                 ).properties(
                     height=chart_height,
-                    # Hier begrenzen wir die Breite des gesamten Charts
                     width=600 
                 ).configure_axis(
-                    # Mehr Platz für Labels links schaffen
                     labelLimit=300 
                 )
                 
-                # Anstatt col_chart nehmen wir st.container und begrenzen die Breite
                 with st.container():
                     st.altair_chart(chart)
             else:
@@ -110,7 +129,7 @@ if check_password():
             
             # 5. Signal-Liste
             st.subheader("📋 Signal-Liste")
-            cols_to_show = ['company_name', 'sector', 'signal_type', 'Performance (%)', 'entry_price', 'candle_time', 'TV_Link']
+            cols_to_show = ['company_name', 'sector', 'signal_type', 'Performance (%)', 'EMA20_Dist_%', 'entry_price', 'candle_time', 'TV_Link']
             existing_cols = [c for c in cols_to_show if c in df.columns]
             
             st.dataframe(
@@ -120,6 +139,7 @@ if check_password():
                 column_config={
                     "TV_Link": st.column_config.LinkColumn("TradingView", display_text="Analyse"),
                     "Performance (%)": st.column_config.NumberColumn("Performance (%)", format="%.2f%%"),
+                    "EMA20_Dist_%": st.column_config.NumberColumn("EMA20 Dist. %", format="%.2f%%"),
                     "entry_price": st.column_config.NumberColumn("Einstieg", format="%.2f €")
                 }
             )
