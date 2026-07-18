@@ -82,22 +82,26 @@ if check_password():
                 sector_counts = df['sector'].value_counts().reset_index()
                 sector_counts.columns = ['Sektor', 'Anzahl']
                 
-                # Wir definieren eine feste Höhe basierend auf der Anzahl der Sektoren
-                chart_height = len(sector_counts) * 35 
+                # Wir legen eine Spalten-Struktur an (2/3 Breite für das Chart, 1/3 bleibt leer)
+                col_chart, col_empty = st.columns([2, 1])
                 
-                chart = alt.Chart(sector_counts).mark_bar(
-                    color='#3b82f6',  # Ein schönes Blau
-                    size=20           # Die Balken selbst sind nur 20px "dick"
-                ).encode(
-                    x=alt.X('Anzahl:Q', title='Anzahl Signale'),
-                    y=alt.Y('Sektor:N', sort='-x', title=None),
-                    tooltip=['Sektor', 'Anzahl']
-                ).properties(
-                    height=chart_height,
-                    width='container'
-                )
-                
-                st.altair_chart(chart, use_container_width=True)
+                with col_chart:
+                    chart_height = len(sector_counts) * 35 
+                    
+                    chart = alt.Chart(sector_counts).mark_bar(
+                        color='#3b82f6',
+                        size=20
+                    ).encode(
+                        # Wir setzen das Maximum der X-Achse auf den höchsten Wert + Puffer,
+                        # damit der Balken optisch bei 2/3 endet
+                        x=alt.X('Anzahl:Q', title='Anzahl Signale', scale=alt.Scale(domain=[0, sector_counts['Anzahl'].max() * 1.5])),
+                        y=alt.Y('Sektor:N', sort='-x', title=None),
+                        tooltip=['Sektor', 'Anzahl']
+                    ).properties(
+                        height=chart_height
+                    )
+                    
+                    st.altair_chart(chart, use_container_width=True)
             else:
                 st.write("Keine Sektoren-Daten.")
             
