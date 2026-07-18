@@ -3,6 +3,7 @@ from supabase import create_client
 import pandas as pd
 import ast
 import yfinance as yf
+import altair as alt
 
 # Seiteneinstellungen
 st.set_page_config(layout="wide", page_title="Ticker-Screener Dashboard")
