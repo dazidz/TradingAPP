@@ -46,11 +46,17 @@ if check_password():
     st.title("📊 Ticker-Screener Dashboard")
 
     try:
+        # 1. Daten holen
         response = supabase.table("signals").select("*").execute()
         df = pd.DataFrame(response.data)
 
         if not df.empty:
-            if 'signal' in df.columns: df = df.rename(columns={'signal': 'signal_type'})
+            # --- HIER: Dubletten entfernen ---
+            # Wir behalten immer den aktuellsten Eintrag pro Ticker und Signal-Typ
+            # Falls du wirklich nur den Ticker unabhängig vom Signal-Typ willst, 
+            # nutze: df = df.drop_duplicates(subset=['ticker'], keep='last')
+            df = df.sort_values('created_at', ascending=True)
+            df = df.drop_duplicates(subset=['ticker', 'signal_type'], keep='last')
             
             if 'meta_data' in df.columns:
                 df['meta_data'] = df['meta_data'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else {})
