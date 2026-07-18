@@ -76,32 +76,35 @@ if check_password():
             df['current_price'] = df['ticker'].map(price_map)
             df['Performance (%)'] = ((df['current_price'] - df['entry_price']) / df['entry_price']) * 100
             
-            # 4. Sektoren-Visualisierung (Altair Horizontal Bar Chart)
+            # 4. Sektoren-Visualisierung
             st.subheader("🏢 Signale nach Sektor")
             if 'sector' in df.columns:
                 sector_counts = df['sector'].value_counts().reset_index()
                 sector_counts.columns = ['Sektor', 'Anzahl']
                 
-                # Wir legen eine Spalten-Struktur an (2/3 Breite für das Chart, 1/3 bleibt leer)
-                col_chart, col_empty = st.columns([2, 1])
+                chart_height = len(sector_counts) * 35
                 
-                with col_chart:
-                    chart_height = len(sector_counts) * 35 
-                    
-                    chart = alt.Chart(sector_counts).mark_bar(
-                        color='#3b82f6',
-                        size=20
-                    ).encode(
-                        # Wir setzen das Maximum der X-Achse auf den höchsten Wert + Puffer,
-                        # damit der Balken optisch bei 2/3 endet
-                        x=alt.X('Anzahl:Q', title='Anzahl Signale', scale=alt.Scale(domain=[0, sector_counts['Anzahl'].max() * 1.5])),
-                        y=alt.Y('Sektor:N', sort='-x', title=None),
-                        tooltip=['Sektor', 'Anzahl']
-                    ).properties(
-                        height=chart_height
-                    )
-                    
-                    st.altair_chart(chart, use_container_width=True)
+                # Wir definieren das Chart
+                chart = alt.Chart(sector_counts).mark_bar(
+                    color='#3b82f6',
+                    size=20
+                ).encode(
+                    # Wir lassen die Skala dynamisch, damit sie nicht "gequetscht" wirkt
+                    x=alt.X('Anzahl:Q', title='Anzahl'),
+                    y=alt.Y('Sektor:N', sort='-x', title=None),
+                    tooltip=['Sektor', 'Anzahl']
+                ).properties(
+                    height=chart_height,
+                    # Hier begrenzen wir die Breite des gesamten Charts
+                    width=600 
+                ).configure_axis(
+                    # Mehr Platz für Labels links schaffen
+                    labelLimit=300 
+                )
+                
+                # Anstatt col_chart nehmen wir st.container und begrenzen die Breite
+                with st.container():
+                    st.altair_chart(chart)
             else:
                 st.write("Keine Sektoren-Daten.")
             
