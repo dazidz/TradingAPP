@@ -1,164 +1,102 @@
-import yfinance as yf
+import streamlit as st
+from supabase import create_client
 import pandas as pd
-import numpy as np
-import datetime
-import pytz
-import time
-from db import get_db_client
+import ast
+import yfinance as yf
 
-supabase = get_db_client()
+# Seiteneinstellungen
+st.set_page_config(layout="wide", page_title="Ticker-Screener Dashboard")
 
-def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker, meta_data, entry_price):
+# Verbindung zu Supabase
+URL = st.secrets["SUPABASE_URL"]
+KEY = st.secrets["SUPABASE_KEY"]
+supabase = create_client(URL, KEY)
+
+# Caching für Live-Kurse (30 Minuten)
+@st.cache_data(ttl=1800)
+def get_all_prices(tickers):
+    if not tickers: return {}
     try:
-        # Check: Existiert bereits ein solches Signal in den letzten 48h?
-        cutoff_time = (datetime.datetime.now(pytz.UTC) - datetime.timedelta(hours=48)).isoformat()
-        check = supabase.table("signals").select("id") \
-            .eq("ticker", ticker) \
-            .eq("signal_type", signal_type) \
-            .gte("created_at", cutoff_time).execute()
-        
-        if len(check.data) > 0: return 
+        # Bulk-Download ist massiv schneller als Einzeldownload
+        data = yf.download(tickers, period="1d", interval="1h", progress=False)['Close']
+        if isinstance(data, pd.Series):
+            return {tickers[0]: float(data.iloc[-1])}
+        return {t: float(data[t].iloc[-1]) for t in tickers if t in data.columns and not pd.isna(data[t].iloc[-1])}
+    except Exception:
+        return {}
 
-        data = {
-            "ticker": ticker,
-            "company_name": company_name,
-            "signal_type": signal_type,
-            "candle_time": candle_time.isoformat(),
-            "sector": sector,
-            "gettex_ticker": gettex_ticker,
-            "entry_price": float(entry_price),
-            "created_at": datetime.datetime.now(pytz.UTC).isoformat(),
-            "meta_data": str(meta_data)
-        }
-        supabase.table("signals").insert(data).execute()
-        print(f"✅ {ticker} -> {signal_type} gespeichert (Einstieg: {entry_price:.2f})")
-    except Exception as e:
-        print(f"❌ Fehler beim Speichern von {ticker}: {e}")
+# Passwort-Schutz
+def check_password():
+    if "password_correct" not in st.session_state:
+        st.session_state.password_correct = False
+    if not st.session_state.password_correct:
+        input_pw = st.text_input("Bitte Passwort eingeben:", type="password")
+        if st.button("Anmelden"):
+            if input_pw == st.secrets["APP_PASSWORD"]:
+                st.session_state.password_correct = True
+                st.rerun()
+            else:
+                st.error("Passwort falsch.")
+        return False
+    return True
 
-def get_ticker_list_with_names():
+if check_password():
+    st.title("📊 Ticker-Screener Dashboard")
+
     try:
-        response = supabase.table("watchlist").select("ticker, company_name, sector, gettex_ticker").execute()
-        return response.data 
-    except Exception as e:
-        print(f"❌ Fehler beim Laden der 'watchlist': {e}")
-        return []
+        response = supabase.table("signals").select("*").execute()
+        df = pd.DataFrame(response.data)
 
-def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker, meta_data, entry_price):
-    try:
-        date_str = datetime.datetime.now(pytz.UTC).strftime('%Y-%m-%d')
-        check = supabase.table("signals").select("id") \
-            .eq("ticker", ticker) \
-            .gte("created_at", date_str + " 00:00:00") \
-            .execute()
-        
-        if len(check.data) > 0: return 
-
-        data = {
-            "ticker": ticker,
-            "company_name": company_name,
-            "signal_type": signal_type,
-            "candle_time": candle_time.isoformat(),
-            "sector": sector,
-            "gettex_ticker": gettex_ticker,
-            "entry_price": float(entry_price),
-            "created_at": datetime.datetime.now(pytz.UTC).isoformat(),
-            "meta_data": str(meta_data)
-        }
-        supabase.table("signals").insert(data).execute()
-        print(f"✅ {ticker} -> {signal_type} gespeichert (Einstieg: {entry_price})")
-    except Exception as e:
-        print(f"❌ Fehler beim Speichern von {ticker}: {e}")
-
-def scan_ticker(ticker_info):
-    ticker = ticker_info['ticker']
-    name = ticker_info.get('company_name', 'N/A')
-    sector = ticker_info.get('sector', 'N/A')
-    gettex_ticker = ticker_info.get('gettex_ticker', '')
-    
-    data = yf.download(ticker, period="3mo", interval="1h", progress=False, auto_adjust=True)
-    
-    if data.empty or len(data) < 20:
-        print(f"⚠️ {ticker}: Zu wenig Daten.")
-        return
-
-    if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
-    data.columns = [str(c).lower() for c in data.columns]
-    
-    for col in ['open', 'high', 'low', 'close']:
-        if col in data.columns: data[col] = data[col] * 1.016
-    
-    high, low, close = data['high'], data['low'], data['close']
-    
-    # ADX Berechnung
-    tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
-    def rma(series, length): return series.ewm(alpha=1/length, adjust=False).mean()
-    atr = rma(tr, 14)
-    plus_di = 100 * (rma((high - high.shift()).clip(lower=0), 14) / atr)
-    minus_di = 100 * (rma((low.shift() - low).clip(lower=0), 14) / atr)
-    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 0.0001)
-    adxV = rma(dx, 14)
-    
-    # SMI Berechnung
-    smiL, smiS1, smiS2, sigL = 10, 3, 10, 5
-    hi, lo = high.rolling(smiL).max(), low.rolling(smiL).min()
-    diff, rdiff = hi - lo, close - (hi + lo) / 2
-    aR = rdiff.ewm(span=smiS1, adjust=False).mean().ewm(span=smiS2, adjust=False).mean()
-    aD = diff.ewm(span=smiS1, adjust=False).mean().ewm(span=smiS2, adjust=False).mean()
-    smiV = pd.Series(np.where(aD != 0, (aR / (aD / 2) * 100), 0), index=data.index)
-    sigN = smiV.ewm(span=sigL, adjust=False).mean()
-
-    # Pivot-Logik
-    smiV_s = smiV.shift(2)
-    is_pivot = (smiV_s < smiV.shift(3)) & (smiV_s < smiV.shift(4)) & \
-               (smiV_s < smiV.shift(1)) & (smiV_s < smiV)
-    lSL = pd.Series(np.where(is_pivot, smiV_s, np.nan), index=data.index).ffill()
-    lPL = pd.Series(np.where(is_pivot, low.shift(2), np.nan), index=data.index).ffill()
-
-    # Signal-Logik
-    cUp = (smiV.shift(1) < sigN.shift(1)) & (smiV > sigN)
-    regD = (low < lPL) & (smiV > lSL) & (smiV < -40)
-    hidD = (low > lPL) & (smiV < lSL) & (lSL < -20)
-    is_elite = cUp & (regD | hidD) & (adxV > 18)
-    is_buy = (~is_elite) & cUp & (smiV < -35) & (adxV > 18)
-
-    # Signal-Suche
-    signal_found = False
-    heute = pd.Timestamp.now(tz='UTC')
-    
-    for i in reversed(range(len(data))):
-        candle_time = data.index[i].tz_localize(None).tz_localize('UTC')
-        if (heute - candle_time).days > 5: break
+        if not df.empty:
+            if 'signal' in df.columns: df = df.rename(columns={'signal': 'signal_type'})
             
-        meta = {"smi": round(float(smiV.iloc[i]), 2), "adx": round(float(adxV.iloc[i]), 2)}
-        current_price = float(data['close'].iloc[i])
-        
-        if is_elite.iloc[i]:
-            current_price = float(data['close'].iloc[i])
-            # DEBUG-PRINT:
-            print(f"DEBUG: Ticker {ticker} wird mit Preis {current_price} gespeichert.")
-            save_to_supabase(ticker, name, "ELITE", candle_time, sector, gettex_ticker, meta, current_price)
-            signal_found = True
-            break
-        elif is_buy.iloc[i]:
-            save_to_supabase(ticker, name, "KAUFEN", candle_time, sector, gettex_ticker, meta, current_price)
-            signal_found = True
-            break
+            if 'meta_data' in df.columns:
+                df['meta_data'] = df['meta_data'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else {})
+                meta_df = pd.json_normalize(df['meta_data'])
+                df = pd.concat([df.drop('meta_data', axis=1), meta_df], axis=1)
+
+            if 'gettex_ticker' in df.columns:
+                df['TV_Link'] = df['gettex_ticker'].apply(lambda x: f"https://www.tradingview.com/chart/?symbol={x}" if x else "")
             
-    if not signal_found:
-        print(f"ℹ️ {ticker}: Kein Signal.")
+            # Performance Berechnung
+            df['entry_price'] = pd.to_numeric(df['entry_price'], errors='coerce')
+            unique_tickers = df['ticker'].unique().tolist()
+            
+            with st.spinner("Lade Live-Kurse..."):
+                price_map = get_all_prices(unique_tickers)
+            
+            df['current_price'] = df['ticker'].map(price_map)
+            df['Performance (%)'] = ((df['current_price'] - df['entry_price']) / df['entry_price']) * 100
+            
+            # Visualisierung
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("🔍 SMI vs. ADX Analyse")
+                if 'smi' in df.columns and 'adx' in df.columns:
+                    st.scatter_chart(df, x='smi', y='adx', color='signal_type')
+            
+            with col2:
+                st.subheader("🏢 Signale nach Sektor")
+                if 'sector' in df.columns:
+                    st.bar_chart(df['sector'].value_counts())
 
-if __name__ == "__main__":
-    print("🧹 Bereinige alte Signale...")
-    try:
-        cutoff = (datetime.datetime.now(pytz.UTC) - datetime.timedelta(hours=48)).isoformat()
-        supabase.table("signals").delete().lt("created_at", cutoff).execute()
-    except Exception as e: print(f"❌ Fehler bei der Bereinigung: {e}")
-
-    print("🚀 Starte Batch-Scan...")
-    ticker_liste = get_ticker_list_with_names()
-    for t_info in ticker_liste:
-        try:
-            scan_ticker(t_info)
-            time.sleep(0.5)
-        except Exception as e: print(f"❌ Fehler bei {t_info['ticker']}: {e}")
-    print("🏁 Scan abgeschlossen.")
+            st.subheader("📋 Signal-Liste")
+            cols_to_show = ['company_name', 'sector', 'signal_type', 'Performance (%)', 'smi', 'adx', 'entry_price', 'candle_time', 'TV_Link']
+            existing_cols = [c for c in cols_to_show if c in df.columns]
+            
+            st.dataframe(
+                df[existing_cols], 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "TV_Link": st.column_config.LinkColumn("TradingView", display_text="Analyse"),
+                    "Performance (%)": st.column_config.NumberColumn("Performance (%)", format="%.2f%%"),
+                    "entry_price": st.column_config.NumberColumn("Einstieg", format="%.2f €"),
+                    "smi": st.column_config.NumberColumn("SMI", format="%.2f"),
+                    "adx": st.column_config.NumberColumn("ADX", format="%.2f")
+                }
+            )
+        else:
+            st.write("Tabelle 'signals' ist leer.")
+    except Exception as e:
+        st.error(f"Fehler: {e}")
