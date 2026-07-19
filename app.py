@@ -148,22 +148,39 @@ if check_password():
                 st.caption(f"Anzahl Signale über EMA: {len(df_ueber)} | Anzahl unter EMA: {len(df_unter)}")
             # ---------------------------
 
-            # 6. Signal-Liste
-            st.subheader("📋 Signal-Liste")
+            # 5. Signal-Listen: Trennung nach EMA-Status
+            st.subheader("📋 Signal-Listen")
+            
+            # Wir nutzen Tabs für eine saubere Trennung
+            tab_ueber, tab_unter = st.tabs(["🚀 Über EMA20 (Trend)", "⚠️ Unter EMA20 (Dip/Reversal)"])
+            
+            # DataFrame filtern (wir nutzen .copy() für saubere Daten)
+            df_ueber = df[df['EMA20_Dist_%'] >= 0].copy()
+            df_unter = df[df['EMA20_Dist_%'] < 0].copy()
+            
+            # Spalten-Konfiguration
             cols_to_show = ['company_name', 'sector', 'signal_type', 'Performance (%)', 'EMA20_Dist_%', 'entry_price', 'candle_time', 'TV_Link']
             existing_cols = [c for c in cols_to_show if c in df.columns]
             
-            st.dataframe(
-                df[existing_cols], 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={
-                    "TV_Link": st.column_config.LinkColumn("TradingView", display_text="Analyse"),
-                    "Performance (%)": st.column_config.NumberColumn("Performance (%)", format="%.2f%%"),
-                    "EMA20_Dist_%": st.column_config.NumberColumn("EMA20 Dist. %", format="%.2f%%"),
-                    "entry_price": st.column_config.NumberColumn("Einstieg", format="%.2f €")
-                }
-            )
+            col_config = {
+                "TV_Link": st.column_config.LinkColumn("TradingView", display_text="Analyse"),
+                "Performance (%)": st.column_config.NumberColumn("Performance (%)", format="%.2f%%"),
+                "EMA20_Dist_%": st.column_config.NumberColumn("EMA20 Dist. %", format="%.2f%%"),
+                "entry_price": st.column_config.NumberColumn("Einstieg", format="%.2f €")
+            }
+
+            with tab_ueber:
+                if not df_ueber.empty:
+                    st.dataframe(df_ueber[existing_cols], use_container_width=True, hide_index=True, column_config=col_config)
+                else:
+                    st.info("Aktuell keine Signale über dem EMA20.")
+
+            with tab_unter:
+                if not df_unter.empty:
+                    st.dataframe(df_unter[existing_cols], use_container_width=True, hide_index=True, column_config=col_config)
+                else:
+                    st.info("Aktuell keine Signale unter dem EMA20.")
+
         else:
             st.info("Tabelle 'signals' ist leer.")
             
