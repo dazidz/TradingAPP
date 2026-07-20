@@ -161,23 +161,29 @@ def scan_ticker(ticker_info):
 
 
 # EMA-CHECK ---
-    hist = yf.download(ticker, period="1mo", interval="1d", progress=False)['Close']
-    if len(hist) >= 20:
-        ema20 = hist.ewm(span=20, adjust=False).mean().iloc[-1]
-        current_price = hist.iloc[-1]
+    try:
+        # Download erzwingt ein DataFrame, [0] wählt die Spalte aus
+        hist = yf.download(ticker, period="1mo", interval="1d", progress=False)['Close']
         
-        # Holen des aktuellen Notified-Status
-        try:
-            existing = supabase.table("signals").select("notified_ema").eq("ticker", ticker).execute()
-            is_notified = existing.data[0].get('notified_ema', False) if existing.data else False
+        # Sicherstellen, dass es ein reiner Zahlenwert (float) ist
+        if not hist.empty and len(hist) >= 20:
+            ema20 = float(hist.ewm(span=20, adjust=False).mean().iloc[-1])
+            current_price = float(hist.iloc[-1])
             
+            # DB-Abfrage
+            response = supabase.table("signals").select("notified_ema").eq("ticker", ticker).execute()
+            
+            # Wert extrahieren
+            is_notified = False
+            if response.data and len(response.data) > 0:
+                is_notified = bool(response.data[0].get('notified_ema', False))
+                
+            # Logik
             if current_price >= ema20 and not is_notified:
                 send_telegram(ticker, current_price)
                 supabase.table("signals").update({"notified_ema": True}).eq("ticker", ticker).execute()
             elif current_price < ema20 and is_notified:
                 supabase.table("signals").update({"notified_ema": False}).eq("ticker", ticker).execute()
-        except Exception as e:
-            print(f"❌ Fehler bei EMA-Benachrichtigung für {ticker}: {e}")
     # --- ENDE EMA-CHECK ---
 
 
