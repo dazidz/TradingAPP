@@ -161,31 +161,36 @@ def scan_ticker(ticker_info):
 
 
 # EMA-CHECK
+    # EMA-CHECK
     try:
-        # Download 
-        hist_df = yf.download(ticker, period="1mo", interval="1d", progress=False)
+        # 1. Daten laden und Spaltennamen vereinheitlichen
+        df_ema = yf.download(ticker, period="1mo", interval="1d", progress=False)
         
-        # Bereinigung: Wir brauchen nur die 'Close' Spalte als einfache Serie
-        if 'Close' in hist_df.columns and len(hist_df) >= 20:
-            # Wir extrahieren die Serie und entfernen mögliche Multi-Indizes
-            close_series = hist_df['Close'].iloc[:, 0] if len(hist_df['Close'].shape) > 1 else hist_df['Close']
+        # Falls MultiIndex, Spalten flachklopfen
+        if isinstance(df_ema.columns, pd.MultiIndex):
+            df_ema.columns = df_ema.columns.get_level_values(0)
             
-            # EMA berechnen
-            ema_series = close_series.ewm(span=20, adjust=False).mean()
+        # 2. NUR mit der 'Close' Spalte arbeiten und zu einer Liste konvertieren
+        if 'Close' in df_ema.columns and len(df_ema) >= 20:
+            # Wir holen die letzten 20 Werte als reine Liste, keine Serie mehr!
+            close_values = df_ema['Close'].tolist()
             
-            # .item() wandelt den Numpy-Skalar oder Pandas-Wert hart in einen nativen Python-Float um
-            ema20 = float(ema_series.iloc[-1].item())
-            current_price = float(close_series.iloc[-1].item())
+            # EMA manuell berechnen oder mit Pandas, aber danach sofort in Float wandeln
+            # Hier nutzen wir eine einfache Methode, um den letzten Wert sicher zu bekommen
+            # Wir berechnen den EMA20 direkt auf der Liste oder Serie
+            ema_serie = df_ema['Close'].ewm(span=20, adjust=False).mean()
             
-            # DB-Abfrage
+            # Die Zuweisung in float() erzwingt die Umwandlung
+            ema20 = float(ema_serie.iloc[-1])
+            current_price = float(df_ema['Close'].iloc[-1])
+            
+            # --- DB Logik bleibt gleich ---
             response = supabase.table("signals").select("notified_ema").eq("ticker", ticker).execute()
             
-            # Wert sicher extrahieren
             is_notified = False
             if response.data and len(response.data) > 0:
                 is_notified = bool(response.data[0].get('notified_ema', False))
                 
-            # Logik (Jetzt sind beide Werte garantiert reine Python-Floats)
             if current_price >= ema20 and not is_notified:
                 send_telegram(ticker, current_price)
                 supabase.table("signals").update({"notified_ema": True}).eq("ticker", ticker).execute()
