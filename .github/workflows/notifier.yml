@@ -1,0 +1,29 @@
+name: EMA Notification Checker
+
+on:
+  schedule:
+    - cron: '*/30 8-20 * * 1-5' # Läuft alle 30 Min, Börsenzeiten (Mo-Fr, 08:00-20:00)
+  workflow_dispatch: # Ermöglicht manuelles Starten zum Testen
+
+jobs:
+  check-signals:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install pandas yfinance requests supabase
+
+      - name: Run Notifier
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python scripts/notify_ema.py
