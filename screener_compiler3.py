@@ -162,19 +162,20 @@ def scan_ticker(ticker_info):
 
 # EMA-CHECK
     try:
-        # Hier erzwingen wir, dass yfinance wirklich nur die Series 'Close' holt
+        # Download 
         hist_df = yf.download(ticker, period="1mo", interval="1d", progress=False)
         
-        # Falls yfinance ein MultiIndex-DataFrame zurückgibt (manchmal bei neuen Versionen)
-        if isinstance(hist_df.columns, pd.MultiIndex):
-            hist_df.columns = hist_df.columns.get_level_values(0)
-            
+        # Bereinigung: Wir brauchen nur die 'Close' Spalte als einfache Serie
         if 'Close' in hist_df.columns and len(hist_df) >= 20:
-            hist_series = hist_df['Close'].squeeze() # .squeeze() macht aus einem 1-Spalten-DF eine echte Serie
+            # Wir extrahieren die Serie und entfernen mögliche Multi-Indizes
+            close_series = hist_df['Close'].iloc[:, 0] if len(hist_df['Close'].shape) > 1 else hist_df['Close']
             
-            # Jetzt erst berechnen und auf float casten
-            ema20 = float(hist_series.ewm(span=20, adjust=False).mean().iloc[-1])
-            current_price = float(hist_series.iloc[-1])
+            # EMA berechnen
+            ema_series = close_series.ewm(span=20, adjust=False).mean()
+            
+            # .item() wandelt den Numpy-Skalar oder Pandas-Wert hart in einen nativen Python-Float um
+            ema20 = float(ema_series.iloc[-1].item())
+            current_price = float(close_series.iloc[-1].item())
             
             # DB-Abfrage
             response = supabase.table("signals").select("notified_ema").eq("ticker", ticker).execute()
@@ -184,7 +185,7 @@ def scan_ticker(ticker_info):
             if response.data and len(response.data) > 0:
                 is_notified = bool(response.data[0].get('notified_ema', False))
                 
-            # Logik
+            # Logik (Jetzt sind beide Werte garantiert reine Python-Floats)
             if current_price >= ema20 and not is_notified:
                 send_telegram(ticker, current_price)
                 supabase.table("signals").update({"notified_ema": True}).eq("ticker", ticker).execute()
