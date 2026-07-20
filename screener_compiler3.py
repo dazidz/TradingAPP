@@ -161,66 +161,24 @@ def scan_ticker(ticker_info):
 
 
 # EMA-CHECK
-    # EMA-CHECK
-    try:
-        # 1. Daten laden und Spaltennamen vereinheitlichen
-        df_ema = yf.download(ticker, period="1mo", interval="1d", progress=False)
+try:
+        df = yf.download(ticker, period="1mo", interval="1d", progress=False)
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         
-        # Falls MultiIndex, Spalten flachklopfen
-        if isinstance(df_ema.columns, pd.MultiIndex):
-            df_ema.columns = df_ema.columns.get_level_values(0)
+        if 'Close' in df.columns and len(df) >= 20:
+            c_price = float(df['Close'].iloc[-1])
+            ema_val = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
             
-        # 2. NUR mit der 'Close' Spalte arbeiten und zu einer Liste konvertieren
-        if 'Close' in df_ema.columns and len(df_ema) >= 20:
-            # Wir holen die letzten 20 Werte als reine Liste, keine Serie mehr!
-            close_values = df_ema['Close'].tolist()
-            
-            # EMA manuell berechnen oder mit Pandas, aber danach sofort in Float wandeln
-            # Hier nutzen wir eine einfache Methode, um den letzten Wert sicher zu bekommen
-            # Wir berechnen den EMA20 direkt auf der Liste oder Serie
-            ema_serie = df_ema['Close'].ewm(span=20, adjust=False).mean()
-            
-            # Die Zuweisung in float() erzwingt die Umwandlung
-            ema20 = float(ema_serie.iloc[-1])
-            current_price = float(df_ema['Close'].iloc[-1])
-            
-            # --- DB Logik bleibt gleich ---
-            response = supabase.table("signals").select("notified_ema").eq("ticker", ticker).execute()
-            
-            is_notified = False
-            if response.data and len(response.data) > 0:
-                is_notified = bool(response.data[0].get('notified_ema', False))
+            res = supabase.table("signals").select("notified_ema").eq("ticker", ticker).execute()
+            is_notified = bool(res.data[0].get('notified_ema', False)) if res.data else False
                 
-            if current_price >= ema20 and not is_notified:
-                send_telegram(ticker, current_price)
+            if c_price >= ema_val and not is_notified:
+                send_telegram(ticker, c_price)
                 supabase.table("signals").update({"notified_ema": True}).eq("ticker", ticker).execute()
-            elif current_price < ema20 and is_notified:
+            elif c_price < ema_val and is_notified:
                 supabase.table("signals").update({"notified_ema": False}).eq("ticker", ticker).execute()
-                
     except Exception as e:
-        print(f"❌ Fehler bei EMA-Benachrichtigung für {ticker}: {e}")
-    # --- ENDE EMA-CHECK ---
-
-
-    if len(hist) >= 20:
-        ema20 = hist.ewm(span=20, adjust=False).mean().iloc[-1]
-        current_price = hist.iloc[-1]
-        
-        # FEHLERBEHEBUNG:
-        # Wir fragen explizit nach .eq("ticker", ticker).execute()
-        response = supabase.table("signals").select("notified_ema").eq("ticker", ticker).execute()
-        
-        # Prüfen, ob Daten da sind
-        is_notified = False
-        if response.data and len(response.data) > 0:
-            is_notified = response.data[0].get('notified_ema', False)
-            
-        if current_price >= ema20 and not is_notified:
-            send_telegram(ticker, current_price)
-            supabase.table("signals").update({"notified_ema": True}).eq("ticker", ticker).execute()
-        
-        elif current_price < ema20 and is_notified:
-            supabase.table("signals").update({"notified_ema": False}).eq("ticker", ticker).execute()
+        print(f"❌ Fehler EMA {ticker}: {e}")
 
 if __name__ == "__main__":
     print("🧹 Bereinige alte Signale...")
