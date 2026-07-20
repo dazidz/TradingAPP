@@ -160,8 +160,8 @@ def scan_ticker(ticker_info):
         print(f"ℹ️ {ticker}: Kein Signal.")
 
 
-# EMA-CHECK
-try:
+    # EMA-CHECK
+    try:
         df = yf.download(ticker, period="1mo", interval="1d", progress=False)
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         
