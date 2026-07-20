@@ -160,20 +160,26 @@ def scan_ticker(ticker_info):
         print(f"ℹ️ {ticker}: Kein Signal.")
 
 
-# EMA-CHECK ---
+# EMA-CHECK
     try:
-        # Download erzwingt ein DataFrame, [0] wählt die Spalte aus
-        hist = yf.download(ticker, period="1mo", interval="1d", progress=False)['Close']
+        # Hier erzwingen wir, dass yfinance wirklich nur die Series 'Close' holt
+        hist_df = yf.download(ticker, period="1mo", interval="1d", progress=False)
         
-        # Sicherstellen, dass es ein reiner Zahlenwert (float) ist
-        if not hist.empty and len(hist) >= 20:
-            ema20 = float(hist.ewm(span=20, adjust=False).mean().iloc[-1])
-            current_price = float(hist.iloc[-1])
+        # Falls yfinance ein MultiIndex-DataFrame zurückgibt (manchmal bei neuen Versionen)
+        if isinstance(hist_df.columns, pd.MultiIndex):
+            hist_df.columns = hist_df.columns.get_level_values(0)
+            
+        if 'Close' in hist_df.columns and len(hist_df) >= 20:
+            hist_series = hist_df['Close'].squeeze() # .squeeze() macht aus einem 1-Spalten-DF eine echte Serie
+            
+            # Jetzt erst berechnen und auf float casten
+            ema20 = float(hist_series.ewm(span=20, adjust=False).mean().iloc[-1])
+            current_price = float(hist_series.iloc[-1])
             
             # DB-Abfrage
             response = supabase.table("signals").select("notified_ema").eq("ticker", ticker).execute()
             
-            # Wert extrahieren
+            # Wert sicher extrahieren
             is_notified = False
             if response.data and len(response.data) > 0:
                 is_notified = bool(response.data[0].get('notified_ema', False))
@@ -184,6 +190,9 @@ def scan_ticker(ticker_info):
                 supabase.table("signals").update({"notified_ema": True}).eq("ticker", ticker).execute()
             elif current_price < ema20 and is_notified:
                 supabase.table("signals").update({"notified_ema": False}).eq("ticker", ticker).execute()
+                
+    except Exception as e:
+        print(f"❌ Fehler bei EMA-Benachrichtigung für {ticker}: {e}")
     # --- ENDE EMA-CHECK ---
 
 
