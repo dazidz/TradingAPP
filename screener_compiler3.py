@@ -181,6 +181,26 @@ def scan_ticker(ticker_info):
     # --- ENDE EMA-CHECK ---
 
 
+    if len(hist) >= 20:
+        ema20 = hist.ewm(span=20, adjust=False).mean().iloc[-1]
+        current_price = hist.iloc[-1]
+        
+        # FEHLERBEHEBUNG:
+        # Wir fragen explizit nach .eq("ticker", ticker).execute()
+        response = supabase.table("signals").select("notified_ema").eq("ticker", ticker).execute()
+        
+        # Prüfen, ob Daten da sind
+        is_notified = False
+        if response.data and len(response.data) > 0:
+            is_notified = response.data[0].get('notified_ema', False)
+            
+        if current_price >= ema20 and not is_notified:
+            send_telegram(ticker, current_price)
+            supabase.table("signals").update({"notified_ema": True}).eq("ticker", ticker).execute()
+        
+        elif current_price < ema20 and is_notified:
+            supabase.table("signals").update({"notified_ema": False}).eq("ticker", ticker).execute()
+
 if __name__ == "__main__":
     print("🧹 Bereinige alte Signale...")
     try:
