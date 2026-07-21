@@ -163,12 +163,21 @@ def scan_ticker(ticker_info):
 
     # EMA-CHECK
     try:
-        df = yf.download(ticker, period="1mo", interval="1d", progress=False)
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+        df = yf.download(ticker, period="1mo", interval="1d", progress=False, auto_adjust=True)
+        if df.empty or len(df) < 20:
+            return
+
+        if isinstance(df.columns, pd.MultiIndex): 
+            df.columns = df.columns.get_level_values(0)
+        df.columns = [str(c).lower() for c in df.columns]
         
-        if 'Close' in df.columns and len(df) >= 20:
-            c_price = float(df['Close'].iloc[-1])
-            ema_val = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
+        if 'close' in df.columns:
+            close_series = df['close']
+            if isinstance(close_series, pd.DataFrame):
+                close_series = close_series.iloc[:, 0]
+                
+            c_price = float(close_series.iloc[-1])
+            ema_val = float(close_series.ewm(span=20, adjust=False).mean().iloc[-1])
             
             res = supabase.table("signals").select("notified_ema").eq("ticker", ticker).execute()
             is_notified = bool(res.data[0].get('notified_ema', False)) if res.data else False
