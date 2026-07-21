@@ -1,3 +1,4 @@
+import os
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -5,7 +6,6 @@ import datetime
 import pytz
 import time
 import requests
-import os
 from db import get_db_client
 
 supabase = get_db_client()
