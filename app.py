@@ -3,7 +3,6 @@ from supabase import create_client
 import pandas as pd
 import ast
 import yfinance as yf
-import altair as alt
 
 # Seiteneinstellungen
 st.set_page_config(layout="wide", page_title="Ticker-Screener Dashboard")
@@ -13,7 +12,7 @@ URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(URL, KEY)
 
-# Caching für Live-Kurse (30 Minuten)
+# Caching für Kurse & EMA
 @st.cache_data(ttl=1800)
 def get_all_prices(tickers):
     prices = {}
@@ -23,11 +22,9 @@ def get_all_prices(tickers):
             hist = ticker_obj.history(period="1d")
             if not hist.empty:
                 prices[ticker] = float(hist['Close'].iloc[-1])
-        except Exception:
-            continue
+        except Exception: continue
     return prices
 
-# Caching für EMA-Abstand (30 Minuten)
 @st.cache_data(ttl=1800)
 def get_ema_stats_bulk(tickers):
     stats = {}
@@ -64,11 +61,13 @@ if check_password():
         df = pd.DataFrame(response.data)
 
         if not df.empty:
-            # Daten aufbereiten
             if 'signal' in df.columns: df = df.rename(columns={'signal': 'signal_type'})
             if 'status' not in df.columns: df['status'] = 'signal'
             
-            # Kurse & EMA laden
+            # TradingView Link erstellen
+            if 'gettex_ticker' in df.columns:
+                df['TV_Link'] = df['gettex_ticker'].apply(lambda x: f"https://www.tradingview.com/chart/?symbol={x}" if x else "")
+            
             unique_tickers = df['ticker'].unique().tolist()
             price_map = get_all_prices(unique_tickers)
             ema_map = get_ema_stats_bulk(unique_tickers)
@@ -77,32 +76,45 @@ if check_password():
             df['Performance (%)'] = ((df['current_price'] - df['entry_price']) / df['entry_price']) * 100
             df['EMA20_Dist_%'] = df['ticker'].map(ema_map)
 
-            # Tabs
-            tab1, tab2, tab3 = st.tabs(["⭐ Favoriten", "🚀 Über EMA20", "⚠️ Unter EMA20"])
-
-            # Spaltenkonfiguration für das DataFrame (ermöglicht Sortierung)
-            col_config = {
-                "Performance (%)": st.column_config.NumberColumn(format="%.2f%%"),
-                "EMA20_Dist_%": st.column_config.NumberColumn(format="%.2f%%"),
-                "entry_price": st.column_config.NumberColumn(format="%.2f €"),
-                "TV_Link": st.column_config.LinkColumn("Chart", display_text="Link")
-            }
-
-            def show_table(df_subset):
+            def show_table(df_subset, is_fav_view=False):
+                df_editor = df_subset.copy()
+                df_editor['Action'] = False 
+                
+                # Wir zeigen Action, Ticker, Name, Performance, Preis, EMA-Dist und den Link
                 edited_df = st.data_editor(
-                    df_subset[['ticker', 'company_name', 'Performance (%)', 'EMA20_Dist_%', 'entry_price', 'status']],
-                    column_config=col_config,
+                    df_editor[['Action', 'ticker', 'company_name', 'Performance (%)', 'entry_price', 'EMA20_Dist_%', 'TV_Link']],
+                    column_config={
+                        "Action": st.column_config.CheckboxColumn(
+                            "Löschen" if is_fav_view else "Zu Favoriten",
+                            default=False
+                        ),
+                        "Performance (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                        "EMA20_Dist_%": st.column_config.NumberColumn(format="%.2f%%"),
+                        "entry_price": st.column_config.NumberColumn(format="%.2f €"),
+                        "TV_Link": st.column_config.LinkColumn("Chart", display_text="Analyse")
+                    },
                     hide_index=True,
                     use_container_width=True
                 )
-                # Hier könntest du bei Bedarf Aktionen für Favoriten einbauen
+
+                changed = edited_df[edited_df['Action'] == True]
+                if not changed.empty:
+                    for _, row in changed.iterrows():
+                        target_id = df_subset[df_subset['ticker'] == row['ticker']]['id'].iloc[0]
+                        if is_fav_view:
+                            supabase.table("signals").delete().eq("id", target_id).execute()
+                        else:
+                            supabase.table("signals").update({"status": "favorite"}).eq("id", target_id).execute()
+                        st.rerun()
+
+            tab1, tab2, tab3 = st.tabs(["⭐ Favoriten", "🚀 Über EMA20", "⚠️ Unter EMA20"])
 
             with tab1:
-                show_table(df[df['status'] == 'favorite'])
+                show_table(df[df['status'] == 'favorite'], is_fav_view=True)
             with tab2:
-                show_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'] >= 0)])
+                show_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'] >= 0)], is_fav_view=False)
             with tab3:
-                show_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'] < 0)])
+                show_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'] < 0)], is_fav_view=False)
 
         else:
             st.info("Datenbank ist leer.")
