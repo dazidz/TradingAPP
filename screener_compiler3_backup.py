@@ -1,26 +1,63 @@
+import os
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import datetime
 import pytz
 import time
+import requests
 from db import get_db_client
 
-# Verbindung zur DB
 supabase = get_db_client()
+
+def send_telegram(ticker, price):
+    token = os.environ.get("TELEGRAM_TOKEN")
+    chat_id = os.environ.get("CHAT_ID")
+    if token and chat_id:
+        msg = f"🚀 {ticker} ist über den EMA20 gestiegen! Kurs: {price:.2f}"
+        url = f"https://api.telegram.org/bot{token}/sendMessage?chat_id={chat_id}&text={msg}"
+        try:
+            requests.get(url)
+        except Exception as e:
+            print(f"❌ Telegram Fehler: {e}")
+
+def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker, meta_data, entry_price):
+    try:
+        # Check: Existiert bereits ein solches Signal in den letzten 48h?
+        cutoff_time = (datetime.datetime.now(pytz.UTC) - datetime.timedelta(hours=48)).isoformat()
+        check = supabase.table("signals").select("id") \
+            .eq("ticker", ticker) \
+            .eq("signal_type", signal_type) \
+            .gte("created_at", cutoff_time).execute()
+        
+        if len(check.data) > 0: return 
+
+        data = {
+            "ticker": ticker,
+            "company_name": company_name,
+            "signal_type": signal_type,
+            "candle_time": candle_time.isoformat(),
+            "sector": sector,
+            "gettex_ticker": gettex_ticker,
+            "entry_price": float(entry_price),
+            "created_at": datetime.datetime.now(pytz.UTC).isoformat(),
+            "meta_data": str(meta_data)
+        }
+        supabase.table("signals").insert(data).execute()
+        print(f"✅ {ticker} -> {signal_type} gespeichert (Einstieg: {entry_price:.2f})")
+    except Exception as e:
+        print(f"❌ Fehler beim Speichern von {ticker}: {e}")
 
 def get_ticker_list_with_names():
     try:
-        # Lädt Ticker, Name, Sektor und Gettex-Ticker aus der Watchlist
         response = supabase.table("watchlist").select("ticker, company_name, sector, gettex_ticker").execute()
         return response.data 
     except Exception as e:
         print(f"❌ Fehler beim Laden der 'watchlist': {e}")
         return []
 
-def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker):
+def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker, meta_data, entry_price):
     try:
-        # Prüfen, ob für diesen Ticker heute schon ein Signal existiert
         date_str = datetime.datetime.now(pytz.UTC).strftime('%Y-%m-%d')
         check = supabase.table("signals").select("id") \
             .eq("ticker", ticker) \
@@ -36,10 +73,12 @@ def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, get
             "candle_time": candle_time.isoformat(),
             "sector": sector,
             "gettex_ticker": gettex_ticker,
-            "created_at": datetime.datetime.now(pytz.UTC).isoformat()
+            "entry_price": float(entry_price),
+            "created_at": datetime.datetime.now(pytz.UTC).isoformat(),
+            "meta_data": str(meta_data)
         }
         supabase.table("signals").insert(data).execute()
-        print(f"✅ {ticker} ({company_name}) -> Signal gespeichert: {signal_type}")
+        print(f"✅ {ticker} -> {signal_type} gespeichert (Einstieg: {entry_price})")
     except Exception as e:
         print(f"❌ Fehler beim Speichern von {ticker}: {e}")
 
@@ -49,8 +88,7 @@ def scan_ticker(ticker_info):
     sector = ticker_info.get('sector', 'N/A')
     gettex_ticker = ticker_info.get('gettex_ticker', '')
     
-    
-    data = yf.download(ticker, period="5d", interval="1h", progress=False, auto_adjust=True)
+    data = yf.download(ticker, period="3mo", interval="1h", progress=False, auto_adjust=True)
     
     if data.empty or len(data) < 20:
         print(f"⚠️ {ticker}: Zu wenig Daten.")
@@ -59,62 +97,98 @@ def scan_ticker(ticker_info):
     if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
     data.columns = [str(c).lower() for c in data.columns]
     
-    # Preisanpassung (wie im Original)
     for col in ['open', 'high', 'low', 'close']:
         if col in data.columns: data[col] = data[col] * 1.016
     
     high, low, close = data['high'], data['low'], data['close']
     
-    # --- 1. Indikatoren-Berechnung ---
+    # ADX Berechnung
     tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
     def rma(series, length): return series.ewm(alpha=1/length, adjust=False).mean()
     atr = rma(tr, 14)
     plus_di = 100 * (rma((high - high.shift()).clip(lower=0), 14) / atr)
     minus_di = 100 * (rma((low.shift() - low).clip(lower=0), 14) / atr)
-    adxV = 100 * rma(abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 0.0001), 14)
+    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 0.0001)
+    adxV = rma(dx, 14)
     
+    # SMI Berechnung
     smiL, smiS1, smiS2, sigL = 10, 3, 10, 5
     hi, lo = high.rolling(smiL).max(), low.rolling(smiL).min()
     diff, rdiff = hi - lo, close - (hi + lo) / 2
     aR = rdiff.ewm(span=smiS1, adjust=False).mean().ewm(span=smiS2, adjust=False).mean()
     aD = diff.ewm(span=smiS1, adjust=False).mean().ewm(span=smiS2, adjust=False).mean()
-    smiV = pd.Series(np.where(aD != 0, (aR / (aD / 2) * 100), 0), index=data.index).rolling(5).mean()
+    smiV = pd.Series(np.where(aD != 0, (aR / (aD / 2) * 100), 0), index=data.index)
     sigN = smiV.ewm(span=sigL, adjust=False).mean()
 
-    # --- 2. Robuste Pivot-Logik (Rückwärtsgewandt) ---
-    is_pivot = (smiV.shift(2) < smiV.shift(3)) & (smiV.shift(2) < smiV.shift(4)) & \
-               (smiV.shift(2) < smiV.shift(5)) & (smiV.shift(2) < smiV.shift(6)) & \
-               (smiV.shift(2) < smiV.shift(1)) & (smiV.shift(2) < smiV)
-               
-    lSL = pd.Series(np.where(is_pivot, smiV.shift(2), np.nan), index=data.index).ffill()
+    # Pivot-Logik
+    smiV_s = smiV.shift(2)
+    is_pivot = (smiV_s < smiV.shift(3)) & (smiV_s < smiV.shift(4)) & \
+               (smiV_s < smiV.shift(1)) & (smiV_s < smiV)
+    lSL = pd.Series(np.where(is_pivot, smiV_s, np.nan), index=data.index).ffill()
     lPL = pd.Series(np.where(is_pivot, low.shift(2), np.nan), index=data.index).ffill()
-    
-    # --- 3. Scoring & Signal-Logik ---
+
+    # Signal-Logik
     cUp = (smiV.shift(1) < sigN.shift(1)) & (smiV > sigN)
-    regD = (low < lPL) & (smiV > lSL) & (smiV < -10)
-    hidD = (low > lPL) & (smiV < lSL) & (lSL < -5)
-    has_div = regD | hidD
-    
-    score = pd.Series(0, index=data.index)
-    score += cUp.astype(int) * 1
-    score += has_div.astype(int) * 1
-    score += (adxV > 5).astype(int) * 1
-    
-    is_elite = (score >= 2) & has_div
-    is_buy = (~is_elite) & (score >= 1)
-    
+    regD = (low < lPL) & (smiV > lSL) & (smiV < -40)
+    hidD = (low > lPL) & (smiV < lSL) & (lSL < -20)
+    is_elite = cUp & (regD | hidD) & (adxV > 18)
+    is_buy = (~is_elite) & cUp & (smiV < -35) & (adxV > 18)
+
+    # Signal-Suche
+    signal_found = False
+    heute = pd.Timestamp.now(tz='UTC')
     
     for i in reversed(range(len(data))):
-        if sE.iloc[i]:
-            save_to_supabase(ticker, name, "ELITE", data.index[i], sector, gettex_ticker)
+        candle_time = data.index[i].tz_localize(None).tz_localize('UTC')
+        if (heute - candle_time).days > 5: break
+            
+        meta = {"smi": round(float(smiV.iloc[i]), 2), "adx": round(float(adxV.iloc[i]), 2)}
+        current_price = float(data['close'].iloc[i])
+        
+        if is_elite.iloc[i]:
+            current_price = float(data['close'].iloc[i])
+            # DEBUG-PRINT:
+            print(f"DEBUG: Ticker {ticker} wird mit Preis {current_price} gespeichert.")
+            save_to_supabase(ticker, name, "ELITE", candle_time, sector, gettex_ticker, meta, current_price)
             signal_found = True
             break
-        elif sK.iloc[i]:
-            save_to_supabase(ticker, name, "KAUFEN", data.index[i], sector, gettex_ticker)
+        elif is_buy.iloc[i]:
+            save_to_supabase(ticker, name, "KAUFEN", candle_time, sector, gettex_ticker, meta, current_price)
             signal_found = True
             break
             
-    if not signal_found: print(f"ℹ️ {ticker}: Kein Signal.")
+    if not signal_found:
+        print(f"ℹ️ {ticker}: Kein Signal.")
+
+
+    # EMA-CHECK
+    try:
+        df = yf.download(ticker, period="1mo", interval="1d", progress=False, auto_adjust=True)
+        if df.empty or len(df) < 20:
+            return
+
+        if isinstance(df.columns, pd.MultiIndex): 
+            df.columns = df.columns.get_level_values(0)
+        df.columns = [str(c).lower() for c in df.columns]
+        
+        if 'close' in df.columns:
+            close_series = df['close']
+            if isinstance(close_series, pd.DataFrame):
+                close_series = close_series.iloc[:, 0]
+                
+            c_price = float(close_series.iloc[-1])
+            ema_val = float(close_series.ewm(span=20, adjust=False).mean().iloc[-1])
+            
+            res = supabase.table("signals").select("notified_ema").eq("ticker", ticker).execute()
+            is_notified = bool(res.data[0].get('notified_ema', False)) if res.data else False
+                
+            if c_price >= ema_val and not is_notified:
+                send_telegram(ticker, c_price)
+                supabase.table("signals").update({"notified_ema": True}).eq("ticker", ticker).execute()
+            elif c_price < ema_val and is_notified:
+                supabase.table("signals").update({"notified_ema": False}).eq("ticker", ticker).execute()
+    except Exception as e:
+        print(f"❌ Fehler EMA {ticker}: {e}")
 
 if __name__ == "__main__":
     print("🧹 Bereinige alte Signale...")

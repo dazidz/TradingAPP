@@ -24,6 +24,8 @@ def send_telegram(ticker, price):
 def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker, meta_data, entry_price):
     try:
         # Check: Existiert bereits ein solches Signal in den letzten 48h?
+        # (Wir prüfen hier über alle Status hinweg, damit keine doppelten Signale reinkommen, 
+        #  während die Aktie evtl. schon in den Favoriten liegt)
         cutoff_time = (datetime.datetime.now(pytz.UTC) - datetime.timedelta(hours=48)).isoformat()
         check = supabase.table("signals").select("id") \
             .eq("ticker", ticker) \
@@ -41,7 +43,8 @@ def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, get
             "gettex_ticker": gettex_ticker,
             "entry_price": float(entry_price),
             "created_at": datetime.datetime.now(pytz.UTC).isoformat(),
-            "meta_data": str(meta_data)
+            "meta_data": str(meta_data),
+            "status": "signal"  # Standard-Status für frische Screener-Signale
         }
         supabase.table("signals").insert(data).execute()
         print(f"✅ {ticker} -> {signal_type} gespeichert (Einstieg: {entry_price:.2f})")
