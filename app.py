@@ -89,7 +89,7 @@ if check_password():
                 meta_df = pd.json_normalize(df['meta_data'])
                 df = pd.concat([df.drop('meta_data', axis=1), meta_df], axis=1)
 
-            # Link-Vorbereitung: Wir bauen den Link, speichern aber den Namen separat
+            # Link-Vorbereitung
             df['tv_url'] = df['gettex_ticker'].apply(lambda x: f"https://www.tradingview.com/chart/?symbol={x}")
 
             unique_tickers = df['ticker'].unique().tolist()
@@ -114,7 +114,6 @@ if check_password():
             st.divider()
             tab_favs, tab_ueber, tab_unter, tab_gesamt = st.tabs(["⭐ Favoriten", "🚀 Über EMA20", "⚠️ Unter EMA20", "📁 Gesamtliste"])
 
-            # Wir zeigen 'tv_url' als Link an, aber als 'company_name' betitelt
             cols_to_show = ['Action', 'tv_url', 'sector', 'signal_type', 'Performance (%)', 'entry_price', 'candle_time']
             
             col_config = {
@@ -127,6 +126,14 @@ if check_password():
             def show_editable_table(df_subset, is_fav_view=False, is_total_view=False):
                 df_editor = df_subset.copy()
                 df_editor['Action'] = False 
+                
+                # In der Gesamtliste markieren wir Favoriten mit einem Sternchen im Namen
+                if is_total_view:
+                    df_editor['company_name'] = df_editor.apply(
+                        lambda x: f"⭐ {x['company_name']}" if x['status'] == 'favorite' else x['company_name'], 
+                        axis=1
+                    )
+                
                 existing_cols = [c for c in cols_to_show if c in df_editor.columns]
                 
                 local_config = col_config.copy()
@@ -137,6 +144,7 @@ if check_password():
                 changed = edited_df[edited_df['Action'] == True]
                 if not changed.empty:
                     for _, row in changed.iterrows():
+                        # Suche ID basierend auf dem URL-Link (da Ticker nicht mehr in Ansicht)
                         target_id = df_subset[df_subset['tv_url'] == row['tv_url']]['id'].iloc[0]
                         if is_fav_view:
                             supabase.table("signals").delete().eq("id", target_id).execute()
