@@ -81,13 +81,15 @@ if check_password():
         df = pd.DataFrame(response.data)
 
         if not df.empty:
-            # 1. Dubletten bereinigen (verhindert doppelte Einträge pro Signal)
+            # Status vorbelegen, falls noch nicht vorhanden (wichtig vor dem drop_duplicates)
+            if 'status' not in df.columns: df['status'] = 'signal'
+
+            # 1. Dubletten bereinigen (inklusive Status, damit Favoriten erhalten bleiben)
             df = df.sort_values('created_at', ascending=True)
-            df = df.drop_duplicates(subset=['ticker', 'signal_type'], keep='last')
+            df = df.drop_duplicates(subset=['ticker', 'signal_type', 'status'], keep='last')
 
             # 2. Spalten-Mapping & Metadaten
             if 'signal' in df.columns: df = df.rename(columns={'signal': 'signal_type'})
-            if 'status' not in df.columns: df['status'] = 'signal'
             
             if 'meta_data' in df.columns:
                 df['meta_data'] = df['meta_data'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else {})
@@ -164,7 +166,6 @@ if check_password():
             cols_to_show = ['Action', 'ticker', 'company_name', 'sector', 'signal_type', 'Performance (%)', 'EMA20_Dist_%', 'entry_price', 'candle_time', 'TV_Link']
             
             col_config = {
-                "Action": st.column_config.CheckboxColumn("Entfernen" if 'is_fav_view' in locals() else "Zu Favoriten", default=False),
                 "TV_Link": st.column_config.LinkColumn("TradingView", display_text="Analyse"),
                 "Performance (%)": st.column_config.NumberColumn("Performance (%)", format="%.2f%%"),
                 "EMA20_Dist_%": st.column_config.NumberColumn("EMA20 Dist. %", format="%.2f%%"),
