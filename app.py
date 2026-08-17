@@ -174,7 +174,7 @@ if check_password():
                 "status": st.column_config.TextColumn("Status")
             }
 
-            def show_editable_table(df_subset, is_fav_view=False, is_total_view=False):
+            def show_editable_table(df_subset, is_fav_view=False):
                 if df_subset.empty:
                     st.info("Keine Einträge.")
                     return
@@ -183,16 +183,10 @@ if check_password():
                 df_editor['Action'] = False 
                 
                 existing_cols = [c for c in cols_to_show if c in df_editor.columns]
-                if is_total_view and 'status' in existing_cols:
-                    # In der Gesamtliste Spaltenreihenfolge anpassen falls gewünscht
-                    pass
 
                 local_config = col_config.copy()
-                if is_fav_view:
-                    local_config["Action"] = st.column_config.CheckboxColumn("Entfernen", default=False)
-                elif is_total_view:
-                    # In der Gesamtliste keine direkte Aktion per Checkbox nötig oder optional
-                    existing_cols = [c for c in existing_cols if c != 'Action']
+                # Beschriftung des Häkchens anpassen je nachdem, ob man in Favoriten ist oder nicht
+                local_config["Action"] = st.column_config.CheckboxColumn("Entfernen" if is_fav_view else "Zu Favoriten", default=False)
 
                 edited_df = st.data_editor(
                     df_editor[existing_cols],
@@ -201,16 +195,15 @@ if check_password():
                     use_container_width=True
                 )
 
-                if not is_total_view:
-                    changed = edited_df[edited_df['Action'] == True]
-                    if not changed.empty:
-                        for _, row in changed.iterrows():
-                            target_id = df_subset[df_subset['ticker'] == row['ticker']]['id'].iloc[0]
-                            if is_fav_view:
-                                supabase.table("signals").delete().eq("id", target_id).execute()
-                            else:
-                                supabase.table("signals").update({"status": "favorite"}).eq("id", target_id).execute()
-                            st.rerun()
+                changed = edited_df[edited_df['Action'] == True]
+                if not changed.empty:
+                    for _, row in changed.iterrows():
+                        target_id = df_subset[df_subset['ticker'] == row['ticker']]['id'].iloc[0]
+                        if is_fav_view:
+                            supabase.table("signals").delete().eq("id", target_id).execute()
+                        else:
+                            supabase.table("signals").update({"status": "favorite"}).eq("id", target_id).execute()
+                        st.rerun()
 
             with tab_favs:
                 show_editable_table(df[df['status'] == 'favorite'], is_fav_view=True)
@@ -219,7 +212,7 @@ if check_password():
             with tab_unter:
                 show_editable_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'] < 0)], is_fav_view=False)
             with tab_gesamt:
-                show_editable_table(df, is_fav_view=False, is_total_view=True)
+                show_editable_table(df, is_fav_view=False)
 
         else:
             st.info("Tabelle 'signals' ist leer.")
