@@ -81,10 +81,10 @@ if check_password():
         df = pd.DataFrame(response.data)
 
         if not df.empty:
-            # Status vorbelegen, falls noch nicht vorhanden (wichtig vor dem drop_duplicates)
+            # Status vorbelegen, falls noch nicht vorhanden
             if 'status' not in df.columns: df['status'] = 'signal'
 
-            # 1. Dubletten bereinigen (inklusive Status, damit Favoriten erhalten bleiben)
+            # 1. Dubletten bereinigen (inklusive Status)
             df = df.sort_values('created_at', ascending=True)
             df = df.drop_duplicates(subset=['ticker', 'signal_type', 'status'], keep='last')
 
@@ -157,23 +157,24 @@ if check_password():
                 st.metric(label="Ø Performance (Unter EMA20)", value=f"{avg_unter:.2f}%")
             st.caption(f"Anzahl Signale über EMA: {len(df_ueber_all)} | Anzahl unter EMA: {len(df_unter_all)}")
 
-            # 6. Signal-Listen mit Favoriten-Funktion & Tabellen-Editor
+            # 6. Signal-Listen mit Favoriten-Funktion & Tabellen-Editor (4 Tabs)
             st.divider()
             st.subheader("📋 Signal-Listen & Favoriten")
             
-            tab_favs, tab_ueber, tab_unter = st.tabs(["⭐ Favoriten", "🚀 Über EMA20 (Trend)", "⚠️ Unter EMA20 (Dip/Reversal)"])
+            tab_favs, tab_ueber, tab_unter, tab_gesamt = st.tabs(["⭐ Favoriten", "🚀 Über EMA20 (Trend)", "⚠️ Unter EMA20 (Dip/Reversal)", "📁 Gesamtliste"])
             
-            cols_to_show = ['Action', 'ticker', 'company_name', 'sector', 'signal_type', 'Performance (%)', 'EMA20_Dist_%', 'entry_price', 'candle_time', 'TV_Link']
+            cols_to_show = ['Action', 'ticker', 'company_name', 'sector', 'signal_type', 'Performance (%)', 'EMA20_Dist_%', 'entry_price', 'candle_time', 'TV_Link', 'status']
             
             col_config = {
                 "TV_Link": st.column_config.LinkColumn("TradingView", display_text="Analyse"),
                 "Performance (%)": st.column_config.NumberColumn("Performance (%)", format="%.2f%%"),
                 "EMA20_Dist_%": st.column_config.NumberColumn("EMA20 Dist. %", format="%.2f%%"),
                 "entry_price": st.column_config.NumberColumn("Einstieg", format="%.2f €"),
-                "candle_time": st.column_config.TextColumn("Kerzen-Zeit")
+                "candle_time": st.column_config.TextColumn("Kerzen-Zeit"),
+                "status": st.column_config.TextColumn("Status")
             }
 
-            def show_editable_table(df_subset, is_fav_view=False):
+            def show_editable_table(df_subset, is_fav_view=False, is_total_view=False):
                 if df_subset.empty:
                     st.info("Keine Einträge.")
                     return
@@ -182,10 +183,16 @@ if check_password():
                 df_editor['Action'] = False 
                 
                 existing_cols = [c for c in cols_to_show if c in df_editor.columns]
+                if is_total_view and 'status' in existing_cols:
+                    # In der Gesamtliste Spaltenreihenfolge anpassen falls gewünscht
+                    pass
 
-                # Dynamische Spaltenkonfiguration je nach Tab
                 local_config = col_config.copy()
-                local_config["Action"] = st.column_config.CheckboxColumn("Entfernen" if is_fav_view else "Zu Favoriten", default=False)
+                if is_fav_view:
+                    local_config["Action"] = st.column_config.CheckboxColumn("Entfernen", default=False)
+                elif is_total_view:
+                    # In der Gesamtliste keine direkte Aktion per Checkbox nötig oder optional
+                    existing_cols = [c for c in existing_cols if c != 'Action']
 
                 edited_df = st.data_editor(
                     df_editor[existing_cols],
@@ -194,15 +201,16 @@ if check_password():
                     use_container_width=True
                 )
 
-                changed = edited_df[edited_df['Action'] == True]
-                if not changed.empty:
-                    for _, row in changed.iterrows():
-                        target_id = df_subset[df_subset['ticker'] == row['ticker']]['id'].iloc[0]
-                        if is_fav_view:
-                            supabase.table("signals").delete().eq("id", target_id).execute()
-                        else:
-                            supabase.table("signals").update({"status": "favorite"}).eq("id", target_id).execute()
-                        st.rerun()
+                if not is_total_view:
+                    changed = edited_df[edited_df['Action'] == True]
+                    if not changed.empty:
+                        for _, row in changed.iterrows():
+                            target_id = df_subset[df_subset['ticker'] == row['ticker']]['id'].iloc[0]
+                            if is_fav_view:
+                                supabase.table("signals").delete().eq("id", target_id).execute()
+                            else:
+                                supabase.table("signals").update({"status": "favorite"}).eq("id", target_id).execute()
+                            st.rerun()
 
             with tab_favs:
                 show_editable_table(df[df['status'] == 'favorite'], is_fav_view=True)
@@ -210,6 +218,8 @@ if check_password():
                 show_editable_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'] >= 0)], is_fav_view=False)
             with tab_unter:
                 show_editable_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'] < 0)], is_fav_view=False)
+            with tab_gesamt:
+                show_editable_table(df, is_fav_view=False, is_total_view=True)
 
         else:
             st.info("Tabelle 'signals' ist leer.")
