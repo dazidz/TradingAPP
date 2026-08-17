@@ -96,8 +96,12 @@ if check_password():
                 meta_df = pd.json_normalize(df['meta_data'])
                 df = pd.concat([df.drop('meta_data', axis=1), meta_df], axis=1)
 
-            if 'gettex_ticker' in df.columns:
-                df['TV_Link'] = df['gettex_ticker'].apply(lambda x: f"https://www.tradingview.com/chart/?symbol={x}" if x else "")
+            # TradingView Link direkt in den company_name als Markdown-Link integrieren
+            if 'gettex_ticker' in df.columns and 'company_name' in df.columns:
+                df['company_name'] = df.apply(
+                    lambda row: f"[{row['company_name']}](https://www.tradingview.com/chart/?symbol={row['gettex_ticker']})" 
+                    if row['gettex_ticker'] else row['company_name'], axis=1
+                )
             
             # 3. Performance & Kurse
             df['entry_price'] = pd.to_numeric(df['entry_price'], errors='coerce')
@@ -163,18 +167,17 @@ if check_password():
             
             tab_favs, tab_ueber, tab_unter, tab_gesamt = st.tabs(["⭐ Favoriten", "🚀 Über EMA20 (Trend)", "⚠️ Unter EMA20 (Dip/Reversal)", "📁 Gesamtliste"])
             
-            cols_to_show = ['Action', 'ticker', 'company_name', 'sector', 'signal_type', 'Performance (%)', 'EMA20_Dist_%', 'entry_price', 'candle_time', 'TV_Link', 'status']
+            # Ohne EMA20_Dist_% und status Spalte
+            cols_to_show = ['Action', 'ticker', 'company_name', 'sector', 'signal_type', 'Performance (%)', 'entry_price', 'candle_time']
             
             col_config = {
-                "TV_Link": st.column_config.LinkColumn("TradingView", display_text="Analyse"),
+                "company_name": st.column_config.LinkColumn("Firma (Chart)", display_text=r"^(.*)$"),
                 "Performance (%)": st.column_config.NumberColumn("Performance (%)", format="%.2f%%"),
-                "EMA20_Dist_%": st.column_config.NumberColumn("EMA20 Dist. %", format="%.2f%%"),
                 "entry_price": st.column_config.NumberColumn("Einstieg", format="%.2f €"),
-                "candle_time": st.column_config.TextColumn("Kerzen-Zeit"),
-                "status": st.column_config.TextColumn("Status")
+                "candle_time": st.column_config.TextColumn("Kerzen-Zeit")
             }
 
-            def show_editable_table(df_subset, is_fav_view=False):
+            def show_editable_table(df_subset, is_fav_view=False, is_total_view=False):
                 if df_subset.empty:
                     st.info("Keine Einträge.")
                     return
@@ -185,15 +188,41 @@ if check_password():
                 existing_cols = [c for c in cols_to_show if c in df_editor.columns]
 
                 local_config = col_config.copy()
-                # Beschriftung des Häkchens anpassen je nachdem, ob man in Favoriten ist oder nicht
                 local_config["Action"] = st.column_config.CheckboxColumn("Entfernen" if is_fav_view else "Zu Favoriten", default=False)
 
-                edited_df = st.data_editor(
-                    df_editor[existing_cols],
-                    column_config=local_config,
-                    hide_index=True,
-                    use_container_width=True
-                )
+                # Nur in der Gesamtliste färben wir Favoriten-Zeilen ein
+                if is_total_view:
+                    def highlight_favorites(row):
+                        if row.get('status') == 'favorite':
+                            return ['background-color: rgba(46, 204, 113, 0.15)'] * len(row)
+                        return [''] * len(row)
+                    
+                    st.dataframe(
+                        df_editor[existing_cols].style.apply(highlight_favorites, axis=1),
+                        column_config=local_config,
+                        hide_index=True,
+                        use_container_width=True
+                    )
+                    
+                    # Da st.dataframe nicht interaktiv ist wie st.data_editor für Styling, 
+                    # nutzen wir für die Bearbeitbarkeit den Editor, aber für die Ansicht mit Stil den Styler.
+                    # Wenn man in der Gesamtliste editieren will, müssen wir data_editor nehmen:
+                
+                if is_total_view:
+                    # Alternativ für den Editor mit bedingter Formatierung in neueren Streamlit-Versionen:
+                    edited_df = st.data_editor(
+                        df_editor[existing_cols],
+                        column_config=local_config,
+                        hide_index=True,
+                        use_container_width=True
+                    )
+                else:
+                    edited_df = st.data_editor(
+                        df_editor[existing_cols],
+                        column_config=local_config,
+                        hide_index=True,
+                        use_container_width=True
+                    )
 
                 changed = edited_df[edited_df['Action'] == True]
                 if not changed.empty:
@@ -212,7 +241,8 @@ if check_password():
             with tab_unter:
                 show_editable_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'] < 0)], is_fav_view=False)
             with tab_gesamt:
-                show_editable_table(df, is_fav_view=False)
+                # In der Gesamtliste übergeben wir das komplette df und markieren es als Total View
+                show_editable_table(df, is_fav_view=False, is_total_view=True)
 
         else:
             st.info("Tabelle 'signals' ist leer.")
