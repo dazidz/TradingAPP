@@ -67,7 +67,6 @@ try:
             d['Action'] = False
             
             if is_total_view:
-                # Füge für die Gesamtliste ganz vorne die Stern-Spalte ein
                 d['⭐'] = d['status'].apply(lambda x: "⭐" if x == 'favorite' else "")
                 cols = ['⭐', 'Action', 'company_name', 'Chart', 'sector', 'Performance (%)', 'entry_price']
             else:
@@ -84,15 +83,17 @@ try:
             existing_cols = [c for c in cols if c in d.columns]
             edited = st.data_editor(d[existing_cols], column_config=conf, hide_index=True, use_container_width=True)
             
-            changed = edited[edited['Action'] == True]
-            if not changed.empty:
-                for _, row in edited[edited['Action'] == True].iterrows():
-                    # Finde das passende ID-Feld über den Chart-Link oder Firmennamen
-                    target_id = df_subset[df_subset['company_name'] == row['company_name']]['id'].iloc[0]
-                    if is_fav_view: 
-                        supabase.table("signals").delete().eq("id", target_id).execute()
-                    else: 
-                        supabase.table("signals").update({"status": "favorite"}).eq("id", target_id).execute()
+            # Schnellere Batch-Aktualisierung über `.in_()` statt Einzelschleife
+            changed_rows = edited[edited['Action'] == True]
+            if not changed_rows.empty:
+                changed_names = changed_rows['company_name'].tolist()
+                target_ids = df_subset[df_subset['company_name'].isin(changed_names)]['id'].tolist()
+                
+                if target_ids:
+                    if is_fav_view:
+                        supabase.table("signals").delete().in_("id", target_ids).execute()
+                    else:
+                        supabase.table("signals").update({"status": "favorite"}).in_("id", target_ids).execute()
                     st.rerun()
 
         with tab_favs: show_table(df[df['status'] == 'favorite'], is_fav_view=True)
