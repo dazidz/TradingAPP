@@ -68,22 +68,47 @@ try:
             
             if is_total_view:
                 d['⭐'] = d['status'].apply(lambda x: "⭐" if x == 'favorite' else "")
-                cols = ['⭐', 'Action', 'company_name', 'Chart', 'sector', 'Performance (%)', 'entry_price']
+                cols = ['⭐', 'Action', 'company_name', 'Chart', 'sector', 'Performance (%)', 'current_price', 'entry_price', 'candle_time']
             else:
-                cols = ['Action', 'company_name', 'Chart', 'sector', 'Performance (%)', 'entry_price']
+                cols = ['Action', 'company_name', 'Chart', 'sector', 'Performance (%)', 'current_price', 'entry_price', 'candle_time']
 
             conf = {
                 "⭐": st.column_config.TextColumn("⭐", width="small"),
                 "company_name": st.column_config.TextColumn("Firma", disabled=True),
                 "Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Öffnen"),
                 "Performance (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                "current_price": st.column_config.NumberColumn("Aktuell", format="€%.2f"),
+                "entry_price": st.column_config.NumberColumn("Entry", format="€%.2f"),
+                "candle_time": st.column_config.TextColumn("Candle Time"),
                 "Action": st.column_config.CheckboxColumn("Favorit" if not is_fav_view else "Entfernen", default=False)
             }
             
             existing_cols = [c for c in cols if c in d.columns]
+            
+            # Performance-Auswertung über die angezeigte Liste oben drüber
+            if not d.empty and 'Performance (%)' in d.columns:
+                avg_perf = d['Performance (%)'].mean()
+                st.metric("Ø Performance der Liste", f"{avg_perf:.2f}%")
+
             edited = st.data_editor(d[existing_cols], column_config=conf, hide_index=True, use_container_width=True)
             
-            # Schnellere Batch-Aktualisierung über `.in_()` statt Einzelschleife
+            # Diagramm / Visualisierung unter der Tabelle
+            if not d.empty and 'sector' in d.columns and 'Performance (%)' in d.columns:
+                chart_data = d.dropna(subset=['Performance (%)'])
+                if not chart_data.empty:
+                    c = alt.Chart(chart_data).mark_bar().encode(
+                        x=alt.X('company_name:N', sort='-y', title='Firma'),
+                        y=alt.Y('Performance (%):Q', title='Performance (%)'),
+                        color=alt.condition(
+                            alt.datum['Performance (%)'] > 0,
+                            alt.value('#22c55e'),  # Grün
+                            alt.value('#ef4444')   # Rot
+                        ),
+                        tooltip=['company_name', 'Performance (%)', 'sector']
+                    ).properties(height=250)
+                    st.altair_chart(c, use_container_width=True)
+
+            # Batch-Update für Favoriten (schnell)
             changed_rows = edited[edited['Action'] == True]
             if not changed_rows.empty:
                 changed_names = changed_rows['company_name'].tolist()
