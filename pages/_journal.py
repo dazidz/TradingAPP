@@ -1,7 +1,13 @@
 import streamlit as st
 import sqlite3
-import pandas as pd  # <--- Das hat gefehlt!
+import pandas as pd
 
+# Sicherheits-Check: Nur Zugriff, wenn bereits auf der Hauptseite eingeloggt
+if "password_correct" not in st.session_state or not st.session_state.password_correct:
+    st.error("Bitte zuerst auf der Startseite anmelden!")
+    st.stop()
+
+# --- SEITENINHALT ---
 st.header("📝 Trade Journal")
 DB_NAME = 'elite_v5.db'
 
@@ -13,13 +19,19 @@ with st.form("trade_form"):
     price = col2.number_input("Einstandspreis", min_value=0.0)
     
     if st.form_submit_button("Trade Einbuchen"):
-        with sqlite3.connect(DB_NAME) as conn:
-            conn.execute("INSERT INTO trades (ticker, cat, qty, price) VALUES (?, ?, ?, ?)", (ticker, cat, qty, price))
-        st.success("Trade gespeichert.")
+        try:
+            with sqlite3.connect(DB_NAME) as conn:
+                conn.execute("INSERT INTO trades (ticker, cat, qty, price) VALUES (?, ?, ?, ?)", 
+                             (ticker, cat, qty, price))
+            st.success("Trade gespeichert.")
+        except Exception as e:
+            st.error(f"Fehler beim Speichern: {e}")
 
 # Anzeige des Journals
 st.subheader("Bisherige Trades")
-with sqlite3.connect(DB_NAME) as conn:
-    # Jetzt funktioniert pd auch, da es oben importiert wurde
-    df = pd.read_sql_query("SELECT * FROM trades", conn)
-    st.table(df)
+try:
+    with sqlite3.connect(DB_NAME) as conn:
+        df = pd.read_sql_query("SELECT * FROM trades", conn)
+        st.table(df)
+except Exception as e:
+    st.warning("Konnte Journal nicht laden (Tabelle 'trades' existiert evtl. noch nicht).")

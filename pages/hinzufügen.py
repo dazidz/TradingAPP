@@ -1,6 +1,12 @@
 import streamlit as st
 from supabase import create_client
 
+# Sicherheits-Check: Nur Zugriff, wenn bereits auf der Hauptseite eingeloggt
+if "password_correct" not in st.session_state or not st.session_state.password_correct:
+    st.error("Bitte zuerst auf der Startseite anmelden!")
+    st.stop()
+
+# --- SEITENINHALT ---
 st.title("➕ Ticker hinzufügen")
 st.markdown("Füge schnell neue Aktien von unterwegs zu deiner Watchlist hinzu.")
 
