@@ -65,23 +65,41 @@ if check_password():
                 df['meta_data'] = df['meta_data'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else {})
                 df = pd.concat([df.drop('meta_data', axis=1), pd.json_normalize(df['meta_data'])], axis=1)
 
-            df['tv_url'] = df['gettex_ticker'].apply(lambda x: f"https://www.tradingview.com/chart/?symbol={x}")
+            # Link-Spalte für TradingView
+            df['Chart'] = df['gettex_ticker'].apply(lambda x: f"https://www.tradingview.com/chart/?symbol={x}")
             df['current_price'] = df['ticker'].map(get_all_prices(df['ticker'].unique().tolist()))
             df['Performance (%)'] = ((df['current_price'] - df['entry_price'].astype(float)) / df['entry_price'].astype(float)) * 100
             df['EMA20_Dist_%'] = df['ticker'].map(get_ema_stats_bulk(df['ticker'].unique().tolist()))
 
-            # Chart
+            # Chart mit dynamischer Höhe
             df_chart = df[df['Performance (%)'] < 3.0].copy()
             st.subheader("🏢 Signale nach Sektor")
             if not df_chart.empty:
                 chart_data = df_chart['sector'].value_counts().reset_index()
                 chart_data.columns = ['Sektor', 'Anzahl']
-                chart = alt.Chart(chart_data).mark_bar(color='#3b82f6').encode(
-                    x='Anzahl:Q', y=alt.Y('Sektor:N', sort='-x')).properties(height=200).configure_view(stroke=None)
+                
+                # Dynamische Höhe berechnen (mindestens 250px, +25px pro Sektor)
+                dynamic_height = max(250, len(chart_data) * 28)
+                
+                chart = alt.Chart(chart_data).mark_bar(color='#3b82f6', size=18).encode(
+                    x='Anzahl:Q', 
+                    y=alt.Y('Sektor:N', sort='-x', title=None)
+                ).properties(
+                    height=dynamic_height
+                ).configure_view(
+                    stroke=None
+                ).configure_axis(
+                    labelLimit=300
+                )
                 st.altair_chart(chart, use_container_width=True)
 
             st.divider()
-            tab_favs, tab_ueber, tab_unter, tab_gesamt = st.tabs(["⭐ Favoriten", "🚀 Trend", "⚠️ Dip", "📁 Gesamtliste"])
+            tab_favs, tab_ueber, tab_unter, tab_gesamt = st.tabs([
+                "⭐ Favoriten", 
+                "EMA20 🟢", 
+                "EMA20 🔴", 
+                "📁 Gesamtliste"
+            ])
 
             def show_table(df_subset, is_fav_view=False, is_total_view=False):
                 d = df_subset.copy()
@@ -90,15 +108,14 @@ if check_password():
                 
                 d['Action'] = False
                 
-                # Hier weisen wir tv_url an, als Display-Text den Wert aus der Spalte 'company_name' zu nutzen
                 conf = {
-                    "tv_url": st.column_config.LinkColumn("Firma", display_text="company_name"),
+                    "company_name": st.column_config.TextColumn("Firma", disabled=True),
+                    "Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Öffnen"),
                     "Performance (%)": st.column_config.NumberColumn(format="%.2f%%"),
                     "Action": st.column_config.CheckboxColumn("Favorit" if not is_fav_view else "Entfernen", default=False)
                 }
                 
-                # WICHTIG: 'company_name' muss in der Liste stehen, damit die LinkColumn darauf zugreifen kann!
-                cols_to_render = ['Action', 'tv_url', 'company_name', 'sector', 'Performance (%)', 'entry_price', 'candle_time']
+                cols_to_render = ['Action', 'company_name', 'Chart', 'sector', 'Performance (%)', 'entry_price', 'candle_time']
                 existing_cols = [c for c in cols_to_render if c in d.columns]
 
                 edited = st.data_editor(d[existing_cols], 
@@ -107,7 +124,7 @@ if check_password():
                 changed = edited[edited['Action'] == True]
                 if not changed.empty:
                     for _, row in changed.iterrows():
-                        target_id = df_subset[df_subset['tv_url'] == row['tv_url']]['id'].iloc[0]
+                        target_id = df_subset[df_subset['Chart'] == row['Chart']]['id'].iloc[0]
                         if is_fav_view: supabase.table("signals").delete().eq("id", target_id).execute()
                         else: supabase.table("signals").update({"status": "favorite"}).eq("id", target_id).execute()
                         st.rerun()
