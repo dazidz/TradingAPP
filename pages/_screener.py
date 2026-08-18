@@ -90,17 +90,18 @@ try:
                 avg_perf = d['Performance (%)'].mean()
                 st.metric("Ø Gesamtperformance der Liste", f"{avg_perf:.2f}%")
 
-            # 2. Diagramm: Zählt, wie viele Aktien welches Sektors unter 3% Performance liegen (horizontale Balken)
+            # 2. Diagramm: Anzahl Aktien je Sektor (< 3% Performance, Top 10 Sektoren)
             if not d.empty and 'sector' in d.columns and 'Performance (%)' in d.columns:
                 chart_data = d[(d['Performance (%)'] < 3) & (d['Performance (%)'].notnull())]
                 if not chart_data.empty:
                     sector_counts = chart_data.groupby('sector').size().reset_index(name='Anzahl')
+                    sector_counts = sector_counts.sort_values(by='Anzahl', ascending=False).head(10)
                     
                     c = alt.Chart(sector_counts).mark_bar().encode(
-                        x=alt.X('Anzahl:Q', title='Anzahl Aktien (< 3% Perf.)'),
+                        x=alt.X('Anzahl:Q', title='Anzahl Signale / Aktien (< 3% Perf.)'),
                         y=alt.Y('sector:N', sort='-x', title='Sektor'),
                         tooltip=['sector', 'Anzahl']
-                    ).properties(height=200)
+                    ).properties(height=250)
                     st.altair_chart(c, use_container_width=True)
 
             edited = st.data_editor(d[existing_cols], column_config=conf, hide_index=True, use_container_width=True)
