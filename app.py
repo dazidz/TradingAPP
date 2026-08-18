@@ -26,7 +26,7 @@ def check_password():
         return False
     return True
 
-# Daten für die wichtigsten Indizes laden
+# Daten für die wichtigsten Indizes laden (exakt 8 Indizes)
 @st.cache_data(ttl=600)
 def get_index_performance():
     indices = {
@@ -98,25 +98,26 @@ if check_password():
     index_data = get_index_performance()
     keys = list(index_data.keys())
     
-    # Zeile 1
-    cols1 = st.columns(4)
-    for i in range(4):
-        val = index_data[keys[i]]
-        cols1[i].metric(
-            label=keys[i], 
-            value=f"{val['price']:,.2f}", 
-            delta=f"{val['pct']}%"
-        )
-        
-    # Zeile 2
-    cols2 = st.columns(4)
-    for i in range(4):
-        val = index_data[keys[i+4]]
-        cols2[i].metric(
-            label=keys[i+4], 
-            value=f"{val['price']:,.2f}", 
-            delta=f"{val['pct']}%"
-        )
+    if len(keys) >= 8:
+        # Zeile 1
+        cols1 = st.columns(4)
+        for i in range(4):
+            val = index_data[keys[i]]
+            cols1[i].metric(
+                label=keys[i], 
+                value=f"{val['price']:,.2f}", 
+                delta=f"{val['pct']}%"
+            )
+            
+        # Zeile 2
+        cols2 = st.columns(4)
+        for i in range(4):
+            val = index_data[keys[i+4]]
+            cols2[i].metric(
+                label=keys[i+4], 
+                value=f"{val['price']:,.2f}", 
+                delta=f"{val['pct']}%"
+            )
     
     st.divider()
     st.subheader("🏆 Watchlist: Top 10 Gewinner & Verlierer des Tages")
