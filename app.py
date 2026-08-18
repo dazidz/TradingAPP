@@ -90,15 +90,18 @@ if check_password():
                 
                 d['Action'] = False
                 
-                # Konfiguration: tv_url ist der Link, display_text zeigt den Namen aus der Spalte company_name
+                # Hier weisen wir tv_url an, als Display-Text den Wert aus der Spalte 'company_name' zu nutzen
                 conf = {
                     "tv_url": st.column_config.LinkColumn("Firma", display_text="company_name"),
                     "Performance (%)": st.column_config.NumberColumn(format="%.2f%%"),
                     "Action": st.column_config.CheckboxColumn("Favorit" if not is_fav_view else "Entfernen", default=False)
                 }
                 
-                # Wir zeigen tv_url (als Firma), Action, etc.
-                edited = st.data_editor(d[['Action', 'tv_url', 'sector', 'Performance (%)', 'entry_price', 'candle_time']], 
+                # WICHTIG: 'company_name' muss in der Liste stehen, damit die LinkColumn darauf zugreifen kann!
+                cols_to_render = ['Action', 'tv_url', 'company_name', 'sector', 'Performance (%)', 'entry_price', 'candle_time']
+                existing_cols = [c for c in cols_to_render if c in d.columns]
+
+                edited = st.data_editor(d[existing_cols], 
                                         column_config=conf, hide_index=True, use_container_width=True)
                 
                 changed = edited[edited['Action'] == True]
