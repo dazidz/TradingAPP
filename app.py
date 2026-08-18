@@ -3,8 +3,34 @@ from supabase import create_client
 import pandas as pd
 import yfinance as yf
 
-# Seiteneinstellungen
-st.set_page_config(layout="wide", page_title="Trading Dashboard")
+# Seiteneinstellungen (Muss als Erstes stehen)
+st.set_page_config(layout="wide", page_title="Trading Dashboard", page_icon="📈")
+
+# --- CUSTOM CSS FÜR EINE SCHÖNERE OPTIK ---
+st.markdown("""
+    <style>
+    /* Metrik-Karten stylen */
+    div[data-testid="metric-container"] {
+        background-color: #1e293b;
+        border: 1px solid #334155;
+        padding: 14px 18px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    div[data-testid="metric-container"] label {
+        color: #94a3b8 !important;
+        font-size: 0.85rem !important;
+    }
+    div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
+        color: #f8fafc !important;
+        font-size: 1.3rem !important;
+    }
+    /* Überschriften-Abstände verfeinern */
+    h1, h2, h3 {
+        letter-spacing: -0.5px;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # Verbindung zu Supabase
 URL = st.secrets["SUPABASE_URL"]
@@ -15,14 +41,17 @@ def check_password():
     if "password_correct" not in st.session_state: 
         st.session_state.password_correct = False
     if not st.session_state.password_correct:
-        st.title("🔐 Bitte anmelden")
-        input_pw = st.text_input("Passwort:", type="password")
-        if st.button("Anmelden", use_container_width=True):
-            if input_pw == st.secrets["APP_PASSWORD"]:
-                st.session_state.password_correct = True
-                st.rerun()
-            else: 
-                st.error("Passwort falsch.")
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown("## 🔐 Trading App Login")
+            input_pw = st.text_input("Bitte Passwort eingeben:", type="password")
+            if st.button("Anmelden", use_container_width=True):
+                if input_pw == st.secrets["APP_PASSWORD"]:
+                    st.session_state.password_correct = True
+                    st.rerun()
+                else: 
+                    st.error("Passwort falsch.")
         return False
     return True
 
@@ -41,12 +70,9 @@ def get_index_performance():
     }
     results = {}
     symbols = list(indices.values())
-    names = list(indices.keys())
     
     try:
-        # Lädt alle Indizes auf einmal – das ist stabiler bei Yahoo Finance
         data = yf.download(symbols, period="5d", interval="1d", progress=False)['Close']
-        
         for name, symbol in indices.items():
             try:
                 series = data[symbol].dropna() if isinstance(data, pd.DataFrame) else data.dropna()
@@ -105,7 +131,8 @@ def get_watchlist_performance():
 # --- HAUPTPROGRAMM ---
 if check_password():
     st.title("📈 Trading Dashboard")
-    st.write("Willkommen zurück! Hier ist dein Marktüberblick und die Performance deiner Watchlist.")
+    st.markdown("Übersicht der globalen Leitindizes und der Performance deiner Watchlist.")
+    st.markdown("")
     
     # Indizes in 4er-Spalten anzeigen (über zwei Zeilen)
     index_data = get_index_performance()
@@ -117,31 +144,28 @@ if check_password():
         for i in range(4):
             k = keys[i]
             val = index_data[k]
-            price_val = val['price']
-            pct_val = val['pct']
-            
             cols1[i].metric(
                 label=k, 
-                value=f"{price_val:,.2f}" if price_val > 0 else "Lade Fehler", 
-                delta=f"{pct_val:.2f}%" if price_val > 0 else "--"
+                value=f"{val['price']:,.2f}" if val['price'] > 0 else "N/A", 
+                delta=f"{val['pct']:.2f}%" if val['price'] > 0 else "--"
             )
             
+        st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
+        
         # Zeile 2
         cols2 = st.columns(4)
         for i in range(4):
             k = keys[i+4]
             val = index_data[k]
-            price_val = val['price']
-            pct_val = val['pct']
-            
             cols2[i].metric(
                 label=k, 
-                value=f"{price_val:,.2f}" if price_val > 0 else "Lade Fehler", 
-                delta=f"{pct_val:.2f}%" if price_val > 0 else "--"
+                value=f"{val['price']:,.2f}" if val['price'] > 0 else "N/A", 
+                delta=f"{val['pct']:.2f}%" if val['price'] > 0 else "--"
             )
     
+    st.markdown("<br>", unsafe_allow_html=True)
     st.divider()
-    st.subheader("🏆 Watchlist: Top 10 Gewinner & Verlierer des Tages")
+    st.markdown("### 🏆 Watchlist-Performance")
 
     df_perf = get_watchlist_performance()
 
@@ -161,7 +185,7 @@ if check_password():
         }
 
         with col_win:
-            st.markdown("### 🟢 Top 10 Gewinner")
+            st.markdown("#### 🟢 Top 10 Gewinner")
             st.dataframe(
                 top_gewinner[['Firma', 'Chart', 'Aktuell', 'Tageschange (%)']],
                 column_config=conf,
@@ -170,7 +194,7 @@ if check_password():
             )
 
         with col_loss:
-            st.markdown("### 🔴 Top 10 Verlierer")
+            st.markdown("#### 🔴 Top 10 Verlierer")
             st.dataframe(
                 top_verlierer[['Firma', 'Chart', 'Aktuell', 'Tageschange (%)']],
                 column_config=conf,
