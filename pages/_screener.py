@@ -65,22 +65,34 @@ try:
         def show_table(df_subset, is_fav_view=False, is_total_view=False):
             d = df_subset.copy()
             d['Action'] = False
+            
+            if is_total_view:
+                # Füge für die Gesamtliste ganz vorne die Stern-Spalte ein
+                d['⭐'] = d['status'].apply(lambda x: "⭐" if x == 'favorite' else "")
+                cols = ['⭐', 'Action', 'company_name', 'Chart', 'sector', 'Performance (%)', 'entry_price']
+            else:
+                cols = ['Action', 'company_name', 'Chart', 'sector', 'Performance (%)', 'entry_price']
+
             conf = {
+                "⭐": st.column_config.TextColumn("⭐", width="small"),
                 "company_name": st.column_config.TextColumn("Firma", disabled=True),
                 "Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Öffnen"),
                 "Performance (%)": st.column_config.NumberColumn(format="%.2f%%"),
                 "Action": st.column_config.CheckboxColumn("Favorit" if not is_fav_view else "Entfernen", default=False)
             }
-            cols = ['Action', 'company_name', 'Chart', 'sector', 'Performance (%)', 'entry_price']
+            
             existing_cols = [c for c in cols if c in d.columns]
             edited = st.data_editor(d[existing_cols], column_config=conf, hide_index=True, use_container_width=True)
             
             changed = edited[edited['Action'] == True]
             if not changed.empty:
-                for _, row in changed.iterrows():
-                    target_id = df_subset[df_subset['Chart'] == row['Chart']]['id'].iloc[0]
-                    if is_fav_view: supabase.table("signals").delete().eq("id", target_id).execute()
-                    else: supabase.table("signals").update({"status": "favorite"}).eq("id", target_id).execute()
+                for _, row in edited[edited['Action'] == True].iterrows():
+                    # Finde das passende ID-Feld über den Chart-Link oder Firmennamen
+                    target_id = df_subset[df_subset['company_name'] == row['company_name']]['id'].iloc[0]
+                    if is_fav_view: 
+                        supabase.table("signals").delete().eq("id", target_id).execute()
+                    else: 
+                        supabase.table("signals").update({"status": "favorite"}).eq("id", target_id).execute()
                     st.rerun()
 
         with tab_favs: show_table(df[df['status'] == 'favorite'], is_fav_view=True)
