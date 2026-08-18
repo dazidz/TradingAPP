@@ -26,7 +26,7 @@ def check_password():
         return False
     return True
 
-# Daten für die wichtigsten Indizes laden (exakt 8 Indizes)
+# Robuster Sammel-Download für alle Indizes gleichzeitig
 @st.cache_data(ttl=600)
 def get_index_performance():
     indices = {
@@ -40,16 +40,29 @@ def get_index_performance():
         "KOSPI": "^KS11"
     }
     results = {}
-    for name, symbol in indices.items():
-        try:
-            hist = yf.Ticker(symbol).history(period="2d")
-            if len(hist) >= 2:
-                prev_close = hist['Close'].iloc[-2]
-                current = hist['Close'].iloc[-1]
-                pct = ((current - prev_close) / prev_close) * 100
-                results[name] = {"price": round(float(current), 2), "pct": round(float(pct), 2)}
-        except:
+    symbols = list(indices.values())
+    names = list(indices.keys())
+    
+    try:
+        # Lädt alle Indizes auf einmal – das ist stabiler bei Yahoo Finance
+        data = yf.download(symbols, period="5d", interval="1d", progress=False)['Close']
+        
+        for name, symbol in indices.items():
+            try:
+                series = data[symbol].dropna() if isinstance(data, pd.DataFrame) else data.dropna()
+                if len(series) >= 2:
+                    prev_close = float(series.iloc[-2])
+                    current = float(series.iloc[-1])
+                    pct = ((current - prev_close) / prev_close) * 100
+                    results[name] = {"price": current, "pct": pct}
+                else:
+                    results[name] = {"price": 0.0, "pct": 0.0}
+            except:
+                results[name] = {"price": 0.0, "pct": 0.0}
+    except:
+        for name in indices.keys():
             results[name] = {"price": 0.0, "pct": 0.0}
+            
     return results
 
 # Daten für Watchlist-Performance laden
@@ -62,7 +75,7 @@ def get_watchlist_performance():
             return pd.DataFrame()
         
         tickers = df['ticker'].tolist()
-        data = yf.download(tickers, period="2d", interval="1d", progress=False)['Close']
+        data = yf.download(tickers, period="5d", interval="1d", progress=False)['Close']
         
         performances = []
         for _, row in df.iterrows():
@@ -102,21 +115,29 @@ if check_password():
         # Zeile 1
         cols1 = st.columns(4)
         for i in range(4):
-            val = index_data[keys[i]]
+            k = keys[i]
+            val = index_data[k]
+            price_val = val['price']
+            pct_val = val['pct']
+            
             cols1[i].metric(
-                label=keys[i], 
-                value=f"{val['price']:,.2f}", 
-                delta=f"{val['pct']}%"
+                label=k, 
+                value=f"{price_val:,.2f}" if price_val > 0 else "Lade Fehler", 
+                delta=f"{pct_val:.2f}%" if price_val > 0 else "--"
             )
             
         # Zeile 2
         cols2 = st.columns(4)
         for i in range(4):
-            val = index_data[keys[i+4]]
+            k = keys[i+4]
+            val = index_data[k]
+            price_val = val['price']
+            pct_val = val['pct']
+            
             cols2[i].metric(
-                label=keys[i+4], 
-                value=f"{val['price']:,.2f}", 
-                delta=f"{val['pct']}%"
+                label=k, 
+                value=f"{price_val:,.2f}" if price_val > 0 else "Lade Fehler", 
+                delta=f"{pct_val:.2f}%" if price_val > 0 else "--"
             )
     
     st.divider()
