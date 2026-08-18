@@ -85,25 +85,30 @@ try:
             
             existing_cols = [c for c in cols if c in d.columns]
             
-            # Performance-Auswertung über die gesamte Liste
+            # Nur Aktien unter 3% Performance filtern und Performance-Schnitt anzeigen
             if not d.empty and 'Performance (%)' in d.columns:
-                avg_perf = d['Performance (%)'].mean()
-                st.metric("Ø Performance der Liste", f"{avg_perf:.2f}%")
+                filtered_perf = d[d['Performance (%)'] < 3]['Performance (%)']
+                avg_perf = filtered_perf.mean() if not filtered_perf.empty else 0.0
+                st.metric("Ø Performance (Aktien < 3%)", f"{avg_perf:.2f}%")
 
-            # Diagramm ÜBER der Tabelle (Horizontale Balken, nur Aktien < 3% Performance)
-            if not d.empty and 'Performance (%)' in d.columns:
+            # Sektoren-Diagramm (Horizontale Balken, Filter < 3% Performance) über der Tabelle
+            if not d.empty and 'sector' in d.columns and 'Performance (%)' in d.columns:
                 chart_data = d[(d['Performance (%)'] < 3) & (d['Performance (%)'].notnull())]
                 if not chart_data.empty:
-                    c = alt.Chart(chart_data).mark_bar().encode(
-                        x=alt.X('Performance (%):Q', title='Performance (%)'),
-                        y=alt.Y('company_name:N', sort='-x', title='Firma'),
+                    # Aggregation nach Sektor (z.B. Durchschnitts-Performance oder Anzahl pro Sektor)
+                    sector_grouped = chart_data.groupby('sector').agg({'Performance (%)': 'mean', 'company_name': 'count'}).reset_index()
+                    sector_grouped.rename(columns={'company_name': 'Anzahl'}, inplace=True)
+                    
+                    c = alt.Chart(sector_grouped).mark_bar().encode(
+                        x=alt.X('Performance (%):Q', title='Ø Performance (%)'),
+                        y=alt.Y('sector:N', sort='-x', title='Sektor'),
                         color=alt.condition(
                             alt.datum['Performance (%)'] > 0,
                             alt.value('#22c55e'),  # Grün
                             alt.value('#ef4444')   # Rot
                         ),
-                        tooltip=['company_name', 'Performance (%)', 'sector']
-                    ).properties(height=max(200, len(chart_data) * 20))
+                        tooltip=['sector', 'Anzahl', 'Performance (%)']
+                    ).properties(height=200)
                     st.altair_chart(c, use_container_width=True)
 
             edited = st.data_editor(d[existing_cols], column_config=conf, hide_index=True, use_container_width=True)
