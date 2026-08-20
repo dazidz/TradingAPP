@@ -68,46 +68,45 @@ try:
             
             if is_total_view:
                 d['⭐'] = d['status'].apply(lambda x: "⭐" if x == 'favorite' else "")
-                cols = ['⭐', 'Action', 'company_name', 'Chart', 'sector', 'Performance (%)', 'current_price', 'entry_price', 'candle_time']
+                cols = ['⭐', 'Action', 'company_name', 'Chart', 'Performance (%)', 'candle_time', 'entry_price', 'gettex_ticker']
             else:
-                cols = ['Action', 'company_name', 'Chart', 'sector', 'Performance (%)', 'current_price', 'entry_price', 'candle_time']
+                cols = ['Action', 'company_name', 'Chart', 'Performance (%)', 'candle_time', 'entry_price', 'gettex_ticker']
 
             conf = {
                 "⭐": st.column_config.TextColumn("⭐", width="small"),
                 "company_name": st.column_config.TextColumn("Firma", disabled=True),
-                "Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Öffnen"),
-                "Performance (%)": st.column_config.NumberColumn(format="%.2f%%"),
-                "current_price": st.column_config.NumberColumn("Aktuell", format="€%.2f"),
-                "entry_price": st.column_config.NumberColumn("Entry", format="€%.2f"),
+                "Chart": st.column_config.LinkColumn("Link", display_text="📈 Öffnen"),
+                "Performance (%)": st.column_config.NumberColumn("Performance", format="%.2f%%"),
                 "candle_time": st.column_config.TextColumn("Candle Time"),
+                "entry_price": st.column_config.NumberColumn("Entry", format="€%.2f"),
+                "gettex_ticker": st.column_config.TextColumn("Gettex Ticker", disabled=True),
                 "Action": st.column_config.CheckboxColumn("Favorit" if not is_fav_view else "Entfernen", default=False)
             }
             
             existing_cols = [c for c in cols if c in d.columns]
             
-            # Performance-Auswertung über die angezeigte Liste oben drüber
+            # --- DIAGRAMM VOR DER TABELLE ---
+            if not d.empty and 'sector' in d.columns and 'Performance (%)' in d.columns:
+                chart_data = d[(d['Performance (%)'] < 3.0) & (d['Performance (%)'].notnull())]
+                if not chart_data.empty:
+                    sector_counts = chart_data.groupby('sector').size().reset_index(name='Anzahl')
+                    sector_counts['Anzahl'] = sector_counts['Anzahl'].astype(int)
+                    sector_counts = sector_counts.sort_values(by='Anzahl', ascending=False).head(10)
+                    
+                    c = alt.Chart(sector_counts).mark_bar(color='#3b82f6').encode(
+                        x=alt.X('Anzahl:Q', title='Anzahl Signale / Aktien (< 3% Perf.)', axis=alt.Axis(format='d', allowDecimals=False)),
+                        y=alt.Y('sector:N', sort='-x', title='Sektor'),
+                        tooltip=['sector', 'Anzahl']
+                    ).properties(height=250)
+                    st.altair_chart(c, use_container_width=True)
+
+            # Performance-Auswertung über die angezeigte Liste
             if not d.empty and 'Performance (%)' in d.columns:
                 avg_perf = d['Performance (%)'].mean()
                 st.metric("Ø Performance der Liste", f"{avg_perf:.2f}%")
 
             edited = st.data_editor(d[existing_cols], column_config=conf, hide_index=True, use_container_width=True)
             
-            # Diagramm / Visualisierung unter der Tabelle
-            if not d.empty and 'sector' in d.columns and 'Performance (%)' in d.columns:
-                chart_data = d.dropna(subset=['Performance (%)'])
-                if not chart_data.empty:
-                    c = alt.Chart(chart_data).mark_bar().encode(
-                        x=alt.X('company_name:N', sort='-y', title='Firma'),
-                        y=alt.Y('Performance (%):Q', title='Performance (%)'),
-                        color=alt.condition(
-                            alt.datum['Performance (%)'] > 0,
-                            alt.value('#22c55e'),  # Grün
-                            alt.value('#ef4444')   # Rot
-                        ),
-                        tooltip=['company_name', 'Performance (%)', 'sector']
-                    ).properties(height=250)
-                    st.altair_chart(c, use_container_width=True)
-
             # Batch-Update für Favoriten (schnell)
             changed_rows = edited[edited['Action'] == True]
             if not changed_rows.empty:
