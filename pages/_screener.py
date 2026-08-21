@@ -68,9 +68,9 @@ try:
             
             if is_total_view:
                 d['⭐'] = d['status'].apply(lambda x: "⭐" if x == 'favorite' else "")
-                cols = ['⭐', 'Action', 'company_name', 'Chart', 'Performance (%)', 'candle_time', 'entry_price', 'gettex_ticker']
+                cols = ['⭐', 'Action', 'company_name', 'Chart', 'Performance (%)', 'candle_time', 'sector', 'entry_price', 'gettex_ticker']
             else:
-                cols = ['Action', 'company_name', 'Chart', 'Performance (%)', 'candle_time', 'entry_price', 'gettex_ticker']
+                cols = ['Action', 'company_name', 'Chart', 'Performance (%)', 'candle_time', 'sector', 'entry_price', 'gettex_ticker']
 
             conf = {
                 "⭐": st.column_config.TextColumn("⭐", width="small"),
@@ -78,6 +78,7 @@ try:
                 "Chart": st.column_config.LinkColumn("Link", display_text="📈 Öffnen"),
                 "Performance (%)": st.column_config.NumberColumn("Performance", format="%.2f%%"),
                 "candle_time": st.column_config.TextColumn("Candle Time"),
+                "sector": st.column_config.TextColumn("Sektor", disabled=True),
                 "entry_price": st.column_config.NumberColumn("Entry", format="€%.2f"),
                 "gettex_ticker": st.column_config.TextColumn("Gettex Ticker", disabled=True),
                 "Action": st.column_config.CheckboxColumn("Favorit" if not is_fav_view else "Entfernen", default=False)
