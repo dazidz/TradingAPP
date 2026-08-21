@@ -86,8 +86,10 @@ try:
         df['Performance (%)'] = ((df['current_price'] - df['entry_price_num']) / df['entry_price_num']) * 100
         df['EMA20_Dist_%'] = df['ticker'].map(ema_stats)
 
-        # Gesamtzahl pro Sektor über die GESAMTE Datenbank/Watchlist (unabhängig vom Tab)
-        total_per_sector_global = df.groupby('sector').size()
+        # Globale Verteilung über die gesamte Watchlist ermitteln (in Prozent)
+        total_count_global = len(df)
+        sector_counts_global = df.groupby('sector').size()
+        sector_share_global = (sector_counts_global / total_count_global) * 100
 
         tab_favs, tab_ueber, tab_unter, tab_gesamt = st.tabs(["⭐ Favoriten", "EMA20 🟢", "EMA20 🔴", "📁 Gesamtliste"])
 
@@ -120,22 +122,43 @@ try:
             
             existing_cols = [c for c in cols if c in d.columns]
             
-            # --- DIAGRAMM MIT GLOBALER SEKTOR-BASIS ---
+            # --- DIAGRAMM: RELATIVES VERHÄLTNIS (Sektor-Anteil in Signalen vs. Sektor-Anteil in Gesamt-Watchlist) ---
             if 'sector' in d.columns and 'Performance (%)' in d.columns:
                 chart_data = d[(d['Performance (%)'] < 3.0) & (d['Performance (%)'].notnull())]
                 if not chart_data.empty and 'sector' in chart_data.columns:
-                    filtered_per_sector = chart_data.groupby('sector').size()
+                    total_subset_count = len(chart_data)
+                    sector_counts_subset = chart_data.groupby('sector').size()
                     
-                    # Nutzung von total_per_sector_global statt nur der Teilliste
-                    sector_df = pd.DataFrame({'Gesamt': total_per_sector_global, 'Treffer': filtered_per_sector}).dropna()
-                    sector_df['Anteil_%'] = (sector_df['Treffer'] / sector_df['Gesamt']) * 100
-                    sector_df = sector_df.reset_index().sort_values(by='Anteil_%', ascending=False).head(10)
+                    # Anteil des Sektors innerhalb der aktuellen gefilterten Signale (%)
+                    sector_share_subset = (sector_counts_subset / total_subset_count) * 100
+                    
+                    # Zusammenführen in ein DataFrame
+                    sector_df = pd.DataFrame({
+                        'Anteil_Signale': sector_share_subset,
+                        'Anteil_Watchlist': sector_share_global,
+                        'Treffer': sector_counts_subset,
+                        'Gesamt_WL': sector_counts_global
+                    }).dropna()
+                    
+                    # Überrepräsentations-Faktor berechnen: (Anteil Signale / Anteil Watchlist)
+                    # Ist der Wert > 1.0, taucht der Sektor in den Signalen prozentual öfter auf, als er in der Watchlist vertreten ist.
+                    sector_df['Faktor'] = sector_df['Anteil_Signale'] / sector_df['Anteil_Watchlist']
+                    
+                    # Nach dem höchsten Faktor sortieren (Top 10)
+                    sector_df = sector_df.reset_index().sort_values(by='Faktor', ascending=False).head(10)
                     
                     if not sector_df.empty:
                         c = alt.Chart(sector_df).mark_bar(color='#3b82f6').encode(
-                            x=alt.X('Anteil_%:Q', title='Anteil der Signale an der Gesamt-Watchlist (%)', axis=alt.Axis(tickMinStep=1)),
+                            x=alt.X('Faktor:Q', title='Überrepräsentations-Faktor (Signale vs. Watchlist-Anteil)', axis=alt.Axis(format='.1f')),
                             y=alt.Y('sector:N', sort='-x', title='Sektor'),
-                            tooltip=['sector', alt.Tooltip('Anteil_%:Q', format='.1f', title='Anteil (%)'), 'Treffer', 'Gesamt']
+                            tooltip=[
+                                'sector', 
+                                alt.Tooltip('Faktor:Q', format='.2f', title='Faktor'),
+                                alt.Tooltip('Anteil_Signale:Q', format='.1f', title='Anteil Signale (%)'),
+                                alt.Tooltip('Anteil_Watchlist:Q', format='.1f', title='Anteil Watchlist (%)'),
+                                'Treffer', 
+                                'Gesamt_WL'
+                            ]
                         ).properties(height=250)
                         st.altair_chart(c, use_container_width=True)
 
