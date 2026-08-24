@@ -56,12 +56,16 @@ def get_ema_stats_bulk(tickers):
 
 # --- SCREENER LOGIK ---
 try:
+    # 1. Signale laden
     response = supabase.table("signals").select("*").execute()
     df = pd.DataFrame(response.data)
 
+    # 2. Favoriten aus der separaten Tabelle laden
+    fav_response = supabase.table("favorites").select("ticker").execute()
+    fav_tickers = [row['ticker'] for row in fav_response.data] if fav_response.data else []
+
     if not df.empty:
-        if 'status' not in df.columns: df['status'] = 'signal'
-        df = df.drop_duplicates(subset=['ticker', 'signal_type', 'status'], keep='last').reset_index(drop=True)
+        df = df.drop_duplicates(subset=['ticker', 'signal_type'], keep='last').reset_index(drop=True)
         
         if 'meta_data' in df.columns:
             df['meta_data'] = df['meta_data'].apply(
@@ -72,6 +76,9 @@ try:
 
         for col in ['gettex_ticker', 'entry_price', 'sector', 'company_name', 'candle_time', 'ticker']:
             if col not in df.columns: df[col] = ""
+
+        # Status direkt über die Favoriten-Tabelle setzen
+        df['is_favorite'] = df['ticker'].isin(fav_tickers)
 
         df['Chart'] = df['gettex_ticker'].apply(lambda x: f"https://www.tradingview.com/chart/?symbol={x}" if x else "")
         
@@ -86,7 +93,7 @@ try:
         df['Performance (%)'] = ((df['current_price'] - df['entry_price_num']) / df['entry_price_num']) * 100
         df['EMA20_Dist_%'] = df['ticker'].map(ema_stats)
 
-        # Globale Verteilung über die gesamte Watchlist ermitteln (in Prozent)
+        # Globale Sektor-Anteile für das Diagramm
         total_count_global = len(df)
         sector_counts_global = df.groupby('sector').size()
         sector_share_global = (sector_counts_global / total_count_global) * 100
@@ -102,7 +109,7 @@ try:
             d['Action'] = False
             
             if is_total_view:
-                d['⭐'] = d['status'].apply(lambda x: "⭐" if x == 'favorite' else "")
+                d['⭐'] = d['is_favorite'].apply(lambda x: "⭐" if x else "")
                 cols = ['⭐', 'Action', 'company_name', 'Chart', 'Performance (%)', 'candle_time', 'sector', 'exchange', 'entry_price', 'gettex_ticker']
             else:
                 cols = ['Action', 'company_name', 'Chart', 'Performance (%)', 'candle_time', 'sector', 'exchange', 'entry_price', 'gettex_ticker']
@@ -117,22 +124,20 @@ try:
                 "exchange": st.column_config.TextColumn("Börse", disabled=True),
                 "entry_price": st.column_config.NumberColumn("Entry", format="€%.2f"),
                 "gettex_ticker": st.column_config.TextColumn("Gettex Ticker", disabled=True),
-                "Action": st.column_config.CheckboxColumn("Favorit" if not is_fav_view else "Entfernen", default=False)
+                "Action": st.column_config.CheckboxColumn("Entfernen" if is_fav_view else "Favorit", default=False)
             }
             
             existing_cols = [c for c in cols if c in d.columns]
             
-            # --- DIAGRAMM: RELATIVES VERHÄLTNIS (Sektor-Anteil in Signalen vs. Sektor-Anteil in Gesamt-Watchlist) ---
+            # --- DIAGRAMM ---
             if 'sector' in d.columns and 'Performance (%)' in d.columns:
                 chart_data = d[(d['Performance (%)'] < 3.0) & (d['Performance (%)'].notnull())]
                 if not chart_data.empty and 'sector' in chart_data.columns:
                     total_subset_count = len(chart_data)
                     sector_counts_subset = chart_data.groupby('sector').size()
                     
-                    # Anteil des Sektors innerhalb der aktuellen gefilterten Signale (%)
                     sector_share_subset = (sector_counts_subset / total_subset_count) * 100
                     
-                    # Zusammenführen in ein DataFrame
                     sector_df = pd.DataFrame({
                         'Anteil_Signale': sector_share_subset,
                         'Anteil_Watchlist': sector_share_global,
@@ -140,11 +145,7 @@ try:
                         'Gesamt_WL': sector_counts_global
                     }).dropna()
                     
-                    # Überrepräsentations-Faktor berechnen: (Anteil Signale / Anteil Watchlist)
-                    # Ist der Wert > 1.0, taucht der Sektor in den Signalen prozentual öfter auf, als er in der Watchlist vertreten ist.
                     sector_df['Faktor'] = sector_df['Anteil_Signale'] / sector_df['Anteil_Watchlist']
-                    
-                    # Nach dem höchsten Faktor sortieren (Top 10)
                     sector_df = sector_df.reset_index().sort_values(by='Faktor', ascending=False).head(10)
                     
                     if not sector_df.empty:
@@ -168,19 +169,21 @@ try:
 
             edited = st.data_editor(d[existing_cols], column_config=conf, hide_index=True, use_container_width=True)
             
+            # --- FAVORITEN SPEICHERN / LÖSCHEN IN SEPARATER TABELLE ---
             changed_rows = edited[edited['Action'] == True]
             if not changed_rows.empty:
-                changed_names = changed_rows['company_name'].tolist()
-                target_ids = df_subset[df_subset['company_name'].isin(changed_names)]['id'].tolist()
-                
-                if target_ids:
+                for _, row in changed_rows.iterrows():
+                    t_symbol = df_subset.loc[df_subset['company_name'] == row['company_name'], 'ticker'].values[0]
+                    
                     if is_fav_view:
-                        supabase.table("signals").delete().in_("id", target_ids).execute()
+                        # Aus Favoriten-Tabelle löschen
+                        supabase.table("favorites").delete().eq("ticker", t_symbol).execute()
                     else:
-                        supabase.table("signals").update({"status": "favorite"}).in_("id", target_ids).execute()
-                    st.rerun()
+                        # In Favoriten-Tabelle hinzufügen (upsert ignoriert Duplikate, falls schon drin)
+                        supabase.table("favorites").upsert({"ticker": t_symbol}, on_conflict="ticker").execute()
+                st.rerun()
 
-        with tab_favs: show_table(df[df['status'] == 'favorite'], is_fav_view=True)
+        with tab_favs: show_table(df[df['is_favorite'] == True], is_fav_view=True)
         with tab_ueber: show_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'].fillna(-1) >= 0)])
         with tab_unter: show_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'].fillna(0) < 0)])
         with tab_gesamt: show_table(df, is_total_view=True)
