@@ -60,7 +60,11 @@ try:
     response = supabase.table("signals").select("*").execute()
     df = pd.DataFrame(response.data)
 
-    # 2. Favoriten aus der separaten Tabelle laden
+    # 2. Historie laden
+    history_response = supabase.table("signal_history").select("*").order("closed_at", desc=True).execute()
+    hist_df = pd.DataFrame(history_response.data)
+
+    # 3. Favoriten aus der separaten Tabelle laden
     fav_response = supabase.table("favorites").select("ticker").execute()
     fav_tickers = [row['ticker'] for row in fav_response.data] if fav_response.data else []
 
@@ -98,7 +102,7 @@ try:
         sector_counts_global = df.groupby('sector').size()
         sector_share_global = (sector_counts_global / total_count_global) * 100
 
-        tab_favs, tab_ueber, tab_unter, tab_gesamt = st.tabs(["⭐ Favoriten", "EMA20 🟢", "EMA20 🔴", "📁 Gesamtliste"])
+        tab_favs, tab_ueber, tab_unter, tab_gesamt, tab_historie = st.tabs(["⭐ Favoriten", "EMA20 🟢", "EMA20 🔴", "📁 Gesamtliste", "📜 Historie"])
 
         def show_table(df_subset, is_fav_view=False, is_total_view=False):
             d = df_subset.copy()
@@ -191,6 +195,42 @@ try:
         with tab_ueber: show_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'].fillna(-1) >= 0)])
         with tab_unter: show_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'].fillna(0) < 0)])
         with tab_gesamt: show_table(df, is_total_view=True)
+
+        # --- NEUER TAB: HISTORIE & PERFORMANCE ---
+        with tab_historie:
+            st.subheader("📜 Abgeschlossene Signale & Performance-Historie")
+            
+            if hist_df.empty:
+                st.info("Noch keine archivierten Signale in der Historie vorhanden. Sobald Signale nach 5 Tagen ablaufen, erscheinen sie hier automatisch.")
+            else:
+                total_trades = len(hist_df)
+                avg_perf_hist = hist_df['performance_pct'].mean() if 'performance_pct' in hist_df.columns else 0.0
+                win_trades = len(hist_df[hist_df['performance_pct'] > 0])
+                win_rate = (win_trades / total_trades) * 100 if total_trades > 0 else 0.0
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Abgeschlossene Trades", total_trades)
+                col2.metric("Ø Performance (Historie)", f"{avg_perf_hist:.2f}%")
+                col3.metric("Win-Rate", f"{win_rate:.1f}%")
+                
+                st.markdown("---")
+                
+                hist_cols = ['company_name', 'ticker', 'signal_type', 'sector', 'entry_price', 'exit_price', 'performance_pct', 'exit_reason', 'closed_at']
+                existing_hist_cols = [c for c in hist_cols if c in hist_df.columns]
+                
+                hist_conf = {
+                    "company_name": st.column_config.TextColumn("Firma", disabled=True),
+                    "ticker": st.column_config.TextColumn("Ticker", disabled=True),
+                    "signal_type": st.column_config.TextColumn("Signal", disabled=True),
+                    "sector": st.column_config.TextColumn("Sektor", disabled=True),
+                    "entry_price": st.column_config.NumberColumn("Entry", format="€%.2f"),
+                    "exit_price": st.column_config.NumberColumn("Exit", format="€%.2f"),
+                    "performance_pct": st.column_config.NumberColumn("Performance", format="%.2f%%"),
+                    "exit_reason": st.column_config.TextColumn("Grund", disabled=True),
+                    "closed_at": st.column_config.TextColumn("Geschlossen am", disabled=True)
+                }
+                
+                st.dataframe(hist_df[existing_hist_cols], column_config=hist_conf, hide_index=True, use_container_width=True)
 
     else:
         st.info("Keine Daten in der Supabase-Datenbank vorhanden.")

@@ -129,7 +129,7 @@ try:
             
             existing_cols = [c for c in cols if c in d.columns]
             
-            # --- DIAGRAMM ---
+            # --- DIAGRAMM (Kombinierter Score) ---
             if 'sector' in d.columns and 'Performance (%)' in d.columns:
                 chart_data = d[(d['Performance (%)'] < 3.0) & (d['Performance (%)'].notnull())]
                 if not chart_data.empty and 'sector' in chart_data.columns:
@@ -145,16 +145,20 @@ try:
                         'Gesamt_WL': sector_counts_global
                     }).dropna()
                     
-                    sector_df['Faktor'] = sector_df['Anteil_Signale'] / sector_df['Anteil_Watchlist']
-                    sector_df = sector_df.reset_index().sort_values(by='Faktor', ascending=False).head(10)
+                    # Fairer Score: Verhindert das Explodieren kleiner Nischen-Sektoren durch Dämpfung
+                    sector_df['Score'] = sector_df['Treffer'] * (
+                        (sector_df['Anteil_Signale'] + 1) / (sector_df['Anteil_Watchlist'] + 1)
+                    )
+                    
+                    sector_df = sector_df.reset_index().sort_values(by='Score', ascending=False).head(10)
                     
                     if not sector_df.empty:
                         c = alt.Chart(sector_df).mark_bar(color='#3b82f6').encode(
-                            x=alt.X('Faktor:Q', title='Überrepräsentations-Faktor (Signale vs. Watchlist-Anteil)', axis=alt.Axis(format='.1f')),
+                            x=alt.X('Score:Q', title='Sektor-Score (Treffer & Gewichtung kombiniert)', axis=alt.Axis(format='.1f')),
                             y=alt.Y('sector:N', sort='-x', title='Sektor'),
                             tooltip=[
                                 'sector', 
-                                alt.Tooltip('Faktor:Q', format='.2f', title='Faktor'),
+                                alt.Tooltip('Score:Q', format='.2f', title='Score'),
                                 alt.Tooltip('Anteil_Signale:Q', format='.1f', title='Anteil Signale (%)'),
                                 alt.Tooltip('Anteil_Watchlist:Q', format='.1f', title='Anteil Watchlist (%)'),
                                 'Treffer', 
