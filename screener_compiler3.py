@@ -237,21 +237,28 @@ try:
                 ema_status_map = get_historical_ema_status_bulk(pairs)
                 
                 hist_df['above_ema20'] = hist_df.apply(lambda r: ema_status_map.get((r.get('ticker'), str(r.get('candle_time'))), False), axis=1)
+                hist_df['is_favorite'] = hist_df['ticker'].isin(fav_tickers)
 
                 total_trades = len(hist_df)
                 avg_perf_hist = hist_df['performance_pct'].mean() if 'performance_pct' in hist_df.columns else 0.0
                 win_trades = len(hist_df[hist_df['performance_pct'] > 0])
                 win_rate = (win_trades / total_trades) * 100 if total_trades > 0 else 0.0
                 
-                col1, col2, col3 = st.columns(3)
+                # Favoriten-Metriken für die Top-Metrik-Karten vorbereiten
+                sub_favs_hist = hist_df[hist_df['is_favorite'] == True]
+                fav_count = len(sub_favs_hist)
+                fav_avg_perf = sub_favs_hist['performance_pct'].mean() if fav_count > 0 and 'performance_pct' in sub_favs_hist.columns else 0.0
+
+                col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Abgeschlossene Trades", total_trades)
-                col2.metric("Ø Performance (Historie)", f"{avg_perf_hist:.2f}%")
-                col3.metric("Win-Rate", f"{win_rate:.1f}%")
+                col2.metric("Ø Performance (Gesamt)", f"{avg_perf_hist:.2f}%")
+                col3.metric("Ø Performance (⭐ Favs)", f"{fav_avg_perf:.2f}%", f"{fav_count} Trades")
+                col4.metric("Win-Rate (Gesamt)", f"{win_rate:.1f}%")
                 
                 st.markdown("---")
                 st.subheader("🎯 Erweiterte Performance-Auswertungen")
 
-                # Sub-Gruppen berechnen (jetzt inklusive Unter EMA20 & Ohne Elite)
+                # Sub-Gruppen berechnen
                 sub_above_ema = hist_df[hist_df['above_ema20'] == True]
                 sub_below_ema = hist_df[hist_df['above_ema20'] == False]
                 sub_elite = hist_df[hist_df['signal_type'] == 'ELITE']
@@ -272,6 +279,7 @@ try:
                     }
 
                 eval_data = [
+                    get_metrics_dict(sub_favs_hist, "⭐ Nur Favoriten"),
                     get_metrics_dict(sub_above_ema, "Über EMA20 (Gesamt)"),
                     get_metrics_dict(sub_below_ema, "Unter EMA20 (Gesamt)"),
                     get_metrics_dict(sub_elite, "Elite Signale (Gesamt)"),
