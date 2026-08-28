@@ -12,13 +12,21 @@ if "password_correct" not in st.session_state or not st.session_state.password_c
 
 st.title("📊 Ticker-Screener")
 
+# --- SEITENBAR & CACHE CONTROL ---
+with st.sidebar:
+    st.markdown("### ⚙️ Steuerung")
+    if st.button("🔄 Cache leeren & Aktualisieren", use_container_width=True):
+        st.cache_data.clear()
+        st.success("Cache erfolgreich geleert!")
+        st.rerun()
+
 # Verbindung zu Supabase
 URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(URL, KEY)
 
-# Caching für Daten & Exchange-Informationen
-@st.cache_data(ttl=1800)
+# Caching für Daten & Exchange-Informationen (auf 1 Stunde / 3600s angepasst)
+@st.cache_data(ttl=3600)
 def get_stock_meta(tickers):
     prices = {}
     exchanges = {}
@@ -36,7 +44,7 @@ def get_stock_meta(tickers):
             continue
     return prices, exchanges
 
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=3600)
 def get_ema_stats_bulk(tickers):
     stats = {}
     if not tickers: return stats
@@ -149,7 +157,7 @@ try:
                         'Gesamt_WL': sector_counts_global
                     }).dropna()
                     
-                    # Fairer Score: Verhindert das Explodieren kleiner Nischen-Sektoren durch Dämpfung
+                    # Fairer Score
                     sector_df['Score'] = sector_df['Treffer'] * (
                         (sector_df['Anteil_Signale'] + 1) / (sector_df['Anteil_Watchlist'] + 1)
                     )
@@ -184,10 +192,8 @@ try:
                     t_symbol = df_subset.loc[df_subset['company_name'] == row['company_name'], 'ticker'].values[0]
                     
                     if is_fav_view:
-                        # Aus Favoriten-Tabelle löschen
                         supabase.table("favorites").delete().eq("ticker", t_symbol).execute()
                     else:
-                        # In Favoriten-Tabelle hinzufügen (upsert ignoriert Duplikate, falls schon drin)
                         supabase.table("favorites").upsert({"ticker": t_symbol}, on_conflict="ticker").execute()
                 st.rerun()
 

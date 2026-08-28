@@ -38,7 +38,7 @@ def check_password():
         return False
     return True
 
-# Robuste Index-Daten
+# Robuste Index-Daten (MultiIndex-sicher)
 @st.cache_data(ttl=60)
 def get_index_performance():
     indices = {
@@ -46,14 +46,30 @@ def get_index_performance():
         "Dow Jones": "^DJI", "Russell 2000": "^RUT", "Nikkei 225": "^N225", "KOSPI": "^KS11"
     }
     results = {}
-    data = yf.download(list(indices.values()), period="2d", group_by='ticker', progress=False)
+    try:
+        data = yf.download(list(indices.values()), period="2d", group_by='ticker', progress=False, multi_level_index=False)
+    except Exception:
+        data = yf.download(list(indices.values()), period="2d", group_by='ticker', progress=False)
+
     for name, symbol in indices.items():
         try:
-            df_idx = data[symbol]
-            current = float(df_idx['Close'].iloc[-1])
-            prev = float(df_idx['Close'].iloc[-2])
-            results[name] = {"price": current, "pct": ((current - prev) / prev) * 100}
-        except: results[name] = {"price": 0.0, "pct": 0.0}
+            if isinstance(data.columns, pd.MultiIndex):
+                df_idx = data[symbol]
+            else:
+                df_idx = data
+            
+            # Falls DataFrame einzeln oder gruppiert vorliegt
+            close_series = df_idx['Close'][symbol] if symbol in df_idx.columns else df_idx['Close']
+            close_series = close_series.dropna()
+            
+            if len(close_series) >= 2:
+                current = float(close_series.iloc[-1])
+                prev = float(close_series.iloc[-2])
+                results[name] = {"price": current, "pct": ((current - prev) / prev) * 100}
+            else:
+                results[name] = {"price": 0.0, "pct": 0.0}
+        except Exception:
+            results[name] = {"price": 0.0, "pct": 0.0}
     return results
 
 # Präzise Watchlist-Performance (Live gegen Vortagesschluss)
@@ -66,21 +82,24 @@ def get_watchlist_performance():
         
         performances = []
         for _, row in df.iterrows():
-            ticker = yf.Ticker(row['ticker'])
-            info = ticker.info
-            # 'currentPrice' oder 'regularMarketPrice' sind Live-Daten
-            curr = info.get('currentPrice') or info.get('regularMarketPrice')
-            prev = info.get('previousClose')
-            
-            if curr and prev:
-                performances.append({
-                    "Firma": row['company_name'],
-                    "Chart": f"https://www.tradingview.com/chart/?symbol={row['gettex_ticker']}" if row['gettex_ticker'] else f"https://www.tradingview.com/chart/?symbol={row['ticker']}",
-                    "Aktuell": round(float(curr), 2),
-                    "Tageschange (%)": round(((curr - prev) / prev) * 100, 2)
-                })
+            try:
+                ticker = yf.Ticker(row['ticker'])
+                info = ticker.info
+                curr = info.get('currentPrice') or info.get('regularMarketPrice')
+                prev = info.get('previousClose')
+                
+                if curr and prev:
+                    performances.append({
+                        "Firma": row['company_name'],
+                        "Chart": f"https://www.tradingview.com/chart/?symbol={row['gettex_ticker']}" if row['gettex_ticker'] else f"https://www.tradingview.com/chart/?symbol={row['ticker']}",
+                        "Aktuell": round(float(curr), 2),
+                        "Tageschange (%)": round(((curr - prev) / prev) * 100, 2)
+                    })
+            except Exception:
+                continue
         return pd.DataFrame(performances)
-    except: return pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
 
 # --- HAUPTPROGRAMM ---
 if check_password():
@@ -100,7 +119,7 @@ if check_password():
     st.divider()
     df_perf = get_watchlist_performance()
 
-    if not df_perf.empty:
+    if not df_perf.empty and "Tageschange (%)" in df_perf.columns:
         df_sorted = df_perf.sort_values(by="Tageschange (%)", ascending=False)
         col_win, col_loss = st.columns(2)
         
@@ -115,3 +134,5 @@ if check_password():
         with col_loss:
             st.markdown("#### 🔴 Top Verlierer")
             st.dataframe(df_sorted.tail(10).sort_values(by="Tageschange (%)"), column_config=conf, hide_index=True, use_container_width=True)
+    else:
+        st.info("Keine Watchlist-Daten verfügbar.")
