@@ -22,18 +22,23 @@ def send_telegram(ticker, price):
             print(f"❌ Telegram Fehler: {e}")
 
 def archive_and_clean_signals():
-    """Verschiebt alte Signale nach 5 Tagen in die Historie, bevor sie aus der Live-Tabelle gelöscht werden."""
-    print("📦 Prüfe auf abgelaufene Signale zum Archivieren...")
+    """Verschiebt Signale, deren Kerzen-Zeitpunkt (> 5 Tage) veraltet ist, in die Historie."""
+    print("📦 Prüfe auf abgelaufene Signale (nach candle_time) zum Archivieren...")
     try:
-        # 5 Tage Cutoff, passend zur Such-Logik im Screener
-        cutoff = (datetime.datetime.now(pytz.UTC) - datetime.timedelta(days=5)).isoformat()
+        # 5 Tage Cutoff basierend auf der echten Kerzen-Zeit
+        cutoff_dt = datetime.datetime.now(pytz.UTC) - datetime.timedelta(days=5)
+        cutoff = cutoff_dt.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + '+00:00'
         
-        # 1. Hole alle Signale, die älter als 5 Tage sind
-        old_signals = supabase.table("signals").select("*").lt("created_at", cutoff).execute()
+        print(f"🔍 Suche nach Signalen mit candle_time älter als: {cutoff}")
+        
+        # Prüfung erfolgt gegen 'candle_time' statt 'created_at'
+        old_signals = supabase.table("signals").select("*").lt("candle_time", cutoff).execute()
         
         if not old_signals.data:
             print("ℹ️ Keine Signale zum Archivieren gefunden.")
             return
+
+        print(f"📦 Gefundene alte Signale: {len(old_signals.data)}")
 
         for sig in old_signals.data:
             ticker = sig['ticker']
@@ -60,7 +65,7 @@ def archive_and_clean_signals():
                 "entry_price": entry_price,
                 "exit_price": exit_price,
                 "performance_pct": round(performance, 2),
-                "exit_reason": "Zeit-Ablauf (5 Tage)",
+                "exit_reason": "Zeit-Ablauf (5 Tage Kerzen-Alter)",
                 "created_at": sig.get('created_at'),
                 "closed_at": datetime.datetime.now(pytz.UTC).isoformat(),
                 "meta_data": sig.get('meta_data', '{}')
@@ -70,12 +75,13 @@ def archive_and_clean_signals():
             supabase.table("signal_history").insert(history_data).execute()
             print(f"📁 Archiviert: {ticker} | Einstieg: {entry_price:.2f} | Exit: {exit_price:.2f} | Perf: {performance:.2f}%")
 
-        # 2. Jetzt erst aus der aktiven 'signals'-Tabelle löschen
-        supabase.table("signals").delete().lt("created_at", cutoff).execute()
+        # Aus der aktiven 'signals'-Tabelle basierend auf candle_time löschen
+        supabase.table("signals").delete().lt("candle_time", cutoff).execute()
         print("🧹 Alte Signale erfolgreich aus der Live-Tabelle bereinigt.")
         
     except Exception as e:
         print(f"❌ Fehler bei der Archivierung: {e}")
+        raise e
 
 def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker, meta_data, entry_price):
     try:
@@ -220,7 +226,7 @@ def scan_ticker(ticker_info):
         print(f"❌ Fehler EMA {ticker}: {e}")
 
 if __name__ == "__main__":
-    # Schritt 1: Alte Signale (> 5 Tage) sauber in die Historie sichern, bevor sie gelöscht werden
+    # Schritt 1: Alte Signale (> 5 Tage gem. candle_time) sauber in die Historie sichern
     archive_and_clean_signals()
 
     print("🚀 Starte Batch-Scan...")

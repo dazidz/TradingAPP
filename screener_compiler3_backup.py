@@ -21,11 +21,65 @@ def send_telegram(ticker, price):
         except Exception as e:
             print(f"❌ Telegram Fehler: {e}")
 
+def archive_and_clean_signals():
+    """Verschiebt alte Signale nach 5 Tagen in die Historie, bevor sie aus der Live-Tabelle gelöscht werden."""
+    print("📦 Prüfe auf abgelaufene Signale zum Archivieren...")
+    try:
+        # 5 Tage Cutoff, passend zur Such-Logik im Screener
+        cutoff = (datetime.datetime.now(pytz.UTC) - datetime.timedelta(days=5)).isoformat()
+        
+        # 1. Hole alle Signale, die älter als 5 Tage sind
+        old_signals = supabase.table("signals").select("*").lt("created_at", cutoff).execute()
+        
+        if not old_signals.data:
+            print("ℹ️ Keine Signale zum Archivieren gefunden.")
+            return
+
+        for sig in old_signals.data:
+            ticker = sig['ticker']
+            entry_price = float(sig.get('entry_price', 0))
+            
+            # Hole aktuellen Kurs für die Performance-Auswertung beim Verlassen
+            exit_price = entry_price
+            try:
+                t = yf.Ticker(ticker)
+                hist = t.history(period="1d")
+                if not hist.empty:
+                    exit_price = float(hist['Close'].iloc[-1])
+            except Exception:
+                pass
+            
+            performance = ((exit_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0.0
+            
+            # Daten für die Historien-Tabelle aufbereiten
+            history_data = {
+                "ticker": ticker,
+                "company_name": sig.get('company_name', ''),
+                "signal_type": sig.get('signal_type', ''),
+                "sector": sig.get('sector', ''),
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "performance_pct": round(performance, 2),
+                "exit_reason": "Zeit-Ablauf (5 Tage)",
+                "created_at": sig.get('created_at'),
+                "closed_at": datetime.datetime.now(pytz.UTC).isoformat(),
+                "meta_data": sig.get('meta_data', '{}')
+            }
+            
+            # In die Historien-Tabelle schreiben
+            supabase.table("signal_history").insert(history_data).execute()
+            print(f"📁 Archiviert: {ticker} | Einstieg: {entry_price:.2f} | Exit: {exit_price:.2f} | Perf: {performance:.2f}%")
+
+        # 2. Jetzt erst aus der aktiven 'signals'-Tabelle löschen
+        supabase.table("signals").delete().lt("created_at", cutoff).execute()
+        print("🧹 Alte Signale erfolgreich aus der Live-Tabelle bereinigt.")
+        
+    except Exception as e:
+        print(f"❌ Fehler bei der Archivierung: {e}")
+
 def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker, meta_data, entry_price):
     try:
-        # Check: Existiert bereits ein solches Signal in den letzten 48h?
-        # (Wir prüfen hier über alle Status hinweg, damit keine doppelten Signale reinkommen, 
-        #  während die Aktie evtl. schon in den Favoriten liegt)
+        # 48-Stunden-Duplikatsprüfung beibehalten
         cutoff_time = (datetime.datetime.now(pytz.UTC) - datetime.timedelta(hours=48)).isoformat()
         check = supabase.table("signals").select("id") \
             .eq("ticker", ticker) \
@@ -58,32 +112,6 @@ def get_ticker_list_with_names():
     except Exception as e:
         print(f"❌ Fehler beim Laden der 'watchlist': {e}")
         return []
-
-def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker, meta_data, entry_price):
-    try:
-        date_str = datetime.datetime.now(pytz.UTC).strftime('%Y-%m-%d')
-        check = supabase.table("signals").select("id") \
-            .eq("ticker", ticker) \
-            .gte("created_at", date_str + " 00:00:00") \
-            .execute()
-        
-        if len(check.data) > 0: return 
-
-        data = {
-            "ticker": ticker,
-            "company_name": company_name,
-            "signal_type": signal_type,
-            "candle_time": candle_time.isoformat(),
-            "sector": sector,
-            "gettex_ticker": gettex_ticker,
-            "entry_price": float(entry_price),
-            "created_at": datetime.datetime.now(pytz.UTC).isoformat(),
-            "meta_data": str(meta_data)
-        }
-        supabase.table("signals").insert(data).execute()
-        print(f"✅ {ticker} -> {signal_type} gespeichert (Einstieg: {entry_price})")
-    except Exception as e:
-        print(f"❌ Fehler beim Speichern von {ticker}: {e}")
 
 def scan_ticker(ticker_info):
     ticker = ticker_info['ticker']
@@ -137,7 +165,7 @@ def scan_ticker(ticker_info):
     is_elite = cUp & (regD | hidD) & (adxV > 18)
     is_buy = (~is_elite) & cUp & (smiV < -35) & (adxV > 18)
 
-    # Signal-Suche
+    # Signal-Suche (5-Tage-Fenster)
     signal_found = False
     heute = pd.Timestamp.now(tz='UTC')
     
@@ -150,7 +178,6 @@ def scan_ticker(ticker_info):
         
         if is_elite.iloc[i]:
             current_price = float(data['close'].iloc[i])
-            # DEBUG-PRINT:
             print(f"DEBUG: Ticker {ticker} wird mit Preis {current_price} gespeichert.")
             save_to_supabase(ticker, name, "ELITE", candle_time, sector, gettex_ticker, meta, current_price)
             signal_found = True
@@ -162,7 +189,6 @@ def scan_ticker(ticker_info):
             
     if not signal_found:
         print(f"ℹ️ {ticker}: Kein Signal.")
-
 
     # EMA-CHECK
     try:
@@ -194,11 +220,8 @@ def scan_ticker(ticker_info):
         print(f"❌ Fehler EMA {ticker}: {e}")
 
 if __name__ == "__main__":
-    print("🧹 Bereinige alte Signale...")
-    try:
-        cutoff = (datetime.datetime.now(pytz.UTC) - datetime.timedelta(hours=48)).isoformat()
-        supabase.table("signals").delete().lt("created_at", cutoff).execute()
-    except Exception as e: print(f"❌ Fehler bei der Bereinigung: {e}")
+    # Schritt 1: Alte Signale (> 5 Tage) sauber in die Historie sichern, bevor sie gelöscht werden
+    archive_and_clean_signals()
 
     print("🚀 Starte Batch-Scan...")
     ticker_liste = get_ticker_list_with_names()
