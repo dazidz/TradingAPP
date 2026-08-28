@@ -1,239 +1,310 @@
-import os
-import yfinance as yf
+import streamlit as st
+from supabase import create_client
 import pandas as pd
-import numpy as np
-import datetime
-import pytz
-import time
-import requests
-from db import get_db_client
+import ast
+import yfinance as yf
+import altair as alt
 
-supabase = get_db_client()
+# Passwort-Schutz
+if "password_correct" not in st.session_state or not st.session_state.password_correct:
+    st.error("Bitte zuerst auf der Startseite anmelden!")
+    st.stop()
 
-def send_telegram(ticker, price):
-    token = os.environ.get("TELEGRAM_TOKEN")
-    chat_id = os.environ.get("CHAT_ID")
-    if token and chat_id:
-        msg = f"🚀 {ticker} ist über den EMA20 gestiegen! Kurs: {price:.2f}"
-        url = f"https://api.telegram.org/bot{token}/sendMessage?chat_id={chat_id}&text={msg}"
+st.title("📊 Ticker-Screener")
+
+# Verbindung zu Supabase
+URL = st.secrets["SUPABASE_URL"]
+KEY = st.secrets["SUPABASE_KEY"]
+supabase = create_client(URL, KEY)
+
+# Caching für Daten & Exchange-Informationen
+@st.cache_data(ttl=1800)
+def get_stock_meta(tickers):
+    prices = {}
+    exchanges = {}
+    if not tickers: return prices, exchanges
+    for ticker in tickers:
         try:
-            requests.get(url)
-        except Exception as e:
-            print(f"❌ Telegram Fehler: {e}")
+            t = yf.Ticker(ticker)
+            hist = t.history(period="1d")
+            if not hist.empty: 
+                prices[ticker] = float(hist['Close'].iloc[-1])
+            
+            info = t.info
+            exchanges[ticker] = info.get('exchange', 'N/A')
+        except Exception: 
+            continue
+    return prices, exchanges
 
-def archive_and_clean_signals():
-    """Verschiebt Signale in die Historie. Pro Ticker wird nur das erste (älteste) Signal übernommen."""
-    print("📦 Prüfe auf abgelaufene Signale (nach candle_time) zum Archivieren...")
+@st.cache_data(ttl=1800)
+def get_ema_stats_bulk(tickers):
+    stats = {}
+    if not tickers: return stats
     try:
-        cutoff_dt = datetime.datetime.now(pytz.UTC) - datetime.timedelta(days=5)
-        cutoff = cutoff_dt.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + '+00:00'
-        
-        print(f"🔍 Suche nach Signalen mit candle_time älter als: {cutoff}")
-        old_signals = supabase.table("signals").select("*").lt("candle_time", cutoff).execute()
-        
-        if not old_signals.data:
-            print("ℹ️ Keine Signale zum Archivieren gefunden.")
-            return
-
-        print(f"📦 Gefundene alte Signal-Einträge: {len(old_signals.data)}")
-
-        # Daten in ein DataFrame konvertieren, um pro Ticker nur das älteste Signal zu behalten
-        df_old = pd.DataFrame(old_signals.data)
-        if 'candle_time' in df_old.columns:
-            # Nach Ticker gruppieren und das mit der frühesten candle_time behalten
-            df_old['candle_time_dt'] = pd.to_datetime(df_old['candle_time'])
-            df_old = df_old.sort_values('candle_time_dt').groupby('ticker', as_index=False).first()
-
-        for _, sig in df_old.iterrows():
-            ticker = sig['ticker']
-            entry_price = float(sig.get('entry_price', 0))
-            
-            exit_price = entry_price
+        data = yf.download(tickers, period="1mo", interval="1d", progress=False)
+        if 'Close' in data:
+            data = data['Close']
+        for ticker in tickers:
             try:
-                t = yf.Ticker(ticker)
-                hist = t.history(period="1d")
-                if not hist.empty:
-                    exit_price = float(hist['Close'].iloc[-1])
-            except Exception:
-                pass
+                series = data[ticker].dropna() if isinstance(data, pd.DataFrame) else data.dropna()
+                if len(series) >= 20:
+                    ema20 = series.ewm(span=20, adjust=False).mean().iloc[-1]
+                    stats[ticker] = float(((series.iloc[-1] - ema20) / ema20) * 100)
+            except Exception: stats[ticker] = None
+    except Exception: pass
+    return stats
+
+# Hilfsfunktion zur Ermittlung des historischen EMA20-Status
+@st.cache_data(ttl=1800)
+def get_historical_ema_status_bulk(tickers_dates):
+    results = {}
+    ticker_dict = {}
+    for t, dt_str in tickers_dates:
+        if not t or not dt_str: continue
+        try:
+            dt = pd.to_datetime(dt_str)
+            ticker_dict.setdefault(t, []).append(dt)
+        except:
+            continue
+
+    for ticker, dates in ticker_dict.items():
+        try:
+            df = yf.download(ticker, period="6mo", interval="1d", progress=False, auto_adjust=True)
+            if df.empty or len(df) < 20:
+                continue
+            if isinstance(df.columns, pd.MultiIndex): 
+                df.columns = df.columns.get_level_values(0)
+            df.columns = [str(c).lower() for c in df.columns]
             
-            performance = ((exit_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0.0
+            if 'close' not in df.columns: continue
             
-            history_data = {
-                "ticker": ticker,
-                "company_name": sig.get('company_name', ''),
-                "signal_type": sig.get('signal_type', ''),
-                "sector": sig.get('sector', ''),
-                "candle_time": sig.get('candle_time', ''),
-                "entry_price": entry_price,
-                "exit_price": exit_price,
-                "performance_pct": round(performance, 2),
-                "exit_reason": "Zeit-Ablauf (5 Tage Kerzen-Alter)",
-                "created_at": sig.get('created_at'),
-                "closed_at": datetime.datetime.now(pytz.UTC).isoformat(),
-                "meta_data": sig.get('meta_data', '{}')
+            close_s = df['close']
+            if isinstance(close_s, pd.DataFrame): close_s = close_s.iloc[:, 0]
+            
+            ema20_s = close_s.ewm(span=20, adjust=False).mean()
+            
+            for dt in dates:
+                sub = close_s.loc[:dt]
+                if not sub.empty:
+                    idx = sub.index[-1]
+                    price = float(close_s.loc[idx])
+                    ema = float(ema20_s.loc[idx])
+                    results[(ticker, str(dt))] = (price >= ema)
+        except Exception:
+            continue
+    return results
+
+# --- SCREENER LOGIK ---
+try:
+    response = supabase.table("signals").select("*").execute()
+    df = pd.DataFrame(response.data)
+
+    history_response = supabase.table("signal_history").select("*").order("closed_at", desc=True).execute()
+    hist_df = pd.DataFrame(history_response.data)
+
+    fav_response = supabase.table("favorites").select("ticker").execute()
+    fav_tickers = [row['ticker'] for row in fav_response.data] if fav_response.data else []
+
+    if not df.empty:
+        if 'candle_time' in df.columns:
+            df = df.sort_values(by='candle_time', ascending=False).drop_duplicates(subset=['ticker'], keep='first').reset_index(drop=True)
+        else:
+            df = df.drop_duplicates(subset=['ticker'], keep='first').reset_index(drop=True)
+        
+        if 'meta_data' in df.columns:
+            df['meta_data'] = df['meta_data'].apply(
+                lambda x: ast.literal_eval(x) if isinstance(x, str) and x.startswith('{') else (x if isinstance(x, dict) else {})
+            )
+            meta_df = pd.json_normalize(df['meta_data'])
+            df = pd.concat([df.drop(columns=['meta_data']), meta_df], axis=1)
+
+        for col in ['gettex_ticker', 'entry_price', 'sector', 'company_name', 'candle_time', 'ticker']:
+            if col not in df.columns: df[col] = ""
+
+        df['is_favorite'] = df['ticker'].isin(fav_tickers)
+        df['Chart'] = df['gettex_ticker'].apply(lambda x: f"https://www.tradingview.com/chart/?symbol={x}" if x else "")
+        
+        unique_tickers = [t for t in df['ticker'].unique().tolist() if t]
+        prices, exchanges = get_stock_meta(unique_tickers)
+        ema_stats = get_ema_stats_bulk(unique_tickers)
+        
+        df['current_price'] = df['ticker'].map(prices)
+        df['exchange'] = df['ticker'].map(exchanges)
+        
+        df['entry_price_num'] = pd.to_numeric(df['entry_price'], errors='coerce')
+        df['Performance (%)'] = ((df['current_price'] - df['entry_price_num']) / df['entry_price_num']) * 100
+        df['EMA20_Dist_%'] = df['ticker'].map(ema_stats)
+
+        total_count_global = len(df)
+        sector_counts_global = df.groupby('sector').size()
+        sector_share_global = (sector_counts_global / total_count_global) * 100
+
+        tab_favs, tab_ueber, tab_unter, tab_gesamt, tab_historie = st.tabs(["⭐ Favoriten", "EMA20 🟢", "EMA20 🔴", "📁 Gesamtliste", "📜 Historie"])
+
+        def show_table(df_subset, is_fav_view=False, is_total_view=False):
+            d = df_subset.copy()
+            if d.empty:
+                st.info("Keine Daten für diese Filtereinstellung vorhanden.")
+                return
+
+            d['Action'] = False
+            
+            if is_total_view:
+                d['⭐'] = d['is_favorite'].apply(lambda x: "⭐" if x else "")
+                cols = ['⭐', 'Action', 'company_name', 'Chart', 'Performance (%)', 'candle_time', 'sector', 'exchange', 'entry_price', 'gettex_ticker']
+            else:
+                cols = ['Action', 'company_name', 'Chart', 'Performance (%)', 'candle_time', 'sector', 'exchange', 'entry_price', 'gettex_ticker']
+
+            conf = {
+                "⭐": st.column_config.TextColumn("⭐", width="small"),
+                "company_name": st.column_config.TextColumn("Firma", disabled=True),
+                "Chart": st.column_config.LinkColumn("Link", display_text="📈 Öffnen"),
+                "Performance (%)": st.column_config.NumberColumn("Performance", format="%.2f%%"),
+                "candle_time": st.column_config.TextColumn("Candle Time"),
+                "sector": st.column_config.TextColumn("Sektor", disabled=True),
+                "exchange": st.column_config.TextColumn("Börse", disabled=True),
+                "entry_price": st.column_config.NumberColumn("Entry", format="€%.2f"),
+                "gettex_ticker": st.column_config.TextColumn("Gettex Ticker", disabled=True),
+                "Action": st.column_config.CheckboxColumn("Entfernen" if is_fav_view else "Favorit", default=False)
             }
             
-            supabase.table("signal_history").insert(history_data).execute()
-            print(f"📁 Archiviert (Erster Einstieg): {ticker} | Kerze: {sig.get('candle_time')} | Perf: {performance:.2f}%")
-
-        # Wie gewohnt alle abgelaufenen Einträge aus der Live-Tabelle löschen
-        supabase.table("signals").delete().lt("candle_time", cutoff).execute()
-        print("🧹 Alte Signale erfolgreich aus der Live-Tabelle bereinigt.")
-        
-    except Exception as e:
-        print(f"❌ Fehler bei der Archivierung: {e}")
-        raise e
-
-def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker, meta_data, entry_price):
-    try:
-        cutoff_time = (datetime.datetime.now(pytz.UTC) - datetime.timedelta(hours=48)).isoformat()
-        check = supabase.table("signals").select("id") \
-            .eq("ticker", ticker) \
-            .eq("signal_type", signal_type) \
-            .gte("created_at", cutoff_time).execute()
-        
-        if len(check.data) > 0: return 
-
-        data = {
-            "ticker": ticker,
-            "company_name": company_name,
-            "signal_type": signal_type,
-            "candle_time": candle_time.isoformat(),
-            "sector": sector,
-            "gettex_ticker": gettex_ticker,
-            "entry_price": float(entry_price),
-            "created_at": datetime.datetime.now(pytz.UTC).isoformat(),
-            "meta_data": str(meta_data),
-            "status": "signal"
-        }
-        supabase.table("signals").insert(data).execute()
-        print(f"✅ {ticker} -> {signal_type} gespeichert (Einstieg: {entry_price:.2f})")
-    except Exception as e:
-        print(f"❌ Fehler beim Speichern von {ticker}: {e}")
-
-def get_ticker_list_with_names():
-    try:
-        response = supabase.table("watchlist").select("ticker, company_name, sector, gettex_ticker").execute()
-        return response.data 
-    except Exception as e:
-        print(f"❌ Fehler beim Laden der 'watchlist': {e}")
-        return []
-
-def scan_ticker(ticker_info):
-    ticker = ticker_info['ticker']
-    name = ticker_info.get('company_name', 'N/A')
-    sector = ticker_info.get('sector', 'N/A')
-    gettex_ticker = ticker_info.get('gettex_ticker', '')
-    
-    data = yf.download(ticker, period="3mo", interval="1h", progress=False, auto_adjust=True)
-    
-    if data.empty or len(data) < 20:
-        print(f"⚠️ {ticker}: Zu wenig Daten.")
-        return
-
-    if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
-    data.columns = [str(c).lower() for c in data.columns]
-    
-    for col in ['open', 'high', 'low', 'close']:
-        if col in data.columns: data[col] = data[col] * 1.016
-    
-    high, low, close = data['high'], data['low'], data['close']
-    
-    # ADX Berechnung
-    tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
-    def rma(series, length): return series.ewm(alpha=1/length, adjust=False).mean()
-    atr = rma(tr, 14)
-    plus_di = 100 * (rma((high - high.shift()).clip(lower=0), 14) / atr)
-    minus_di = 100 * (rma((low.shift() - low).clip(lower=0), 14) / atr)
-    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 0.0001)
-    adxV = rma(dx, 14)
-    
-    # SMI Berechnung
-    smiL, smiS1, smiS2, sigL = 10, 3, 10, 5
-    hi, lo = high.rolling(smiL).max(), low.rolling(smiL).min()
-    diff, rdiff = hi - lo, close - (hi + lo) / 2
-    aR = rdiff.ewm(span=smiS1, adjust=False).mean().ewm(span=smiS2, adjust=False).mean()
-    aD = diff.ewm(span=smiS1, adjust=False).mean().ewm(span=smiS2, adjust=False).mean()
-    smiV = pd.Series(np.where(aD != 0, (aR / (aD / 2) * 100), 0), index=data.index)
-    sigN = smiV.ewm(span=sigL, adjust=False).mean()
-
-    # Pivot-Logik
-    smiV_s = smiV.shift(2)
-    is_pivot = (smiV_s < smiV.shift(3)) & (smiV_s < smiV.shift(4)) & \
-               (smiV_s < smiV.shift(1)) & (smiV_s < smiV)
-    lSL = pd.Series(np.where(is_pivot, smiV_s, np.nan), index=data.index).ffill()
-    lPL = pd.Series(np.where(is_pivot, low.shift(2), np.nan), index=data.index).ffill()
-
-    # Signal-Logik
-    cUp = (smiV.shift(1) < sigN.shift(1)) & (smiV > sigN)
-    regD = (low < lPL) & (smiV > lSL) & (smiV < -40)
-    hidD = (low > lPL) & (smiV < lSL) & (lSL < -20)
-    is_elite = cUp & (regD | hidD) & (adxV > 18)
-    is_buy = (~is_elite) & cUp & (smiV < -35) & (adxV > 18)
-
-    # Signal-Suche (5-Tage-Fenster)
-    signal_found = False
-    heute = pd.Timestamp.now(tz='UTC')
-    
-    for i in reversed(range(len(data))):
-        candle_time = data.index[i].tz_localize(None).tz_localize('UTC')
-        if (heute - candle_time).days > 5: break
+            existing_cols = [c for c in cols if c in d.columns]
             
-        meta = {"smi": round(float(smiV.iloc[i]), 2), "adx": round(float(adxV.iloc[i]), 2)}
-        current_price = float(data['close'].iloc[i])
-        
-        if is_elite.iloc[i]:
-            current_price = float(data['close'].iloc[i])
-            print(f"DEBUG: Ticker {ticker} wird mit Preis {current_price} gespeichert.")
-            save_to_supabase(ticker, name, "ELITE", candle_time, sector, gettex_ticker, meta, current_price)
-            signal_found = True
-            break
-        elif is_buy.iloc[i]:
-            save_to_supabase(ticker, name, "KAUFEN", candle_time, sector, gettex_ticker, meta, current_price)
-            signal_found = True
-            break
+            if 'sector' in d.columns and 'Performance (%)' in d.columns:
+                chart_data = d[(d['Performance (%)'] < 3.0) & (d['Performance (%)'].notnull())]
+                if not chart_data.empty and 'sector' in chart_data.columns:
+                    total_subset_count = len(chart_data)
+                    sector_counts_subset = chart_data.groupby('sector').size()
+                    sector_share_subset = (sector_counts_subset / total_subset_count) * 100
+                    
+                    sector_df = pd.DataFrame({
+                        'Anteil_Signale': sector_share_subset,
+                        'Anteil_Watchlist': sector_share_global,
+                        'Treffer': sector_counts_subset,
+                        'Gesamt_WL': sector_counts_global
+                    }).dropna()
+                    
+                    sector_df['Score'] = sector_df['Treffer'] * (
+                        (sector_df['Anteil_Signale'] + 1) / (sector_df['Anteil_Watchlist'] + 1)
+                    )
+                    
+                    sector_df = sector_df.reset_index().sort_values(by='Score', ascending=False).head(10)
+                    
+                    if not sector_df.empty:
+                        c = alt.Chart(sector_df).mark_bar(color='#3b82f6').encode(
+                            x=alt.X('Score:Q', title='Sektor-Score (Treffer & Gewichtung kombiniert)', axis=alt.Axis(format='.1f')),
+                            y=alt.Y('sector:N', sort='-x', title='Sektor'),
+                            tooltip=[
+                                'sector', 
+                                alt.Tooltip('Score:Q', format='.2f', title='Score'),
+                                alt.Tooltip('Anteil_Signale:Q', format='.1f', title='Anteil Signale (%)'),
+                                alt.Tooltip('Anteil_Watchlist:Q', format='.1f', title='Anteil Watchlist (%)'),
+                                'Treffer', 
+                                'Gesamt_WL'
+                            ]
+                        ).properties(height=250)
+                        st.altair_chart(c, use_container_width=True)
+
+            if 'Performance (%)' in d.columns and not d['Performance (%)'].dropna().empty:
+                avg_perf = d['Performance (%)'].mean()
+                st.metric("Ø Performance der Liste", f"{avg_perf:.2f}%")
+
+            edited = st.data_editor(d[existing_cols], column_config=conf, hide_index=True, use_container_width=True)
             
-    if not signal_found:
-        print(f"ℹ️ {ticker}: Kein Signal.")
+            changed_rows = edited[edited['Action'] == True]
+            if not changed_rows.empty:
+                for _, row in changed_rows.iterrows():
+                    t_symbol = df_subset.loc[df_subset['company_name'] == row['company_name'], 'ticker'].values[0]
+                    if is_fav_view:
+                        supabase.table("favorites").delete().eq("ticker", t_symbol).execute()
+                    else:
+                        supabase.table("favorites").upsert({"ticker": t_symbol}, on_conflict="ticker").execute()
+                st.rerun()
 
-    # EMA-CHECK
-    try:
-        df = yf.download(ticker, period="1mo", interval="1d", progress=False, auto_adjust=True)
-        if df.empty or len(df) < 20:
-            return
+        with tab_favs: show_table(df[df['is_favorite'] == True], is_fav_view=True)
+        with tab_ueber: show_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'].fillna(-1) >= 0)])
+        with tab_unter: show_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'].fillna(0) < 0)])
+        with tab_gesamt: show_table(df, is_total_view=True)
 
-        if isinstance(df.columns, pd.MultiIndex): 
-            df.columns = df.columns.get_level_values(0)
-        df.columns = [str(c).lower() for c in df.columns]
-        
-        if 'close' in df.columns:
-            close_series = df['close']
-            if isinstance(close_series, pd.DataFrame):
-                close_series = close_series.iloc[:, 0]
+        # --- TAB: HISTORIE & PERFORMANCE ---
+        with tab_historie:
+            st.subheader("📜 Abgeschlossene Signale & Performance-Historie")
+            
+            if hist_df.empty:
+                st.info("Noch keine archivierten Signale in der Historie vorhanden.")
+            else:
+                pairs = [(row.get('ticker'), row.get('candle_time')) for _, row in hist_df.iterrows()]
+                ema_status_map = get_historical_ema_status_bulk(pairs)
                 
-            c_price = float(close_series.iloc[-1])
-            ema_val = float(close_series.ewm(span=20, adjust=False).mean().iloc[-1])
-            
-            res = supabase.table("signals").select("notified_ema").eq("ticker", ticker).execute()
-            is_notified = bool(res.data[0].get('notified_ema', False)) if res.data else False
+                hist_df['above_ema20'] = hist_df.apply(lambda r: ema_status_map.get((r.get('ticker'), str(r.get('candle_time'))), False), axis=1)
+
+                total_trades = len(hist_df)
+                avg_perf_hist = hist_df['performance_pct'].mean() if 'performance_pct' in hist_df.columns else 0.0
+                win_trades = len(hist_df[hist_df['performance_pct'] > 0])
+                win_rate = (win_trades / total_trades) * 100 if total_trades > 0 else 0.0
                 
-            if c_price >= ema_val and not is_notified:
-                send_telegram(ticker, c_price)
-                supabase.table("signals").update({"notified_ema": True}).eq("ticker", ticker).execute()
-            elif c_price < ema_val and is_notified:
-                supabase.table("signals").update({"notified_ema": False}).eq("ticker", ticker).execute()
-    except Exception as e:
-        print(f"❌ Fehler EMA {ticker}: {e}")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Abgeschlossene Trades", total_trades)
+                col2.metric("Ø Performance (Historie)", f"{avg_perf_hist:.2f}%")
+                col3.metric("Win-Rate", f"{win_rate:.1f}%")
+                
+                st.markdown("---")
+                st.subheader("🎯 Erweiterte Performance-Auswertungen")
 
-if __name__ == "__main__":
-    archive_and_clean_signals()
+                # Sub-Gruppen berechnen (jetzt inklusive Unter EMA20 & Ohne Elite)
+                sub_above_ema = hist_df[hist_df['above_ema20'] == True]
+                sub_below_ema = hist_df[hist_df['above_ema20'] == False]
+                sub_elite = hist_df[hist_df['signal_type'] == 'ELITE']
+                sub_no_elite = hist_df[hist_df['signal_type'] != 'ELITE']
+                sub_above_ema_and_elite = hist_df[(hist_df['above_ema20'] == True) & (hist_df['signal_type'] == 'ELITE')]
+                sub_below_ema_and_no_elite = hist_df[(hist_df['above_ema20'] == False) & (hist_df['signal_type'] != 'ELITE')]
 
-    print("🚀 Starte Batch-Scan...")
-    ticker_liste = get_ticker_list_with_names()
-    for t_info in ticker_liste:
-        try:
-            scan_ticker(t_info)
-            time.sleep(0.5)
-        except Exception as e: print(f"❌ Fehler bei {t_info['ticker']}: {e}")
-    print("🏁 Scan abgeschlossen.")
+                def get_metrics_dict(sub_df, name):
+                    count = len(sub_df)
+                    perf = sub_df['performance_pct'].mean() if count > 0 and 'performance_pct' in sub_df.columns else 0.0
+                    w_count = len(sub_df[sub_df['performance_pct'] > 0]) if count > 0 else 0
+                    w_rate = (w_count / count) * 100 if count > 0 else 0.0
+                    return {
+                        "Kategorie": name,
+                        "Anzahl Trades": count,
+                        "Ø Performance": f"{perf:.2f}%",
+                        "Win-Rate": f"{w_rate:.1f}%"
+                    }
+
+                eval_data = [
+                    get_metrics_dict(sub_above_ema, "Über EMA20 (Gesamt)"),
+                    get_metrics_dict(sub_below_ema, "Unter EMA20 (Gesamt)"),
+                    get_metrics_dict(sub_elite, "Elite Signale (Gesamt)"),
+                    get_metrics_dict(sub_no_elite, "Ohne Elite Signale (Kaufen)"),
+                    get_metrics_dict(sub_above_ema_and_elite, "Über EMA20 & Elite"),
+                    get_metrics_dict(sub_below_ema_and_no_elite, "Unter EMA20 & Ohne Elite")
+                ]
+                
+                eval_df = pd.DataFrame(eval_data)
+                st.dataframe(eval_df, hide_index=True, use_container_width=True)
+
+                st.markdown("---")
+                
+                hist_cols = ['company_name', 'ticker', 'signal_type', 'sector', 'candle_time', 'entry_price', 'exit_price', 'performance_pct', 'exit_reason', 'closed_at']
+                existing_hist_cols = [c for c in hist_cols if c in hist_df.columns]
+                
+                hist_conf = {
+                    "company_name": st.column_config.TextColumn("Firma", disabled=True),
+                    "ticker": st.column_config.TextColumn("Ticker", disabled=True),
+                    "signal_type": st.column_config.TextColumn("Signal", disabled=True),
+                    "sector": st.column_config.TextColumn("Sektor", disabled=True),
+                    "candle_time": st.column_config.TextColumn("Candle Time", disabled=True),
+                    "entry_price": st.column_config.NumberColumn("Entry", format="€%.2f"),
+                    "exit_price": st.column_config.NumberColumn("Exit", format="€%.2f"),
+                    "performance_pct": st.column_config.NumberColumn("Performance", format="%.2f%%"),
+                    "exit_reason": st.column_config.TextColumn("Grund", disabled=True),
+                    "closed_at": st.column_config.TextColumn("Geschlossen am", disabled=True)
+                }
+                
+                st.dataframe(hist_df[existing_hist_cols], column_config=hist_conf, hide_index=True, use_container_width=True)
+
+    else:
+        st.info("Keine Daten in der Supabase-Datenbank vorhanden.")
+
+except Exception as e:
+    st.error(f"Fehler: {e}")
