@@ -22,29 +22,32 @@ def send_telegram(ticker, price):
             print(f"❌ Telegram Fehler: {e}")
 
 def archive_and_clean_signals():
-    """Verschiebt Signale, deren Kerzen-Zeitpunkt (> 5 Tage) veraltet ist, in die Historie."""
+    """Verschiebt Signale in die Historie. Pro Ticker wird nur das erste (älteste) Signal übernommen."""
     print("📦 Prüfe auf abgelaufene Signale (nach candle_time) zum Archivieren...")
     try:
-        # 5 Tage Cutoff basierend auf der echten Kerzen-Zeit
         cutoff_dt = datetime.datetime.now(pytz.UTC) - datetime.timedelta(days=5)
         cutoff = cutoff_dt.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + '+00:00'
         
         print(f"🔍 Suche nach Signalen mit candle_time älter als: {cutoff}")
-        
-        # Prüfung erfolgt gegen 'candle_time' statt 'created_at'
         old_signals = supabase.table("signals").select("*").lt("candle_time", cutoff).execute()
         
         if not old_signals.data:
             print("ℹ️ Keine Signale zum Archivieren gefunden.")
             return
 
-        print(f"📦 Gefundene alte Signale: {len(old_signals.data)}")
+        print(f"📦 Gefundene alte Signal-Einträge: {len(old_signals.data)}")
 
-        for sig in old_signals.data:
+        # Daten in ein DataFrame konvertieren, um pro Ticker nur das älteste Signal zu behalten
+        df_old = pd.DataFrame(old_signals.data)
+        if 'candle_time' in df_old.columns:
+            # Nach Ticker gruppieren und das mit der frühesten candle_time behalten
+            df_old['candle_time_dt'] = pd.to_datetime(df_old['candle_time'])
+            df_old = df_old.sort_values('candle_time_dt').groupby('ticker', as_index=False).first()
+
+        for _, sig in df_old.iterrows():
             ticker = sig['ticker']
             entry_price = float(sig.get('entry_price', 0))
             
-            # Hole aktuellen Kurs für die Performance-Auswertung beim Verlassen
             exit_price = entry_price
             try:
                 t = yf.Ticker(ticker)
@@ -56,12 +59,12 @@ def archive_and_clean_signals():
             
             performance = ((exit_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0.0
             
-            # Daten für die Historien-Tabelle aufbereiten
             history_data = {
                 "ticker": ticker,
                 "company_name": sig.get('company_name', ''),
                 "signal_type": sig.get('signal_type', ''),
                 "sector": sig.get('sector', ''),
+                "candle_time": sig.get('candle_time', ''),
                 "entry_price": entry_price,
                 "exit_price": exit_price,
                 "performance_pct": round(performance, 2),
@@ -71,11 +74,10 @@ def archive_and_clean_signals():
                 "meta_data": sig.get('meta_data', '{}')
             }
             
-            # In die Historien-Tabelle schreiben
             supabase.table("signal_history").insert(history_data).execute()
-            print(f"📁 Archiviert: {ticker} | Einstieg: {entry_price:.2f} | Exit: {exit_price:.2f} | Perf: {performance:.2f}%")
+            print(f"📁 Archiviert (Erster Einstieg): {ticker} | Kerze: {sig.get('candle_time')} | Perf: {performance:.2f}%")
 
-        # Aus der aktiven 'signals'-Tabelle basierend auf candle_time löschen
+        # Wie gewohnt alle abgelaufenen Einträge aus der Live-Tabelle löschen
         supabase.table("signals").delete().lt("candle_time", cutoff).execute()
         print("🧹 Alte Signale erfolgreich aus der Live-Tabelle bereinigt.")
         
@@ -85,7 +87,6 @@ def archive_and_clean_signals():
 
 def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, gettex_ticker, meta_data, entry_price):
     try:
-        # 48-Stunden-Duplikatsprüfung beibehalten
         cutoff_time = (datetime.datetime.now(pytz.UTC) - datetime.timedelta(hours=48)).isoformat()
         check = supabase.table("signals").select("id") \
             .eq("ticker", ticker) \
@@ -104,7 +105,7 @@ def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, get
             "entry_price": float(entry_price),
             "created_at": datetime.datetime.now(pytz.UTC).isoformat(),
             "meta_data": str(meta_data),
-            "status": "signal"  # Standard-Status für frische Screener-Signale
+            "status": "signal"
         }
         supabase.table("signals").insert(data).execute()
         print(f"✅ {ticker} -> {signal_type} gespeichert (Einstieg: {entry_price:.2f})")
@@ -226,7 +227,6 @@ def scan_ticker(ticker_info):
         print(f"❌ Fehler EMA {ticker}: {e}")
 
 if __name__ == "__main__":
-    # Schritt 1: Alte Signale (> 5 Tage gem. candle_time) sauber in die Historie sichern
     archive_and_clean_signals()
 
     print("🚀 Starte Batch-Scan...")
