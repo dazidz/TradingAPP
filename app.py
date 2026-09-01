@@ -154,7 +154,7 @@ if check_password():
     index_data = get_index_performance()
     keys = list(index_data.keys())
     
-    # 2 Reihen à 4 Metriken
+    # 2 Reihen à 4 Metriken für Indizes
     for r in range(2):
         cols = st.columns(4)
         for i in range(4):
@@ -164,11 +164,25 @@ if check_password():
     
     st.divider()
     
-    # --- SEKTOR PERFORMANCE DIAGRAMM ---
-    st.subheader("📊 Durchschnittliche Tagesperformance nach Sektoren")
+    # --- SEKTOR PERFORMANCE ALS KOMPAKTE METRIKEN ---
+    st.subheader("📊 Sektor-Übersicht (Tagesperformance)")
     sector_perf = get_sector_performance()
+    
     if not sector_perf.empty:
-        st.bar_chart(sector_perf)
+        sectors = list(sector_perf.items())
+        num_sectors = len(sectors)
+        
+        # Zeige maximal 4 Sektoren pro Reihe an, damit es übersichtlich bleibt
+        cols_per_row = min(num_sectors, 4)
+        for i in range(0, num_sectors, cols_per_row):
+            row_sectors = sectors[i:i + cols_per_row]
+            cols = st.columns(len(row_sectors))
+            for col_idx, (sec_name, sec_val) in enumerate(row_sectors):
+                cols[col_idx].metric(
+                    label=sec_name, 
+                    value=f"{sec_val:.2f}%", 
+                    delta=f"{sec_val:.2f}%"
+                )
     else:
         st.info("Keine Sektor-Daten verfügbar.")
         
