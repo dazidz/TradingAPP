@@ -110,7 +110,9 @@ try:
         sector_counts_global = df.groupby('sector').size()
         sector_share_global = (sector_counts_global / total_count_global) * 100
 
-        tab_favs, tab_ueber, tab_unter, tab_gesamt, tab_historie = st.tabs(["⭐ Favoriten", "EMA20 🟢", "EMA20 🔴", "📁 Gesamtliste", "📜 Historie"])
+        tab_favs, tab_ueber, tab_unter, tab_gesamt, tab_dip, tab_historie = st.tabs([
+            "⭐ Favoriten", "EMA20 🟢", "EMA20 🔴", "📁 Gesamtliste", "📉 Dip-Scanner", "📜 Historie"
+        ])
 
         def show_table(df_subset, is_fav_view=False, is_total_view=False):
             d = df_subset.copy()
@@ -198,9 +200,46 @@ try:
                 st.rerun()
 
         with tab_favs: show_table(df[df['is_favorite'] == True], is_fav_view=True)
-        with tab_ueber: show_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'].fillna(-1) >= 0)])
-        with tab_unter: show_table(df[(df['status'] == 'signal') & (df['EMA20_Dist_%'].fillna(0) < 0)])
+        with tab_ueber: show_table(df[(df.get('status') == 'signal') & (df['EMA20_Dist_%'].fillna(-1) >= 0)])
+        with tab_unter: show_table(df[(df.get('status') == 'signal') & (df['EMA20_Dist_%'].fillna(0) < 0)])
         with tab_gesamt: show_table(df, is_total_view=True)
+
+        # --- NEUER TAB: DIP-SCANNER (-20% vom ATH) ---
+        with tab_dip:
+            st.subheader("📉 Dip-Scanner: Aktien mit $\ge$ 20% Korrektur vom Allzeithoch")
+            st.markdown("Solide Werte aus deiner Watchlist, die sich in einer tieferen Konsolidierung befinden.")
+            
+            try:
+                dip_response = supabase.table("watchlist") \
+                    .select("ticker, company_name, sector, gettex_ticker, current_price, ath, distance_from_ath") \
+                    .lte("distance_from_ath", -20.0) \
+                    .order("distance_from_ath", desc=False) \
+                    .execute()
+                
+                dip_data = dip_response.data
+                
+                if dip_data:
+                    df_dip = pd.DataFrame(dip_data)
+                    df_dip['Chart'] = df_dip['gettex_ticker'].apply(lambda x: f"https://www.tradingview.com/chart/?symbol={x}" if x else "")
+                    
+                    dip_cols = ['company_name', 'Chart', 'sector', 'current_price', 'ath', 'distance_from_ath', 'gettex_ticker']
+                    existing_dip_cols = [c for c in dip_cols if c in df_dip.columns]
+                    
+                    dip_conf = {
+                        "company_name": st.column_config.TextColumn("Firma", disabled=True),
+                        "Chart": st.column_config.LinkColumn("Link", display_text="📈 Öffnen"),
+                        "sector": st.column_config.TextColumn("Sektor", disabled=True),
+                        "current_price": st.column_config.NumberColumn("Aktueller Kurs", format="€%.2f"),
+                        "ath": st.column_config.NumberColumn("Allzeithoch (ATH)", format="€%.2f"),
+                        "distance_from_ath": st.column_config.NumberColumn("Abstand vom ATH", format="%.2f%%"),
+                        "gettex_ticker": st.column_config.TextColumn("Gettex Ticker", disabled=True)
+                    }
+                    
+                    st.dataframe(df_dip[existing_dip_cols], column_config=dip_conf, hide_index=True, use_container_width=True)
+                else:
+                    st.info("Aktuell befinden sich keine Aktien aus der Watchlist im Bereich von -20% oder tiefer vom Allzeithoch.")
+            except Exception as e:
+                st.error(f"Fehler beim Laden der Dip-Daten: {e}")
 
         # --- NEUER TAB: HISTORIE & PERFORMANCE ---
         with tab_historie:

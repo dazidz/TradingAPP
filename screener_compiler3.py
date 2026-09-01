@@ -63,6 +63,27 @@ def scan_ticker(ticker_info):
     sector = ticker_info.get('sector', 'N/A')
     gettex_ticker = ticker_info.get('gettex_ticker', '')
     
+    # 1. ATH- und Abstandsberechnung (für den Dip-Scanner)
+    try:
+        df_max = yf.download(ticker, period="max", progress=False, auto_adjust=True)
+        if isinstance(df_max.columns, pd.MultiIndex): 
+            df_max.columns = df_max.columns.get_level_values(0)
+            
+        if 'close' in [c.lower() for c in df_max.columns] and not df_max.empty:
+            df_max.columns = [str(c).lower() for c in df_max.columns]
+            ath = float(df_max['close'].max())
+            current_p = float(df_max['close'].iloc[-1])
+            dist_ath = ((current_p - ath) / ath) * 100 # z. B. -21.5 (%)
+            
+            supabase.table("watchlist").update({
+                "ath": ath,
+                "current_price": current_p,
+                "distance_from_ath": round(dist_ath, 2)
+            }).eq("ticker", ticker).execute()
+    except Exception as e:
+        print(f"⚠️ ATH-Berechnung Hinweis für {ticker}: {e}")
+
+    # 2. Intraday-Daten für Signale laden
     data = yf.download(ticker, period="3mo", interval="1h", progress=False, auto_adjust=True)
     
     if data.empty or len(data) < 20:
@@ -121,7 +142,6 @@ def scan_ticker(ticker_info):
         current_price = float(data['close'].iloc[i])
         
         if is_elite.iloc[i]:
-            current_price = float(data['close'].iloc[i])
             print(f"DEBUG: Ticker {ticker} wird mit Preis {current_price} gespeichert.")
             save_to_supabase(ticker, name, "ELITE", candle_time, sector, gettex_ticker, meta, current_price)
             signal_found = True
