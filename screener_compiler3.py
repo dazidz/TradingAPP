@@ -62,23 +62,31 @@ def scan_ticker(ticker_info):
     sector = ticker_info.get('sector', 'N/A')
     gettex_ticker = ticker_info.get('gettex_ticker', '')
     
-    # 1. ATH- und Abstandsberechnung
+    # 1. 52-Wochen-Hoch (statt max) und Abstandsberechnung (sauber ohne Yahoo-Split-Fehler)
     try:
-        df_max = yf.download(ticker, period="max", progress=False, auto_adjust=True)
+        df_max = yf.download(ticker, period="1y", progress=False, auto_adjust=True)
         if isinstance(df_max.columns, pd.MultiIndex): 
             df_max.columns = df_max.columns.get_level_values(0)
             
-        if 'close' in [c.lower() for c in df_max.columns] and not df_max.empty:
+        if not df_max.empty:
             df_max.columns = [str(c).lower() for c in df_max.columns]
-            ath = float(df_max['close'].max())
-            current_p = float(df_max['close'].iloc[-1])
-            dist_ath = ((current_p - ath) / ath) * 100
             
-            supabase.table("watchlist").update({
-                "ath": ath,
-                "current_price": current_p,
-                "distance_from_ath": round(dist_ath, 2)
-            }).eq("ticker", ticker).execute()
+            price_col = 'high' if 'high' in df_max.columns else ('close' if 'close' in df_max.columns else None)
+            
+            if price_col:
+                valid_prices = df_max[price_col].dropna()
+                valid_prices = valid_prices[valid_prices > 0]
+                
+                if not valid_prices.empty:
+                    ath = float(valid_prices.max())
+                    current_p = float(df_max['close'].iloc[-1]) if 'close' in df_max.columns else float(valid_prices.iloc[-1])
+                    dist_ath = ((current_p - ath) / ath) * 100
+                    
+                    supabase.table("watchlist").update({
+                        "ath": round(ath, 2),
+                        "current_price": round(current_p, 2),
+                        "distance_from_ath": round(dist_ath, 2)
+                    }).eq("ticker", ticker).execute()
     except Exception as e:
         print(f"⚠️ ATH-Berechnung Hinweis für {ticker}: {e}")
 
@@ -191,7 +199,6 @@ if __name__ == "__main__":
                 max_price = entry_price
                 
                 try:
-                    # Lade Stunden-Daten der letzten 10 Tage, um das exakte 5-Tage-Fenster abzugreifen
                     df_hist = yf.download(ticker, period="10d", interval="1h", progress=False, auto_adjust=True)
                     if not df_hist.empty:
                         if isinstance(df_hist.columns, pd.MultiIndex): 
@@ -206,7 +213,6 @@ if __name__ == "__main__":
                         start_dt = pd.to_datetime(created_at_str)
                         end_dt = datetime.datetime.now(pytz.UTC)
                         
-                        # Filtere das Zeitfenster von Signal-Erstellung bis jetzt / Ablauf
                         window_df = df_hist.loc[(df_hist.index >= start_dt) & (df_hist.index <= end_dt)]
                         
                         if not window_df.empty:
@@ -217,7 +223,6 @@ if __name__ == "__main__":
                 except Exception as e:
                     print(f"⚠️ Warnung bei Kurs-Historie für {ticker}: {e}")
                 
-                # Performancen berechnen
                 perf_pct = ((exit_price - entry_price) / entry_price) * 100
                 max_perf_pct = ((max_price - entry_price) / entry_price) * 100
                 
