@@ -78,11 +78,50 @@ def get_index_performance():
             results[name] = {"price": 0.0, "pct": 0.0}
     return results
 
+# Sektor-Performance berechnen
+@st.cache_data(ttl=60)
+def get_sector_performance():
+    try:
+        response = supabase.table("watchlist").select("ticker, sector").execute()
+        df = pd.DataFrame(response.data)
+        if df.empty or 'sector' not in df.columns or 'ticker' not in df.columns:
+            return pd.Series()
+        
+        tickers = df['ticker'].dropna().unique().tolist()
+        if not tickers:
+            return pd.Series()
+            
+        data = yf.download(tickers, period="2d", interval="1d", progress=False, auto_adjust=True)
+        if data.empty:
+            return pd.Series()
+            
+        if isinstance(data.columns, pd.MultiIndex):
+            if 'Close' in data.columns.levels[0]:
+                df_close = data['Close']
+            else:
+                df_close = data.iloc[:, :len(tickers)]
+        else:
+            df_close = data[['Close']] if 'Close' in data.columns else data
+            
+        if len(df_close) >= 2:
+            pct_changes = df_close.iloc[-1] / df_close.iloc[-2] - 1
+            pct_changes = pct_changes * 100
+            
+            perf_df = pd.DataFrame({'ticker': pct_changes.index, 'daily_return_pct': pct_changes.values})
+            merged = pd.merge(df, perf_df, on='ticker', how='inner')
+            
+            if not merged.empty and 'daily_return_pct' in merged.columns:
+                sector_perf = merged.groupby('sector')['daily_return_pct'].mean().sort_values(ascending=False)
+                return sector_perf
+        return pd.Series()
+    except Exception:
+        return pd.Series()
+
 # Präzise Watchlist-Performance (Live gegen Vortagesschluss)
 @st.cache_data(ttl=60)
 def get_watchlist_performance():
     try:
-        response = supabase.table("watchlist").select("ticker, company_name, gettex_ticker").execute()
+        response = supabase.table("watchlist").select("ticker, company_name, gettex_ticker, sector").execute()
         df = pd.DataFrame(response.data)
         if df.empty: return pd.DataFrame()
         
@@ -97,6 +136,7 @@ def get_watchlist_performance():
                 if curr and prev:
                     performances.append({
                         "Firma": row['company_name'],
+                        "Sektor": row.get('sector', 'N/A'),
                         "Chart": f"https://www.tradingview.com/chart/?symbol={row['gettex_ticker']}" if row['gettex_ticker'] else f"https://www.tradingview.com/chart/?symbol={row['ticker']}",
                         "Aktuell": round(float(curr), 2),
                         "Tageschange (%)": round(((curr - prev) / prev) * 100, 2)
@@ -122,6 +162,16 @@ if check_password():
             val = index_data[idx_name]
             cols[i].metric(idx_name, f"{val['price']:,.2f}", f"{val['pct']:.2f}%")
     
+    st.divider()
+    
+    # --- SEKTOR PERFORMANCE DIAGRAMM ---
+    st.subheader("📊 Durchschnittliche Tagesperformance nach Sektoren")
+    sector_perf = get_sector_performance()
+    if not sector_perf.empty:
+        st.bar_chart(sector_perf)
+    else:
+        st.info("Keine Sektor-Daten verfügbar.")
+        
     st.divider()
     df_perf = get_watchlist_performance()
 

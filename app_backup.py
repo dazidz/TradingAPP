@@ -24,19 +24,26 @@ KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(URL, KEY)
 
 def check_password():
-    if "password_correct" not in st.session_state: st.session_state.password_correct = False
-    if not st.session_state.password_correct:
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.markdown("## 🔐 Login")
-            input_pw = st.text_input("Passwort:", type="password")
-            if st.button("Anmelden", use_container_width=True):
-                if input_pw == st.secrets["APP_PASSWORD"]:
-                    st.session_state.password_correct = True
-                    st.rerun()
-                else: st.error("Passwort falsch.")
-        return False
-    return True
+    # Initialisierung im Session State, falls noch nicht vorhanden
+    if "password_correct" not in st.session_state:
+        st.session_state.password_correct = False
+
+    # Wenn bereits erfolgreich eingeloggt, direkt True zurückgeben
+    if st.session_state.password_correct:
+        return True
+
+    # Login-Maske anzeigen
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("## 🔐 Login")
+        input_pw = st.text_input("Passwort:", type="password", key="login_password_input")
+        if st.button("Anmelden", use_container_width=True):
+            if input_pw == st.secrets["APP_PASSWORD"]:
+                st.session_state.password_correct = True
+                st.rerun()
+            else:
+                st.error("Passwort falsch.")
+    return False
 
 # Robuste Index-Daten (MultiIndex-sicher)
 @st.cache_data(ttl=60)
@@ -58,7 +65,6 @@ def get_index_performance():
             else:
                 df_idx = data
             
-            # Falls DataFrame einzeln oder gruppiert vorliegt
             close_series = df_idx['Close'][symbol] if symbol in df_idx.columns else df_idx['Close']
             close_series = close_series.dropna()
             
