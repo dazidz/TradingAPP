@@ -241,7 +241,7 @@ try:
             except Exception as e:
                 st.error(f"Fehler beim Laden der Dip-Daten: {e}")
 
-        # --- NEUER TAB: HISTORIE & PERFORMANCE ---
+        # --- TAB: HISTORIE & PERFORMANCE ---
         with tab_historie:
             st.subheader("📜 Abgeschlossene Signale & Performance-Historie")
             
@@ -250,17 +250,19 @@ try:
             else:
                 total_trades = len(hist_df)
                 avg_perf_hist = hist_df['performance_pct'].mean() if 'performance_pct' in hist_df.columns else 0.0
+                avg_max_perf = hist_df['max_performance_pct'].mean() if 'max_performance_pct' in hist_df.columns else 0.0
                 win_trades = len(hist_df[hist_df['performance_pct'] > 0])
                 win_rate = (win_trades / total_trades) * 100 if total_trades > 0 else 0.0
                 
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Abgeschlossene Trades", total_trades)
-                col2.metric("Ø Performance (Historie)", f"{avg_perf_hist:.2f}%")
-                col3.metric("Win-Rate", f"{win_rate:.1f}%")
+                col2.metric("Ø Performance (Exit)", f"{avg_perf_hist:.2f}%")
+                col3.metric("Ø Max. Performance", f"{avg_max_perf:.2f}%")
+                col4.metric("Win-Rate", f"{win_rate:.1f}%")
                 
                 st.markdown("---")
                 
-                hist_cols = ['company_name', 'ticker', 'signal_type', 'sector', 'entry_price', 'exit_price', 'performance_pct', 'exit_reason', 'closed_at']
+                hist_cols = ['company_name', 'ticker', 'signal_type', 'sector', 'entry_price', 'exit_price', 'performance_pct', 'max_performance_pct', 'exit_reason', 'closed_at']
                 existing_hist_cols = [c for c in hist_cols if c in hist_df.columns]
                 
                 hist_conf = {
@@ -271,6 +273,7 @@ try:
                     "entry_price": st.column_config.NumberColumn("Entry", format="€%.2f"),
                     "exit_price": st.column_config.NumberColumn("Exit", format="€%.2f"),
                     "performance_pct": st.column_config.NumberColumn("Performance", format="%.2f%%"),
+                    "max_performance_pct": st.column_config.NumberColumn("Max. Perf.", format="%.2f%%"),
                     "exit_reason": st.column_config.TextColumn("Grund", disabled=True),
                     "closed_at": st.column_config.TextColumn("Geschlossen am", disabled=True)
                 }
