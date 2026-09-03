@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+import pandas as pd
 
 # Setzt das Hauptverzeichnis fest in den Suchpfad von Python
 root_dir = Path(__file__).resolve().parent.parent
@@ -9,9 +10,9 @@ if str(root_dir) not in sys.path:
 import streamlit as st
 from supabase import create_client
 
-# Importiere die sauberen, separaten Mitarbeiter-Klassen
+# Importiere die Mitarbeiter-Klassen
 from employees.otto import OttoAnalyst
-# Später einfach: from employees.risk_manager import RiskManager
+from employees.nino import NinoSignalsAssistant
 
 st.set_page_config(layout="wide", page_title="VisionDZ - Team & Kommandozentrale", page_icon="🏢")
 
@@ -25,12 +26,16 @@ supabase = create_client(URL, KEY)
 
 # Mitarbeiter-Instanzen erzeugen
 otto = OttoAnalyst(supabase)
-# risk_manager = RiskManager(supabase)
+nino = NinoSignalsAssistant(supabase)
 
 st.title("🏢 VisionDZ - Team & Kommandozentrale")
 
-# --- DIE TABS DEFINIEREN ---
-tab_teamroom, tab_otto, tab_risk = st.tabs(["💬 Teamroom", "📊 Otto (History & Macro)", "🛡️ Risk Manager"])
+# --- DIE TABS DEFINIEREN (Risk Manager raus, Nino rein) ---
+tab_teamroom, tab_otto, tab_nino = st.tabs([
+    "💬 Teamroom", 
+    "📊 Otto (History & Macro)", 
+    "⚡ Nino (Signals Assistent)"
+])
 
 # ==========================================
 # TAB 1: DER TEAMROOM (Zusammenführung & Synthese)
@@ -51,7 +56,6 @@ with tab_teamroom:
     
     with col1:
         st.markdown("#### 📊 Ottos aktueller Stand")
-        # Holt Ottos Berichte direkt über seine eigenen Methoden/Daten
         logs = otto.get_logs()
         if logs:
             latest_otto = logs[0]
@@ -61,8 +65,14 @@ with tab_teamroom:
             st.warning("Otto hat noch kein Standup durchgeführt. Wechsle in den Tab 'Otto'.")
             
     with col2:
-        st.markdown("#### 🛡️ Risk Manager")
-        st.info("Wartet auf Integration des separaten `risk_manager.py`-Codes...")
+        st.markdown("#### ⚡ Ninos letzter Stand (Signals Journal)")
+        journal_logs = nino.get_signals_history()
+        if journal_logs:
+            latest_nino = journal_logs[0]
+            st.write(f"**Letzter Ticker im Journal:** {latest_nino.get('ticker')} ({latest_nino.get('signal_typ')})")
+            st.info(f"Status: {latest_nino.get('status')} | Max-Perf (5D): {latest_nino.get('max_performance_5_tage', 0):+.2f}%")
+        else:
+            st.warning("Noch keine Signale im Journal. Starte Ninos Schicht im Nino-Tab.")
         
     st.divider()
     
@@ -128,8 +138,41 @@ with tab_otto:
                 st.warning("Bitte Nachricht eingeben.")
 
 # ==========================================
-# TAB 3: RISK MANAGER (Platzhalter für den nächsten Mitarbeiter-Code)
+# TAB 3: NINO (Signals Assistent & Journal)
 # ==========================================
-with tab_risk:
-    st.subheader("🛡️ Risk Management & Quant")
-    st.markdown("Sobald du `employees/risk_manager.py` anlegst, binden wir ihn hier analog zu Otto ein.")
+with tab_nino:
+    st.subheader(f"⚡ {nino.name}")
+    st.caption(nino.description)
+    
+    col_n1, col_n2 = st.columns([2, 1])
+    
+    with col_n1:
+        st.markdown("### Ninos Schicht-Steuerung")
+        st.markdown("Lass Nino prüfen, ob neue Signale aus dem Screener ins Journal übernommen werden müssen oder ob 5-Tages-Auswertungen fällig sind.")
+        
+        if st.button("🚀 Ninos tägliche Schicht ausführen", key="btn_run_nino"):
+            with st.spinner("Nino durchsucht den Screener und aktualisiert das Signals Journal..."):
+                logs = nino.daily_routine()
+                
+            if logs:
+                st.success("Ninos Schicht erfolgreich beendet!")
+                for log in logs:
+                    st.write(f"- {log}")
+            else:
+                st.info("Nino hat gearbeitet: Keine neuen Signale oder fälligen 5-Tages-Updates gefunden.")
+
+    with col_n2:
+        st.info("💡 **Regel:** Nino sichert den Einstiegspreis und berechnet nach exakt 5 Handelstagen automatisch den Peak (Höchstkurs) sowie den Schlusskurs.")
+
+    st.divider()
+
+    st.subheader("📖 Das Signals Journal (Archiv)")
+    journal_data = nino.get_signals_history()
+    
+    if journal_data:
+        df_nino = pd.DataFrame(journal_data)
+        if "id" in df_nino.columns:
+            df_nino = df_nino.drop(columns=["id"])
+        st.dataframe(df_nino, use_container_width=True)
+    else:
+        st.info("Das Signals Journal ist noch leer. Starte Ninos Schicht, sobald Signale im Screener liegen.")
