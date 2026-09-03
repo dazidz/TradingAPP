@@ -1,57 +1,119 @@
-import streamlit as st
-from supabase import create_client
-from employees.otto import OttoAnalyst
+import pandas as pd
+import yfinance as yf
 
-st.set_page_config(layout="wide", page_title="Teamroom - Otto", page_icon="📊")
+class OttoAnalyst:
+    def __init__(self, supabase_client):
+        self.supabase = supabase_client
+        self.name = "Otto (History Analyst)"
+        self.description = "Analysiert langfristige historische Muster, Zinsstrukturen und Ray-Dalio-Wirtschaftszyklen."
+        self.table_name = "employee_otto_memory"
 
-if not st.session_state.get("password_correct", False):
-    st.warning("Bitte melde dich zuerst auf der Hauptseite an.")
-    st.stop()
+    def run_analysis(self):
+        try:
+            # 1. Makro-Indikatoren als Dalio-Zyklus-Tacho (^TNX = Zins, GC=F = Gold, CL=F = Öl)
+            macro_symbols = {"Zins": "^TNX", "Gold": "GC=F", "Öl": "CL=F"}
+            macro_data = {}
+            
+            for name, sym in macro_symbols.items():
+                df_m = yf.download(sym, period="1y", progress=False, auto_adjust=True)
+                if not df_m.empty:
+                    close_col = df_m['Close']
+                    if isinstance(close_col, pd.DataFrame):
+                        close_col = close_col.iloc[:, 0]
+                    curr = float(close_col.iloc[-1])
+                    prev_1y = float(close_col.iloc[0])
+                    pct = ((curr - prev_1y) / prev_1y) * 100
+                    macro_data[name] = {"curr": curr, "pct": pct}
 
-URL = st.secrets["SUPABASE_URL"]
-KEY = st.secrets["SUPABASE_KEY"]
-supabase = create_client(URL, KEY)
+            # 2. Watchlist aus Supabase laden
+            response_wl = self.supabase.table("watchlist").select("ticker, company_name, sector").execute()
+            df_wl = pd.DataFrame(response_wl.data)
+            
+            cycle_phase = "Unbekannt"
+            macro_insight = ""
+            
+            if macro_data:
+                zins_trend = macro_data.get("Zins", {}).get("pct", 0)
+                gold_trend = macro_data.get("Gold", {}).get("pct", 0)
+                
+                if zins_trend > 5 and gold_trend > 0:
+                    cycle_phase = "Spätzyklische Überhitzung / Inflationsdruck"
+                    macro_insight = (
+                        f"**Dalio-Makro-Analyse:** Steigende Zinsen ({zins_trend:+.1f}%) und fester Goldpreis ({gold_trend:+.1f}%) "
+                        "signalisieren späten Zyklus und Inflationsdruck. Sachwerte bevorzugen."
+                    )
+                elif zins_trend < -5:
+                    cycle_phase = "Reflation / Zentralbank-Stimulus"
+                    macro_insight = (
+                        f"**Dalio-Makro-Analyse:** Sinkende Zinsen ({zins_trend:+.1f}%) entlasten die Verschuldung. "
+                        "Klassische Reflationsphase, starker Nährboden für Aktien-Rallies."
+                    )
+                else:
+                    cycle_phase = "Schuldendynamische Konsolidierung"
+                    macro_insight = (
+                        f"**Dalio-Makro-Analyse:** Moderater Zinstrend ({zins_trend:+.1f}%). "
+                        "Die Märkte bewegen sich in einer durch historische Schuldenzyklen erzwungenen Seitwärtsphase."
+                    )
 
-otto = OttoAnalyst(supabase)
+            # 3. Langfristige historische Muster über die Watchlist scannen
+            pattern_details = []
+            if not df_wl.empty:
+                tickers = df_wl['ticker'].dropna().unique().tolist()
+                df_hist = yf.download(tickers, period="1y", progress=False, auto_adjust=True)
+                
+                if not df_hist.empty:
+                    df_close = df_hist['Close'] if isinstance(df_hist.columns, pd.MultiIndex) else df_hist[['Close']]
+                    
+                    bullish_count = 0
+                    bearish_count = 0
+                    
+                    for ticker in tickers:
+                        try:
+                            series = df_close[ticker].dropna() if isinstance(df_close, pd.DataFrame) else df_close.dropna()
+                            if len(series) > 50:
+                                p_curr = float(series.iloc[-1])
+                                sma_50 = float(series.rolling(window=50).mean().iloc[-1])
+                                high_52w = float(series.max())
+                                
+                                c_name = df_wl.loc[df_wl['ticker'] == ticker, 'company_name'].values[0]
+                                
+                                if p_curr > sma_50 and p_curr >= (high_52w * 0.95):
+                                    bullish_count += 1
+                                    if len(pattern_details) < 3:
+                                        pattern_details.append(f"• **{c_name}**: Historisches Breakout-Muster (nahe 52W-Hoch bei {high_52w:.2f}).")
+                                elif p_curr < sma_50:
+                                    bearish_count += 1
+                        except Exception:
+                            continue
+                    
+                    macro_insight += f"\n\n**Muster-Screening:** {bullish_count} Titel in historischer Stärke (über SMA50 & nahe 52W-Hoch), {bearish_count} Titel unter Druck."
+                    if pattern_details:
+                        macro_insight += "\n" + "\n".join(pattern_details)
 
-st.title(f"📊 {otto.name}")
-st.caption(f"Teamroom Unterseite • {otto.description}")
+            # 4. In Ottos Supabase-Gedächtnis abspeichern
+            self.supabase.table(self.table_name).insert({
+                "market_phase": cycle_phase,
+                "insight": macro_insight
+            }).execute()
 
-col1, col2 = st.columns([2, 1])
+            return True, "Otto hat die historischen Zyklen und Watchlist-Muster erfolgreich analysiert."
+        except Exception as e:
+            return False, f"Fehler bei Ottos Analyse: {e}"
 
-with col1:
-    st.markdown("#### 📝 Arbeitsbereich & Logbuch")
-    
-    if st.button("🚀 Otto: Analyse & Tages-Standup starten"):
-        with st.spinner("Otto analysiert Zyklen und Watchlist..."):
-            success, msg = otto.run_analysis()
-            if success:
-                st.success(msg)
-                st.rerun()
-            else:
-                st.error(f"Fehler: {msg}")
-    
-    logs = otto.get_logs()
-    if logs:
-        st.markdown("### 📚 Logbuch & Historie")
-        for log in logs:
-            with st.expander(f"Standup vom {log['analysis_date']} – Phase: {log.get('market_phase', 'N/A')}"):
-                st.write(log['insight'])
-                if log.get('user_feedback'):
-                    st.info(f"Dein Feedback: {log['user_feedback']}")
-    else:
-        st.info("Noch keine Berichte im Gedächtnis.")
+    def get_logs(self):
+        try:
+            response = self.supabase.table(self.table_name).select("*").order("analysis_date", desc=True).limit(5).execute()
+            return response.data
+        except Exception:
+            return []
 
-with col2:
-    st.markdown("#### 💬 Direkt mit Otto sprechen")
-    user_input = st.text_area("Anweisung an Otto:", placeholder="Z.B.: 'Achte stärker auf Rohstoffe.'")
-    if st.button("Anweisung senden"):
-        if user_input:
-            success, msg = otto.save_feedback(user_input)
-            if success:
-                st.success(msg)
-                st.rerun()
-            else:
-                st.warning(msg)
-        else:
-            st.warning("Bitte gib eine Nachricht ein.")
+    def save_feedback(self, feedback_text):
+        try:
+            res = self.supabase.table(self.table_name).select("id").order("analysis_date", desc=True).limit(1).execute()
+            if res.data:
+                latest_id = res.data[0]['id']
+                self.supabase.table(self.table_name).update({"user_feedback": feedback_text}).eq("id", latest_id).execute()
+                return True, "Feedback erfolgreich im Gedächtnis verankert."
+            return False, "Kein Bericht vorhanden, an den das Feedback angehängt werden kann."
+        except Exception as e:
+            return False, str(e)
