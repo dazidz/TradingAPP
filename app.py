@@ -97,10 +97,14 @@ def get_index_performance():
             results[name] = {"price": 0.0, "pct": 0.0}
     return results
 
-# Sektor-Performance berechnen
+# Sektor-Performance berechnen (Supabase intern initialisiert für Caching-Sicherheit)
 @st.cache_data(ttl=60)
-def get_sector_performance(sup_client):
+def get_sector_performance():
     try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        sup_client = create_client(url, key)
+        
         response = sup_client.table("watchlist").select("ticker, sector").execute()
         df = pd.DataFrame(response.data)
         if df.empty or 'sector' not in df.columns or 'ticker' not in df.columns:
@@ -136,10 +140,14 @@ def get_sector_performance(sup_client):
     except Exception:
         return pd.Series()
 
-# Präzise Watchlist-Performance
+# Präzise Watchlist-Performance (Supabase intern initialisiert)
 @st.cache_data(ttl=60)
-def get_watchlist_performance(sup_client):
+def get_watchlist_performance():
     try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        sup_client = create_client(url, key)
+        
         response = sup_client.table("watchlist").select("ticker, company_name, gettex_ticker, sector").execute()
         df = pd.DataFrame(response.data)
         if df.empty: return pd.DataFrame()
@@ -168,11 +176,6 @@ def get_watchlist_performance(sup_client):
 
 # --- HAUPTPROGRAMM ---
 if check_password():
-    # Verbindung zu Supabase erst nach erfolgreichem Login herstellen
-    URL = st.secrets["SUPABASE_URL"]
-    KEY = st.secrets["SUPABASE_KEY"]
-    supabase = create_client(URL, KEY)
-
     st.title("📈 VisionDZ - Dashboard")
     
     # 1. Makro & Rohstoffe
@@ -224,7 +227,7 @@ if check_password():
     st.divider()
     
     # 4. Top Gewinner & Verlierer
-    df_perf = get_watchlist_performance(supabase)
+    df_perf = get_watchlist_performance()
 
     if not df_perf.empty and "Tageschange (%)" in df_perf.columns:
         df_sorted = df_perf.sort_values(by="Tageschange (%)", ascending=False)
