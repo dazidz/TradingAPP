@@ -1,126 +1,158 @@
+import sys
+from pathlib import Path
 import pandas as pd
-import yfinance as yf
-from datetime import datetime, timedelta
 
-class NinoSignalsAssistant:
-    def __init__(self, supabase_client):
-        self.supabase = supabase_client
-        self.name = "Nino (Signals Assistent)"
-        self.description = "Scannt täglich neue Screener-Signale, archiviert sie und wertet nach 5 Tagen den Peak und Schlusskurs aus."
-        self.table_journal = "signals_journal"
-        self.table_active_signals = "signals"  # Deine aktive Screener-Tabelle
+# Setzt das Hauptverzeichnis fest in den Suchpfad von Python
+root_dir = Path(__file__).resolve().parent.parent
+if str(root_dir) not in sys.path:
+    sys.path.append(str(root_dir))
 
-    def daily_routine(self):
-        """
-        Nino führt seine tägliche Schicht aus:
-        1. Neue Signale aus der aktiven Tabelle ins Journal holen.
-        2. Offene Signale, die 5 Tage alt sind, final auswerten und updaten.
-        """
-        logs = []
-        
-        # --- SCHRITT 1: Neue Signale ins Journal holen ---
-        try:
-            active_res = self.supabase.table(self.table_active_signals).select("*").execute()
-            active_signals = active_res.data
+import streamlit as st
+from supabase import create_client
+
+# Importiere die Mitarbeiter-Klassen
+from employees.otto import OttoAnalyst
+from employees.nino import NinoSignalsAssistant
+
+st.set_page_config(layout="wide", page_title="VisionDZ - Team & Kommandozentrale", page_icon="🏢")
+
+if not st.session_state.get("password_correct", False):
+    st.warning("Bitte melde dich zuerst auf der Hauptseite an.")
+    st.stop()
+
+URL = st.secrets["SUPABASE_URL"]
+KEY = st.secrets["SUPABASE_KEY"]
+supabase = create_client(URL, KEY)
+
+# Mitarbeiter-Instanzen erzeugen
+otto = OttoAnalyst(supabase)
+nino = NinoSignalsAssistant(supabase)
+
+st.title("🏢 VisionDZ - Team & Kommandozentrale")
+
+# --- DIE TABS DEFINIEREN ---
+tab_teamroom, tab_otto, tab_nino = st.tabs([
+    "💬 Teamroom", 
+    "📊 Otto (History & Macro)", 
+    "⚡ Signals Journal (Nino)"
+])
+
+# ==========================================
+# TAB 1: DER TEAMROOM (Zusammenführung & Synthese)
+# ==========================================
+with tab_teamroom:
+    st.subheader("Tägliches Standup & Synthesis")
+    st.markdown("Nach Ray Dalios Prinzipien: **Radical Truth & Radical Open-Mindedness**.")
+    
+    selected_depot = st.selectbox(
+        "Fokus-Depot für dieses Meeting:",
+        ["Invest (Langfristiges Fundament / Core)", "Swing (Mittelfristige Trendfolge)", "Risiko (Aggressive / Spekulative Plays)"],
+        key="teamroom_depot_select"
+    )
+    
+    st.divider()
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### 📊 Ottos aktueller Stand")
+        logs = otto.get_logs()
+        if logs:
+            latest_otto = logs[0]
+            st.write(f"**Marktphase:** {latest_otto.get('market_phase', 'N/A')}")
+            st.info(latest_otto.get('insight', 'Keine Daten'))
+        else:
+            st.warning("Otto hat noch kein Standup durchgeführt. Wechsle in den Tab 'Otto'.")
             
-            # Bereits im Journal vorhandene Ticker/Datums-Kombinationen prüfen, um Duplikate zu vermeiden
-            journal_res = self.supabase.table(self.table_journal).select("ticker, signal_datum").execute()
-            existing_set = {(j['ticker'], j['signal_datum'][:10]) for j in journal_res.data}
+    with col2:
+        st.markdown("#### ⚡ Ninos letzte Journal-Aktivität")
+        journal_logs = nino.get_signals_history()
+        if journal_logs:
+            latest_nino = journal_logs[0]
+            st.write(f"**Letzter Ticker:** {latest_nino.get('ticker')} ({latest_nino.get('signal_typ')})")
+            st.info(f"Status: {latest_nino.get('status')} | Max-Perf (5D): {latest_nino.get('max_performance_5_tage', 0):+.2f}%")
+        else:
+            st.warning("Das Journal ist noch leer.")
+        
+    st.divider()
+    
+    team_conclusion = st.text_area(
+        "Finaler Team-Beschluss für das gewählte Depot:",
+        placeholder="Z.B.: 'Aufgrund von Ottos Makro-Analyse gewichten wir das Invest-Depot defensiver...'"
+    )
+    if st.button("💾 Entschluss speichern"):
+        if team_conclusion:
+            try:
+                supabase.table("team_decisions").insert({
+                    "depot_focus": selected_depot,
+                    "decision_text": team_conclusion
+                }).execute()
+                st.success("Entschluss erfolgreich verankert!")
+            except Exception as e:
+                st.error(f"Fehler: {e}")
+        else:
+            st.warning("Bitte Text eingeben.")
 
-            for sig in active_signals:
-                ticker = sig.get('ticker')
-                sig_date_str = sig.get('datum') or sig.get('signal_datum') # Passe das Feld an deine DB an
-                sig_type = sig.get('signal_typ', 'Standard')
-                sig_price = float(sig.get('preis', 0))
+# ==========================================
+# TAB 2: OTTO (Nutzt ausschließlich `employees/otto.py`)
+# ==========================================
+with tab_otto:
+    st.subheader(f"📊 {otto.name}")
+    st.caption(otto.description)
+    
+    col_o1, col_o2 = st.columns([2, 1])
+    
+    with col_o1:
+        if st.button("🚀 Otto: Analyse & Tages-Standup starten", key="btn_run_otto"):
+            with st.spinner("Otto analysiert..."):
+                success, msg = otto.run_analysis()
+                if success:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(f"Fehler: {msg}")
+        
+        logs = otto.get_logs()
+        if logs:
+            st.markdown("### 📚 Ottos Logbuch")
+            for log in logs:
+                with st.expander(f"Standup vom {log['analysis_date']} – Phase: {log.get('market_phase', 'N/A')}"):
+                    st.write(log['insight'])
+                    if log.get('user_feedback'):
+                        st.info(f"Dein Feedback: {log['user_feedback']}")
+        else:
+            st.info("Noch keine Berichte im Gedächtnis.")
+            
+    with col_o2:
+        st.markdown("#### 💬 Direkt mit Otto sprechen")
+        user_input = st.text_area("Anweisung an Otto:", placeholder="Z.B.: 'Achte stärker auf Rohstoffe.'", key="otto_feedback_input")
+        if st.button("Anweisung senden", key="btn_send_otto_fb"):
+            if user_input:
+                success, msg = otto.save_feedback(user_input)
+                if success:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.warning(msg)
+            else:
+                st.warning("Bitte Nachricht eingeben.")
 
-                if not sig_date_str:
-                    continue
+# ==========================================
+# TAB 3: NINO (Reines Signals Journal)
+# ==========================================
+with tab_nino:
+    st.subheader("⚡ Signals Journal")
+    st.markdown("Autonomes Archiv aller Screener-Signale inklusive 5-Tages-Peak- und Schlusskurs-Auswertung.")
+    
+    st.divider()
 
-                sig_date_iso = pd.to_datetime(sig_date_str).strftime('%Y-%m-%d')
-
-                # Wenn das Signal noch nicht im Journal ist, frisch aufnehmen
-                if (ticker, sig_date_iso) not in existing_set:
-                    self.supabase.table(self.table_journal).insert({
-                        "ticker": ticker.upper(),
-                        "signal_datum": pd.to_datetime(sig_date_str).isoformat(),
-                        "signal_typ": sig_type,
-                        "einstiegspreis_zum_signal": sig_price,
-                        "status": "Offen (warte auf 5D)"
-                    }).execute()
-                    logs.append(f"Neu im Journal: {ticker} vom {sig_date_iso}")
-
-        except Exception as e:
-            logs.append(f"Fehler beim Einlesen neuer Signale: {e}")
-
-        # --- SCHRITT 2: Auswertung für Signale nach 5 Handelstagen ---
-        try:
-            # Hole alle Signale, die noch den Status "Offen" haben
-            pending_res = self.supabase.table(self.table_journal).select("*").eq("status", "Offen (warte auf 5D)").execute()
-            pending_signals = pending_res.data
-
-            today = datetime.now().date()
-
-            for sig in pending_signals:
-                sig_id = sig['id']
-                ticker = sig['ticker']
-                sig_date = pd.to_datetime(sig['signal_datum']).date()
-                
-                # Prüfen, ob ca. 5-7 Kalendertage vergangen sind (entspricht ~5 Handelstagen)
-                days_passed = (today - sig_date).days
-                
-                if days_passed >= 5:
-                    # Kursdaten ab Signal-Datum herunterladen
-                    end_date = today + timedelta(days=2)
-                    df_hist = yf.download(
-                        ticker, 
-                        start=sig_date.strftime('%Y-%m-%d'), 
-                        end=end_date.strftime('%Y-%m-%d'), 
-                        progress=False, 
-                        auto_adjust=True
-                    )
-
-                    if len(df_hist) >= 5:
-                        df_5d = df_hist.head(5)
-
-                        # MultiIndex-Sicherheit für yfinance
-                        if isinstance(df_5d['High'], pd.DataFrame):
-                            high_series = df_5d['High'].iloc[:, 0]
-                            close_series = df_5d['Close'].iloc[:, 0]
-                        else:
-                            high_series = df_5d['High']
-                            close_series = df_5d['Close']
-
-                        max_kurs = float(high_series.max())
-                        end_kurs = float(close_series.iloc[-1])
-                        base_preis = float(sig['einstiegspreis_zum_signal'])
-
-                        if base_preis == 0:
-                            base_preis = float(close_series.iloc[0])
-
-                        # Performance berechnen
-                        max_perf_pct = ((max_kurs - base_preis) / base_preis) * 100 if base_preis > 0 else 0
-                        end_perf_pct = ((end_kurs - base_preis) / base_preis) * 100 if base_preis > 0 else 0
-
-                        # Update in Supabase
-                        self.supabase.table(self.table_journal).update({
-                            "max_kurs_5_tage": max_kurs,
-                            "max_performance_5_tage": max_perf_pct,
-                            "end_kurs_5_tage": end_kurs,
-                            "end_performance_5_tage": end_perf_pct,
-                            "status": "Ausgewertet (5D)"
-                        }).eq("id", sig_id).execute()
-
-                        logs.append(f"Ausgewertet (5D): {ticker} | Peak: {max_perf_pct:+.2f}%")
-
-        except Exception as e:
-            logs.append(f"Fehler bei der 5-Tages-Auswertung: {e}")
-
-        return logs
-
-    def get_signals_history(self):
-        """Gibt das gesamte Journal für die UI zurück."""
-        try:
-            res = self.supabase.table(self.table_journal).select("*").order("signal_datum", desc=True).execute()
-            return res.data
-        except Exception:
-            return []
+    # Das Journal direkt laden und anzeigen
+    journal_data = nino.get_signals_history()
+    
+    if journal_data:
+        df_nino = pd.DataFrame(journal_data)
+        if "id" in df_nino.columns:
+            df_nino = df_nino.drop(columns=["id"])
+        st.dataframe(df_nino, use_container_width=True)
+    else:
+        st.info("Das Signals Journal ist noch leer. Sobald Nino im Hintergrund seine Arbeit verrichtet, erscheinen hier die Daten.")
