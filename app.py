@@ -203,7 +203,7 @@ if check_password():
     
     # 3. Sektor-Performance
     st.subheader("🏛️ Sektor-Übersicht (Tagesperformance)")
-    sector_perf = get_sector_performance(supabase)
+    sector_perf = get_sector_performance()
     
     if not sector_perf.empty:
         sectors = list(sector_perf.items())
