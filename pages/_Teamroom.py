@@ -1,11 +1,12 @@
 import streamlit as st
 from supabase import create_client
-import pandas as pd
-import yfinance as yf
+import importlib
+import pkgutil
+import employees
 
 st.set_page_config(layout="wide", page_title="VisionDZ - Teamroom", page_icon="🏢")
 
-# Sicherheitsprüfung (Login-Status übernehmen)
+# Sicherheitsprüfung
 if not st.session_state.get("password_correct", False):
     st.warning("Bitte melde dich zuerst auf der Hauptseite an.")
     st.stop()
@@ -16,84 +17,75 @@ KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(URL, KEY)
 
 st.title("🏢 VisionDZ - Teamroom")
-st.markdown("Willkommen in der Kommandozentrale. Hier triffst du dich mit deinen KI-Mitarbeitern zum Daily Standup.")
+st.markdown("Kommandozentrale – Vollautomatisches KI-Mitarbeiter-Management.")
 
-# Mitarbeiter-Auswahl
+# Automatische Erkennung aller Mitarbeiter im 'employees'-Ordner
+@st.cache_resource
+def load_employee_registry():
+    registry = {}
+    for _, module_name, _ in pkgutil.iter_modules(employees.__path__):
+        module = importlib.import_module(f"employees.{module_name}")
+        # Suche nach Klassen, die von der Basis-Klasse 'Employee' erben (aber nicht Employee selbst sind)
+        for attribute_name in dir(module):
+            attribute = getattr(module, attribute_name)
+            if isinstance(attribute, type) and attribute != employees.otto.Employee:
+                # Prüfen ob es eine Methode run_analysis besitzt
+                if hasattr(attribute, "run_analysis"):
+                    instance = attribute(supabase)
+                    registry[instance.name] = instance
+    return registry
+
+employee_registry = load_employee_registry()
+
+# Sidebar Auswahl baut sich komplett dynamisch auf!
 st.sidebar.markdown("### 🤖 KI-Mitarbeiter")
-selected_employee = st.sidebar.selectbox("Mitarbeiter wählen:", ["Otto (History Analyst)"])
+selected_name = st.sidebar.selectbox("Mitarbeiter wählen:", list(employee_registry.keys()))
 
 st.divider()
 
-if selected_employee == "Otto (History Analyst)":
-    st.subheader("📊 Otto – History & Market Analyst")
-    st.caption("Zuständig für historische Muster, Marktphasen und datenbasierte Briefings.")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.markdown("#### 📝 Tägliche Analyse & Gedächtnis")
-        
-        # Button, um Otto eine neue Analyse schreiben zu lassen
-        if st.button("🚀 Otto: Neuen Tagesbericht erstellen & speichern"):
-            with st.spinner("Otto analysiert die Historie..."):
-                try:
-                    # Einfache Marktdaten holen für die Analyse
-                    df_spy = yf.download("^GSPC", period="5d", progress=False)
-                    current_val = float(df_spy['Close'].iloc[-1])
-                    prev_val = float(df_spy['Close'].iloc[-2])
-                    change = ((current_val - prev_val) / prev_val) * 100
-                    
-                    phase = "Bullenmarkt / Aufwärtstrend" if change > 0 else "Konsolidierung / Druck"
-                    insight_text = f"S&P 500 steht bei {current_val:,.2f} ({change:+.2f}%). Historische Muster deuten auf eine Phase der {phase} hin."
-                    
-                    # In Ottos eigene Tabelle speichern
-                    supabase.table("employee_otto_memory").insert({
-                        "market_phase": phase,
-                        "insight": insight_text
-                    }).execute()
-                    
-                    st.success("Otto hat seinen Bericht erfolgreich im Langzeitgedächtnis hinterlegt!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Fehler bei Ottos Analyse: {e}")
-        
-        # Bisherige Einträge aus Ottos Gedächtnis laden
-        try:
-            response = supabase.table("employee_otto_memory").select("*").order("analysis_date", desc=True).limit(5).execute()
-            logs = response.data
-            
-            if logs:
-                st.markdown("### 📚 Ottos Logbuch (Letzte Einträge)")
-                for log in logs:
-                    with st.expander(f"Bericht vom {log['analysis_date']} – Phase: {log['market_phase']}"):
-                        st.write(log['insight'])
-                        if log.get('user_feedback'):
-                            st.info(f"Dein Feedback: {log['user_feedback']}")
-            else:
-                st.info("Noch keine Einträge in Ottos Gedächtnis vorhanden. Starte oben die erste Analyse.")
-        except Exception as e:
-            st.error(get_error_msg(e))
+# Den aktuell ausgewählten Mitarbeiter laden
+current_employee = employee_registry[selected_name]
 
-    with col2:
-        st.markdown("#### 💬 Direkt mit Otto sprechen")
-        st.markdown("Gib Otto Anweisungen oder Feedback für seine nächste Analyse:")
-        
-        user_input = st.text_area("Nachricht an Otto:", placeholder="Z.B.: 'Otto, konzentriere dich morgen stärker auf den Technologiesektor.'")
-        if st.button("Anweisung senden"):
-            if user_input:
-                try:
-                    # Letzten Log holen und Feedback speichern
-                    res = supabase.table("employee_otto_memory").select("id").order("analysis_date", desc=True).limit(1).execute()
-                    if res.data:
-                        latest_id = res.data[0]['id']
-                        supabase.table("employee_otto_memory").update({"user_feedback": user_input}).eq("id", latest_id).execute()
-                        st.success("Anweisung an Otto übergeben und gespeichert!")
-                    else:
-                        st.warning("Kein Bericht vorhanden, an den das Feedback angehängt werden kann.")
-                except Exception as e:
-                    st.error(f"Fehler: {e}")
-            else:
-                st.warning("Bitte gib eine Nachricht ein.")
+st.subheader(f"📊 {current_employee.name}")
+st.caption(current_employee.description)
 
-def get_error_msg(e):
-    return f"Datenbank-Fehler: {e}"
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.markdown("#### 📝 Arbeitsbereich & Logbuch")
+    
+    if st.button(f"🚀 {current_employee.name}: Analyse & Tages-Standup starten"):
+        with st.spinner(f"{current_employee.name} arbeitet..."):
+            success, msg = current_employee.run_analysis()
+            if success:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(f"Fehler: {msg}")
+    
+    logs = current_employee.get_logs()
+    if logs:
+        st.markdown("### 📚 Logbuch & Historie")
+        for log in logs:
+            with st.expander(f"Standup vom {log['analysis_date']} – Status: {log.get('market_phase', 'N/A')}"):
+                st.write(log['insight'])
+                if log.get('user_feedback'):
+                    st.info(f"Dein Feedback: {log['user_feedback']}")
+    else:
+        st.info("Noch keine Berichte im Gedächtnis dieses Mitarbeiters vorhanden.")
+
+with col2:
+    st.markdown("#### 💬 Direkt sprechen / Training")
+    st.markdown("Gib deinem Mitarbeiter Anweisungen oder Feedback:")
+    
+    user_input = st.text_area("Nachricht:", placeholder="Z.B.: 'Achte stärker auf Kennzahl X.'", key=f"fb_{selected_name}")
+    if st.button("Anweisung senden"):
+        if user_input:
+            success, msg = current_employee.save_feedback(user_input)
+            if success:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.warning(msg)
+        else:
+            st.warning("Bitte gib eine Nachricht ein.")
