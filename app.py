@@ -18,11 +18,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Verbindung zu Supabase
-URL = st.secrets["SUPABASE_URL"]
-KEY = st.secrets["SUPABASE_KEY"]
-supabase = create_client(URL, KEY)
-
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
@@ -104,9 +99,9 @@ def get_index_performance():
 
 # Sektor-Performance berechnen
 @st.cache_data(ttl=60)
-def get_sector_performance():
+def get_sector_performance(sup_client):
     try:
-        response = supabase.table("watchlist").select("ticker, sector").execute()
+        response = sup_client.table("watchlist").select("ticker, sector").execute()
         df = pd.DataFrame(response.data)
         if df.empty or 'sector' not in df.columns or 'ticker' not in df.columns:
             return pd.Series()
@@ -143,9 +138,9 @@ def get_sector_performance():
 
 # Präzise Watchlist-Performance
 @st.cache_data(ttl=60)
-def get_watchlist_performance():
+def get_watchlist_performance(sup_client):
     try:
-        response = supabase.table("watchlist").select("ticker, company_name, gettex_ticker, sector").execute()
+        response = sup_client.table("watchlist").select("ticker, company_name, gettex_ticker, sector").execute()
         df = pd.DataFrame(response.data)
         if df.empty: return pd.DataFrame()
         
@@ -173,9 +168,14 @@ def get_watchlist_performance():
 
 # --- HAUPTPROGRAMM ---
 if check_password():
+    # Verbindung zu Supabase erst nach erfolgreichem Login herstellen
+    URL = st.secrets["SUPABASE_URL"]
+    KEY = st.secrets["SUPABASE_KEY"]
+    supabase = create_client(URL, KEY)
+
     st.title("📈 VisionDZ - Dashboard")
     
-    # 1. NEU: Makro & Rohstoffe ganz oben
+    # 1. Makro & Rohstoffe ganz oben
     st.subheader("🌍 Makro & Rohstoffe")
     macro_data = get_macro_commodities()
     if macro_data:
@@ -203,7 +203,7 @@ if check_password():
     
     # 3. Sektor-Performance
     st.subheader("🏛️ Sektor-Übersicht (Tagesperformance)")
-    sector_perf = get_sector_performance()
+    sector_perf = get_sector_performance(supabase)
     
     if not sector_perf.empty:
         sectors = list(sector_perf.items())
@@ -224,7 +224,7 @@ if check_password():
     st.divider()
     
     # 4. Top Gewinner & Verlierer
-    df_perf = get_watchlist_performance()
+    df_perf = get_watchlist_performance(supabase)
 
     if not df_perf.empty and "Tageschange (%)" in df_perf.columns:
         df_sorted = df_perf.sort_values(by="Tageschange (%)", ascending=False)
