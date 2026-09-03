@@ -4,7 +4,7 @@ import pandas as pd
 import yfinance as yf
 
 # Seiteneinstellungen
-st.set_page_config(layout="wide", page_title="VisionDZ - Dashboard", page_icon="📈")
+st.set_page_config(layout="wide", page_title="Trading Dashboard", page_icon="📈")
 
 # --- CUSTOM CSS ---
 st.markdown("""
@@ -41,33 +41,6 @@ def check_password():
             else:
                 st.error("Passwort falsch.")
     return False
-
-# --- NEU: Makro- & Rohstoff-Daten ---
-@st.cache_data(ttl=60)
-def get_macro_commodities():
-    symbols = {
-        "Gold": "GC=F",
-        "Rohöl (WTI)": "CL=F",
-        "US 10Y Zins": "^TNX"
-    }
-    results = {}
-    for name, symbol in symbols.items():
-        try:
-            df = yf.download(symbol, period="2d", progress=False)
-            if not df.empty and 'Close' in df.columns:
-                close_series = df['Close'].dropna()
-                if isinstance(close_series, pd.DataFrame):
-                    close_series = close_series.iloc[:, 0]
-                if len(close_series) >= 2:
-                    current = float(close_series.iloc[-1])
-                    prev = float(close_series.iloc[-2])
-                    unit = "%" if symbol == "^TNX" else "$"
-                    results[name] = {"price": current, "pct": ((current - prev) / prev) * 100, "unit": unit}
-                    continue
-        except Exception:
-            pass
-        results[name] = {"price": 0.0, "pct": 0.0, "unit": ""}
-    return results
 
 # Robuste Index-Daten (MultiIndex-sicher)
 @st.cache_data(ttl=60)
@@ -173,36 +146,21 @@ def get_watchlist_performance():
 
 # --- HAUPTPROGRAMM ---
 if check_password():
-    st.title("📈 VisionDZ - Dashboard")
+    st.title("📈 Trading Dashboard")
     
-    # 1. NEU: Makro & Rohstoffe ganz oben
-    st.subheader("🌍 Makro & Rohstoffe")
-    macro_data = get_macro_commodities()
-    if macro_data:
-        cols_macro = st.columns(len(macro_data))
-        for idx, (m_name, m_val) in enumerate(macro_data.items()):
-            val_str = f"{m_val['price']:,.2f} {m_val['unit']}"
-            cols_macro[idx].metric(m_name, val_str, f"{m_val['pct']:.2f}%")
-        
-    st.divider()
-    
-    # 2. Globale Indizes
-    st.subheader("📊 Globale Märkte")
     index_data = get_index_performance()
     keys = list(index_data.keys())
     
     for r in range(2):
         cols = st.columns(4)
         for i in range(4):
-            if r*4 + i < len(keys):
-                idx_name = keys[r*4 + i]
-                val = index_data[idx_name]
-                cols[i].metric(idx_name, f"{val['price']:,.2f}", f"{val['pct']:.2f}%")
+            idx_name = keys[r*4 + i]
+            val = index_data[idx_name]
+            cols[i].metric(idx_name, f"{val['price']:,.2f}", f"{val['pct']:.2f}%")
     
     st.divider()
     
-    # 3. Sektor-Performance
-    st.subheader("🏛️ Sektor-Übersicht (Tagesperformance)")
+    st.subheader("📊 Sektor-Übersicht (Tagesperformance)")
     sector_perf = get_sector_performance()
     
     if not sector_perf.empty:
@@ -222,8 +180,6 @@ if check_password():
         st.info("Keine Sektor-Daten verfügbar.")
         
     st.divider()
-    
-    # 4. Top Gewinner & Verlierer
     df_perf = get_watchlist_performance()
 
     if not df_perf.empty and "Tageschange (%)" in df_perf.columns:
