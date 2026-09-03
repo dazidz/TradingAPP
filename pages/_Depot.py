@@ -148,6 +148,13 @@ with tab_new_trade:
             t_shares = st.number_input("Anzahl Anteile", min_value=0.0001, value=1.0, format="%.4f")
             t_price = st.number_input("Ausführungspreis pro Einheit (€)", min_value=0.01, value=100.0, format="%.2f")
         
+        # --- NEU: Datum und Uhrzeit des tatsächlichen Trades ---
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            trade_date_only = st.date_input("Tatsächliches Ausführungsdatum", value="today")
+        with col_d2:
+            trade_time_only = st.time_input("Tatsächliche Ausführungszeit", value=datetime.now().time())
+        
         t_reason = st.text_area("Begründung / Kausalität (Bezug auf Team-Standup):", placeholder="Z.B.: 'Basierend auf Ottos Makro-Analyse im Invest-Depot aufgebaut...'")
         
         submitted = st.form_submit_button("Trade ausführen & speichern")
@@ -155,29 +162,32 @@ with tab_new_trade:
         if submitted:
             if t_ticker:
                 try:
-                    now_str = datetime.now().isoformat()
+                    # Kombiniere Datum und Uhrzeit zu einem ISO-String für Supabase
+                    combined_datetime = datetime.combine(trade_date_only, trade_time_only)
+                    trade_timestamp = combined_datetime.isoformat()
+                    
                     dest_table = depot_tables[t_target_depot]
                     
-                    # 1. Immer ins zentrale Journal eintragen
+                    # 1. Ins zentrale Journal eintragen (mit gewähltem Datum)
                     supabase.table("trade_journal").insert({
                         "ticker": t_ticker,
                         "action": t_action,
                         "shares": t_shares,
                         "price": t_price,
                         "reason": f"[{t_target_depot}] {t_reason}",
-                        "trade_date": now_str
+                        "trade_date": trade_timestamp
                     }).execute()
 
-                    # 2. Wenn BUY, in die entsprechende Depot-Tabelle einfügen
+                    # 2. Wenn BUY, in die entsprechende Depot-Tabelle einfügen (mit gewähltem Datum)
                     if t_action == "BUY":
                         supabase.table(dest_table).insert({
                             "ticker": t_ticker,
                             "shares": t_shares,
                             "buy_price": t_price,
-                            "buy_date": now_str
+                            "buy_date": trade_timestamp
                         }).execute()
                     
-                    st.success(f"Trade erfolgreich in `trade_journal` und `{dest_table}` verankert!")
+                    st.success(f"Trade für {t_ticker} mit Datum {combined_datetime.strftime('%d.%m.%Y %H:%M')} erfolgreich gespeichert!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Fehler beim Speichern: {e}")
