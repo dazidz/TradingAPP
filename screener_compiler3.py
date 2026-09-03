@@ -62,7 +62,7 @@ def scan_ticker(ticker_info):
     sector = ticker_info.get('sector', 'N/A')
     gettex_ticker = ticker_info.get('gettex_ticker', '')
     
-    # 1. 52-Wochen-Hoch (statt max) und Abstandsberechnung (sauber ohne Yahoo-Split-Fehler)
+    # 1. 52-Wochen-Hoch und Abstandsberechnung
     try:
         df_max = yf.download(ticker, period="1y", progress=False, auto_adjust=True)
         if isinstance(df_max.columns, pd.MultiIndex): 
@@ -181,72 +181,15 @@ def scan_ticker(ticker_info):
         print(f"❌ Fehler EMA {ticker}: {e}")
 
 if __name__ == "__main__":
-    print("🧹 Prüfe abgelaufene Signale (> 5 Tage) für die Historie...")
+    print("🧹 Räume alte Signale (> 5 Tage) in der aktiven Tabelle auf...")
     try:
         cutoff_5days = (datetime.datetime.now(pytz.UTC) - datetime.timedelta(days=5)).isoformat()
         
-        old_signals_res = supabase.table("signals").select("*").lt("created_at", cutoff_5days).execute()
-        old_signals = old_signals_res.data
-        
-        if old_signals:
-            print(f"📦 {len(old_signals)} abgelaufene Signale gefunden. Berechne Historie & Höchststände...")
-            for sig in old_signals:
-                ticker = sig['ticker']
-                entry_price = float(sig['entry_price'])
-                created_at_str = sig['created_at']
-                
-                exit_price = entry_price
-                max_price = entry_price
-                
-                try:
-                    df_hist = yf.download(ticker, period="10d", interval="1h", progress=False, auto_adjust=True)
-                    if not df_hist.empty:
-                        if isinstance(df_hist.columns, pd.MultiIndex): 
-                            df_hist.columns = df_hist.columns.get_level_values(0)
-                        df_hist.columns = [str(c).lower() for c in df_hist.columns]
-                        
-                        if df_hist.index.tz is None:
-                            df_hist.index = df_hist.index.tz_localize('UTC')
-                        else:
-                            df_hist.index = df_hist.index.tz_convert('UTC')
-                            
-                        start_dt = pd.to_datetime(created_at_str)
-                        end_dt = datetime.datetime.now(pytz.UTC)
-                        
-                        window_df = df_hist.loc[(df_hist.index >= start_dt) & (df_hist.index <= end_dt)]
-                        
-                        if not window_df.empty:
-                            if 'close' in window_df.columns:
-                                exit_price = float(window_df['close'].iloc[-1])
-                            if 'high' in window_df.columns:
-                                max_price = float(window_df['high'].max())
-                except Exception as e:
-                    print(f"⚠️ Warnung bei Kurs-Historie für {ticker}: {e}")
-                
-                perf_pct = ((exit_price - entry_price) / entry_price) * 100
-                max_perf_pct = ((max_price - entry_price) / entry_price) * 100
-                
-                history_data = {
-                    "ticker": ticker,
-                    "company_name": sig.get('company_name', ''),
-                    "signal_type": sig.get('signal_type', ''),
-                    "sector": sig.get('sector', ''),
-                    "entry_price": entry_price,
-                    "exit_price": exit_price,
-                    "performance_pct": round(perf_pct, 2),
-                    "max_performance_pct": round(max_perf_pct, 2),
-                    "exit_reason": "5 Tage Ablauf",
-                    "closed_at": datetime.datetime.now(pytz.UTC).isoformat()
-                }
-                supabase.table("signal_history").insert(history_data).execute()
-            
-            supabase.table("signals").delete().lt("created_at", cutoff_5days).execute()
-            print("✅ Historie erfolgreich mit Höchstständen aktualisiert.")
-        else:
-            print("ℹ️ Keine abgelaufenen Signale zum Verschieben.")
-
+        # Nur noch reines Löschen nach 5 Tagen (kein History-Eintrag mehr)
+        supabase.table("signals").delete().lt("created_at", cutoff_5days).execute()
+        print("✅ Alte Signale erfolgreich bereinigt.")
     except Exception as e: 
-        print(f"❌ Fehler bei der Historien-Verarbeitung: {e}")
+        print(f"❌ Fehler bei der Signal-Bereinigung: {e}")
 
     print("🚀 Starte Batch-Scan...")
     ticker_liste = get_ticker_list_with_names()
@@ -254,5 +197,6 @@ if __name__ == "__main__":
         try:
             scan_ticker(t_info)
             time.sleep(0.5)
-        except Exception as e: print(f"❌ Fehler bei {t_info['ticker']}: {e}")
+        except Exception as e: 
+            print(f"❌ Fehler bei {t_info['ticker']}: {e}")
     print("🏁 Scan abgeschlossen.")
