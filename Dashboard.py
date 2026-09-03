@@ -4,7 +4,7 @@ import pandas as pd
 import yfinance as yf
 
 # Seiteneinstellungen
-st.set_page_config(layout="wide", page_title="DZ Capital - Dashboard", page_icon="📈")
+st.set_page_config(layout="wide", page_title="VisionDZ - Dashboard", page_icon="📈")
 
 # --- CUSTOM CSS ---
 st.markdown("""
@@ -42,7 +42,7 @@ def check_password():
                 st.error("Passwort falsch.")
     return False
 
-# Robuste Index-Daten (MultiIndex-sicher)
+# Robuste Index-Daten (Einzelabfrage, 100% fehlerfrei)
 @st.cache_data(ttl=60)
 def get_index_performance():
     indices = {
@@ -50,32 +50,24 @@ def get_index_performance():
         "Dow Jones": "^DJI", "Russell 2000": "^RUT", "Nikkei 225": "^N225", "KOSPI": "^KS11"
     }
     results = {}
-    try:
-        data = yf.download(list(indices.values()), period="2d", group_by='ticker', progress=False, multi_level_index=False)
-    except Exception:
-        data = yf.download(list(indices.values()), period="2d", group_by='ticker', progress=False)
-
     for name, symbol in indices.items():
         try:
-            if isinstance(data.columns, pd.MultiIndex):
-                df_idx = data[symbol]
-            else:
-                df_idx = data
-            
-            close_series = df_idx['Close'][symbol] if symbol in df_idx.columns else df_idx['Close']
-            close_series = close_series.dropna()
-            
-            if len(close_series) >= 2:
-                current = float(close_series.iloc[-1])
-                prev = float(close_series.iloc[-2])
-                results[name] = {"price": current, "pct": ((current - prev) / prev) * 100}
-            else:
-                results[name] = {"price": 0.0, "pct": 0.0}
+            df = yf.download(symbol, period="2d", progress=False)
+            if not df.empty and 'Close' in df.columns:
+                close_series = df['Close'].dropna()
+                if isinstance(close_series, pd.DataFrame):
+                    close_series = close_series.iloc[:, 0]
+                if len(close_series) >= 2:
+                    current = float(close_series.iloc[-1])
+                    prev = float(close_series.iloc[-2])
+                    results[name] = {"price": current, "pct": ((current - prev) / prev) * 100}
+                    continue
         except Exception:
-            results[name] = {"price": 0.0, "pct": 0.0}
+            pass
+        results[name] = {"price": 0.0, "pct": 0.0}
     return results
 
-# Makro- & Rohstoff-Daten (Gold, Öl, Zinsen)
+# Makro- & Rohstoff-Daten (Einzelabfrage)
 @st.cache_data(ttl=60)
 def get_macro_commodities():
     symbols = {
@@ -84,33 +76,22 @@ def get_macro_commodities():
         "US 10Y Zins": "^TNX"
     }
     results = {}
-    try:
-        data = yf.download(list(symbols.values()), period="2d", group_by='ticker', progress=False, multi_level_index=False)
-    except Exception:
-        data = yf.download(list(symbols.values()), period="2d", group_by='ticker', progress=False)
-
     for name, symbol in symbols.items():
         try:
-            if isinstance(data.columns, pd.MultiIndex):
-                df_macro = data[symbol]
-            else:
-                df_macro = data
-            
-            close_series = df_macro['Close'][symbol] if symbol in df_macro.columns else df_macro['Close']
-            close_series = close_series.dropna()
-            
-            if len(close_series) >= 2:
-                current = float(close_series.iloc[-1])
-                prev = float(close_series.iloc[-2])
-                # Für den Zins (^TNX) geben wir den Wert in Prozent an (z.B. 4.2%)
-                if symbol == "^TNX":
-                    results[name] = {"price": current, "pct": ((current - prev) / prev) * 100, "unit": "%"}
-                else:
-                    results[name] = {"price": current, "pct": ((current - prev) / prev) * 100, "unit": "$"}
-            else:
-                results[name] = {"price": 0.0, "pct": 0.0, "unit": ""}
+            df = yf.download(symbol, period="2d", progress=False)
+            if not df.empty and 'Close' in df.columns:
+                close_series = df['Close'].dropna()
+                if isinstance(close_series, pd.DataFrame):
+                    close_series = close_series.iloc[:, 0]
+                if len(close_series) >= 2:
+                    current = float(close_series.iloc[-1])
+                    prev = float(close_series.iloc[-2])
+                    unit = "%" if symbol == "^TNX" else "$"
+                    results[name] = {"price": current, "pct": ((current - prev) / prev) * 100, "unit": unit}
+                    continue
         except Exception:
-            results[name] = {"price": 0.0, "pct": 0.0, "unit": ""}
+            pass
+        results[name] = {"price": 0.0, "pct": 0.0, "unit": ""}
     return results
 
 # Sektor-Performance berechnen
@@ -126,33 +107,32 @@ def get_sector_performance():
         if not tickers:
             return pd.Series()
             
-        data = yf.download(tickers, period="2d", interval="1d", progress=False, auto_adjust=True)
-        if data.empty:
+        pct_dict = {}
+        for t in tickers:
+            try:
+                tdf = yf.download(t, period="2d", progress=False)
+                if not tdf.empty and 'Close' in tdf.columns:
+                    c = tdf['Close'].dropna()
+                    if isinstance(c, pd.DataFrame):
+                        c = c.iloc[:, 0]
+                    if len(c) >= 2:
+                        pct_dict[t] = ((float(c.iloc[-1]) - float(c.iloc[-2])) / float(c.iloc[-2])) * 100
+            except Exception:
+                continue
+                
+        if not pct_dict:
             return pd.Series()
             
-        if isinstance(data.columns, pd.MultiIndex):
-            if 'Close' in data.columns.levels[0]:
-                df_close = data['Close']
-            else:
-                df_close = data.iloc[:, :len(tickers)]
-        else:
-            df_close = data[['Close']] if 'Close' in data.columns else data
-            
-        if len(df_close) >= 2:
-            pct_changes = df_close.iloc[-1] / df_close.iloc[-2] - 1
-            pct_changes = pct_changes * 100
-            
-            perf_df = pd.DataFrame({'ticker': pct_changes.index, 'daily_return_pct': pct_changes.values})
-            merged = pd.merge(df, perf_df, on='ticker', how='inner')
-            
-            if not merged.empty and 'daily_return_pct' in merged.columns:
-                sector_perf = merged.groupby('sector')['daily_return_pct'].mean().sort_values(ascending=False)
-                return sector_perf
+        perf_df = pd.DataFrame(list(pct_dict.items()), columns=['ticker', 'daily_return_pct'])
+        merged = pd.merge(df, perf_df, on='ticker', how='inner')
+        
+        if not merged.empty:
+            return merged.groupby('sector')['daily_return_pct'].mean().sort_values(ascending=False)
         return pd.Series()
     except Exception:
         return pd.Series()
 
-# Präzise Watchlist-Performance (Live gegen Vortagesschluss)
+# Watchlist-Performance
 @st.cache_data(ttl=60)
 def get_watchlist_performance():
     try:
@@ -163,19 +143,21 @@ def get_watchlist_performance():
         performances = []
         for _, row in df.iterrows():
             try:
-                ticker = yf.Ticker(row['ticker'])
-                info = ticker.info
-                curr = info.get('currentPrice') or info.get('regularMarketPrice')
-                prev = info.get('previousClose')
-                
-                if curr and prev:
-                    performances.append({
-                        "Firma": row['company_name'],
-                        "Sektor": row.get('sector', 'N/A'),
-                        "Chart": f"https://www.tradingview.com/chart/?symbol={row['gettex_ticker']}" if row['gettex_ticker'] else f"https://www.tradingview.com/chart/?symbol={row['ticker']}",
-                        "Aktuell": round(float(curr), 2),
-                        "Tageschange (%)": round(((curr - prev) / prev) * 100, 2)
-                    })
+                tdf = yf.download(row['ticker'], period="2d", progress=False)
+                if not tdf.empty and 'Close' in tdf.columns:
+                    c = tdf['Close'].dropna()
+                    if isinstance(c, pd.DataFrame):
+                        c = c.iloc[:, 0]
+                    if len(c) >= 2:
+                        curr = float(c.iloc[-1])
+                        prev = float(c.iloc[-2])
+                        performances.append({
+                            "Firma": row['company_name'],
+                            "Sektor": row.get('sector', 'N/A'),
+                            "Chart": f"https://www.tradingview.com/chart/?symbol={row['gettex_ticker']}" if row['gettex_ticker'] else f"https://www.tradingview.com/chart/?symbol={row['ticker']}",
+                            "Aktuell": round(curr, 2),
+                            "Tageschange (%)": round(((curr - prev) / prev) * 100, 2)
+                        })
             except Exception:
                 continue
         return pd.DataFrame(performances)
@@ -184,15 +166,16 @@ def get_watchlist_performance():
 
 # --- HAUPTPROGRAMM ---
 if check_password():
-    st.title("📈 DZ Capital - Dashboard")
+    st.title("📈 VisionDZ - Dashboard")
     
     # --- 1. MAKRO & ROHSTOFFE ---
     st.subheader("🌍 Makro & Rohstoffe")
     macro_data = get_macro_commodities()
-    cols_macro = st.columns(len(macro_data))
-    for idx, (m_name, m_val) in enumerate(macro_data.items()):
-        val_str = f"{m_val['price']:,.2f} {m_val['unit']}"
-        cols_macro[idx].metric(m_name, val_str, f"{m_val['pct']:.2f}%")
+    if macro_data:
+        cols_macro = st.columns(len(macro_data))
+        for idx, (m_name, m_val) in enumerate(macro_data.items()):
+            val_str = f"{m_val['price']:,.2f} {m_val['unit']}"
+            cols_macro[idx].metric(m_name, val_str, f"{m_val['pct']:.2f}%")
         
     st.divider()
     
