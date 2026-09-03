@@ -13,6 +13,7 @@ from supabase import create_client
 # Importiere die Mitarbeiter-Klassen
 from employees.otto import OttoAnalyst
 from employees.nino import NinoSignalsAssistant
+from employees.peter import PeterInsiderAnalyst
 
 st.set_page_config(layout="wide", page_title="VisionDZ - Team & Kommandozentrale", page_icon="🏢")
 
@@ -27,14 +28,16 @@ supabase = create_client(URL, KEY)
 # Mitarbeiter-Instanzen erzeugen
 otto = OttoAnalyst(supabase)
 nino = NinoSignalsAssistant(supabase)
+peter = PeterInsiderAnalyst(supabase)
 
 st.title("🏢 VisionDZ - Team & Kommandozentrale")
 
 # --- DIE TABS DEFINIEREN ---
-tab_teamroom, tab_otto, tab_nino = st.tabs([
+tab_teamroom, tab_otto, tab_nino, tab_peter = st.tabs([
     "💬 Teamroom", 
     "📊 Otto (History & Macro)", 
-    "⚡ Signals Journal (Nino)"
+    "⚡ Signals Journal (Nino)",
+    "🕵️ Peter (Market Intel)"
 ])
 
 # ==========================================
@@ -156,3 +159,34 @@ with tab_nino:
         st.dataframe(df_nino, use_container_width=True)
     else:
         st.info("Das Signals Journal ist noch leer. Sobald Nino im Hintergrund seine Arbeit verrichtet, erscheinen hier die Daten.")
+
+# ==========================================
+# TAB 4: PETER (Market Intel & Insider)
+# ==========================================
+with tab_peter:
+    st.subheader(f"🕵️ {peter.name}")
+    st.caption(peter.description)
+    
+    if st.button("🔄 Peter: Markt-Intel & Kennzahlen aktualisieren", key="btn_run_peter"):
+        with st.spinner("Peter holt aktuelle Marktdaten und bereinigt alte Einträge (>6 Monate)..."):
+            success, msg = peter.fetch_market_intel()
+            if success:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+                
+    st.divider()
+    
+    latest_intel = peter.get_latest_intel()
+    if latest_intel:
+        st.markdown(f"### 📌 Bericht vom {latest_intel.get('analysis_date')}")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info(f"**Insider & Aktivität:**\n\n{latest_intel.get('insider_activity')}")
+            st.warning(f"**Analysten-Konsens / Bewertung:**\n\n{latest_intel.get('analyst_consensus')}")
+        with col2:
+            st.success(f"**Markt- & News-Summary:**\n\n{latest_intel.get('market_news_summary')}")
+    else:
+        st.info("Noch keine Markt-Intel vorhanden. Starte die Aktualisierung über den Button.")
