@@ -32,7 +32,6 @@ try:
 
     def check_password():
         if "APP_PASSWORD" not in st.secrets:
-            # Falls kein Passwort konfiguriert ist, direkt durchlassen
             return True
             
         if "password_correct" not in st.session_state:
