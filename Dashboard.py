@@ -23,7 +23,6 @@ URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(URL, KEY)
 
-# --- URSPRÜNGLICHE PASSWORT-LOGIK ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
@@ -43,7 +42,7 @@ def check_password():
                 st.error("Passwort falsch.")
     return False
 
-# --- NEU: Makro- & Rohstoff-Daten (optional oben) ---
+# --- NEU: Makro- & Rohstoff-Daten ---
 @st.cache_data(ttl=60)
 def get_macro_commodities():
     symbols = {
@@ -176,7 +175,7 @@ def get_watchlist_performance():
 if check_password():
     st.title("📈 VisionDZ - Dashboard")
     
-    # Makro & Rohstoffe
+    # 1. NEU: Makro & Rohstoffe ganz oben
     st.subheader("🌍 Makro & Rohstoffe")
     macro_data = get_macro_commodities()
     if macro_data:
@@ -187,7 +186,8 @@ if check_password():
         
     st.divider()
     
-    # Indizes
+    # 2. Globale Indizes
+    st.subheader("📊 Globale Märkte")
     index_data = get_index_performance()
     keys = list(index_data.keys())
     
@@ -201,8 +201,8 @@ if check_password():
     
     st.divider()
     
-    # Sektor-Performance
-    st.subheader("📊 Sektor-Übersicht (Tagesperformance)")
+    # 3. Sektor-Performance
+    st.subheader("🏛️ Sektor-Übersicht (Tagesperformance)")
     sector_perf = get_sector_performance()
     
     if not sector_perf.empty:
@@ -222,6 +222,8 @@ if check_password():
         st.info("Keine Sektor-Daten verfügbar.")
         
     st.divider()
+    
+    # 4. Top Gewinner & Verlierer
     df_perf = get_watchlist_performance()
 
     if not df_perf.empty and "Tageschange (%)" in df_perf.columns:
