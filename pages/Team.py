@@ -30,11 +30,11 @@ nino = NinoSignalsAssistant(supabase)
 
 st.title("🏢 VisionDZ - Team & Kommandozentrale")
 
-# --- DIE TABS DEFINIEREN (Risk Manager raus, Nino rein) ---
+# --- DIE TABS DEFINIEREN ---
 tab_teamroom, tab_otto, tab_nino = st.tabs([
     "💬 Teamroom", 
     "📊 Otto (History & Macro)", 
-    "⚡ Nino (Signals Assistent)"
+    "⚡ Signals Journal (Nino)"
 ])
 
 # ==========================================
@@ -65,14 +65,14 @@ with tab_teamroom:
             st.warning("Otto hat noch kein Standup durchgeführt. Wechsle in den Tab 'Otto'.")
             
     with col2:
-        st.markdown("#### ⚡ Ninos letzter Stand (Signals Journal)")
+        st.markdown("#### ⚡ Ninos letzte Journal-Aktivität")
         journal_logs = nino.get_signals_history()
         if journal_logs:
             latest_nino = journal_logs[0]
-            st.write(f"**Letzter Ticker im Journal:** {latest_nino.get('ticker')} ({latest_nino.get('signal_typ')})")
+            st.write(f"**Letzter Ticker:** {latest_nino.get('ticker')} ({latest_nino.get('signal_typ')})")
             st.info(f"Status: {latest_nino.get('status')} | Max-Perf (5D): {latest_nino.get('max_performance_5_tage', 0):+.2f}%")
         else:
-            st.warning("Noch keine Signale im Journal. Starte Ninos Schicht im Nino-Tab.")
+            st.warning("Das Journal ist noch leer.")
         
     st.divider()
     
@@ -138,35 +138,15 @@ with tab_otto:
                 st.warning("Bitte Nachricht eingeben.")
 
 # ==========================================
-# TAB 3: NINO (Signals Assistent & Journal)
+# TAB 3: NINO (Reines Signals Journal)
 # ==========================================
 with tab_nino:
-    st.subheader(f"⚡ {nino.name}")
-    st.caption(nino.description)
+    st.subheader("⚡ Signals Journal")
+    st.markdown("Autonomes Archiv aller Screener-Signale inklusive 5-Tages-Peak- und Schlusskurs-Auswertung.")
     
-    col_n1, col_n2 = st.columns([2, 1])
-    
-    with col_n1:
-        st.markdown("### Ninos Schicht-Steuerung")
-        st.markdown("Lass Nino prüfen, ob neue Signale aus dem Screener ins Journal übernommen werden müssen oder ob 5-Tages-Auswertungen fällig sind.")
-        
-        if st.button("🚀 Ninos tägliche Schicht ausführen", key="btn_run_nino"):
-            with st.spinner("Nino durchsucht den Screener und aktualisiert das Signals Journal..."):
-                logs = nino.daily_routine()
-                
-            if logs:
-                st.success("Ninos Schicht erfolgreich beendet!")
-                for log in logs:
-                    st.write(f"- {log}")
-            else:
-                st.info("Nino hat gearbeitet: Keine neuen Signale oder fälligen 5-Tages-Updates gefunden.")
-
-    with col_n2:
-        st.info("💡 **Regel:** Nino sichert den Einstiegspreis und berechnet nach exakt 5 Handelstagen automatisch den Peak (Höchstkurs) sowie den Schlusskurs.")
-
     st.divider()
 
-    st.subheader("📖 Das Signals Journal (Archiv)")
+    # Das Journal direkt laden und anzeigen
     journal_data = nino.get_signals_history()
     
     if journal_data:
@@ -175,4 +155,4 @@ with tab_nino:
             df_nino = df_nino.drop(columns=["id"])
         st.dataframe(df_nino, use_container_width=True)
     else:
-        st.info("Das Signals Journal ist noch leer. Starte Ninos Schicht, sobald Signale im Screener liegen.")
+        st.info("Das Signals Journal ist noch leer. Sobald Nino im Hintergrund seine Arbeit verrichtet, erscheinen hier die Daten.")
