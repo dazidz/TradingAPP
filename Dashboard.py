@@ -24,12 +24,15 @@ KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(URL, KEY)
 
 def check_password():
+    # Initialisierung im Session State, falls noch nicht vorhanden
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
 
+    # Wenn bereits erfolgreich eingeloggt, direkt True zurückgeben
     if st.session_state.password_correct:
         return True
 
+    # Login-Maske anzeigen
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("## 🔐 Login")
@@ -114,7 +117,7 @@ def get_sector_performance():
     except Exception:
         return pd.Series()
 
-# Präzise Watchlist-Performance
+# Präzise Watchlist-Performance (Live gegen Vortagesschluss)
 @st.cache_data(ttl=60)
 def get_watchlist_performance():
     try:
@@ -151,6 +154,7 @@ if check_password():
     index_data = get_index_performance()
     keys = list(index_data.keys())
     
+    # 2 Reihen à 4 Metriken für Indizes
     for r in range(2):
         cols = st.columns(4)
         for i in range(4):
@@ -160,12 +164,15 @@ if check_password():
     
     st.divider()
     
+    # --- SEKTOR PERFORMANCE ALS KOMPAKTE METRIKEN ---
     st.subheader("📊 Sektor-Übersicht (Tagesperformance)")
     sector_perf = get_sector_performance()
     
     if not sector_perf.empty:
         sectors = list(sector_perf.items())
         num_sectors = len(sectors)
+        
+        # Zeige maximal 4 Sektoren pro Reihe an, damit es übersichtlich bleibt
         cols_per_row = min(num_sectors, 4)
         for i in range(0, num_sectors, cols_per_row):
             row_sectors = sectors[i:i + cols_per_row]
