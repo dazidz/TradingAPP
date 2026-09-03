@@ -2,30 +2,30 @@ name: Nino Autonomous Routine
 
 on:
   schedule:
-    # Läuft jeden Tag um 20:00 UTC (Beispiel-Zeitpunkt nach US-Börsenschluss)
+    # Läuft jeden Tag um 20:00 UTC (nach US-Börsenschluss)
     - cron: '0 20 * * 1-5'
-  workflow_dispatch: # Ermöglicht auch das manuelle Starten direkt auf GitHub
+  workflow_dispatch: # Ermöglicht das manuelle Starten in GitHub
 
 jobs:
   run-nino:
-  runs-on: ubuntu-latest
-  steps:
-    - name: Repository auschecken
-      uses: actions/checkout@v4
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
 
-    - name: Python einrichten
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    - name: Abhängigkeiten installieren
-      run: |
-        python -m pip install --upgrade pip
-        pip install supabase pandas yfinance
+      - name: Abhängigkeiten installieren
+        run: |
+          python -m pip install --upgrade pip
+          pip install supabase pandas yfinance
 
-    - name: Nino-Skript ausführen
-      env:
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-      run: |
-        python run_nino.py
+      - name: Nino-Skript ausführen
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          python run_nino.py
