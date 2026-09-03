@@ -185,7 +185,7 @@ if __name__ == "__main__":
     try:
         cutoff_5days = (datetime.datetime.now(pytz.UTC) - datetime.timedelta(days=5)).isoformat()
         
-        # Nur noch reines Löschen nach 5 Tagen (kein History-Eintrag mehr)
+        # Löscht alte Signale rein aus der 'signals'-Tabelle (keine History-Tabellen mehr hier)
         supabase.table("signals").delete().lt("created_at", cutoff_5days).execute()
         print("✅ Alte Signale erfolgreich bereinigt.")
     except Exception as e: 
