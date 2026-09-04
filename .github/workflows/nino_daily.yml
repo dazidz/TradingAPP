@@ -1,28 +1,31 @@
-import os
-import sys
-from supabase import create_client
-from employees.nino import NinoSignalsAssistant
+name: Nino Autonomous Routine
 
-def main():
-    # Umgebungsvariablen aus GitHub Secrets auslesen
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_KEY")
+on:
+  schedule:
+    # Läuft jeden Tag um 20:00 UTC (nach US-Börsenschluss)
+    - cron: '0 20 * * 1-5'
+  workflow_dispatch: # Ermöglicht das manuelle Starten in GitHub
 
-    if not url or not key:
-        print("Fehler: SUPABASE_URL oder SUPABASE_KEY sind nicht gesetzt!")
-        sys.exit(1)
+jobs:
+  run-nino:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
 
-    print("Verbinde mit Supabase...")
-    supabase = create_client(url, key)
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    print("Nino startet seine automatisierte Schicht...")
-    nino = NinoSignalsAssistant(supabase)
-    logs = nino.daily_routine()
+      - name: Abhängigkeiten installieren
+        run: |
+          python -m pip install --upgrade pip
+          pip install supabase pandas yfinance
 
-    for log in logs:
-        print(f"[Nino Log]: {log}")
-        
-    print("Nino hat seine Schicht beendet.")
-
-if __name__ == "__main__":
-    main()
+      - name: Nino-Skript ausführen
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          python nino.py
