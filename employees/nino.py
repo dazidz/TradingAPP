@@ -1,3 +1,5 @@
+import os
+import sys
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
@@ -115,3 +117,25 @@ class NinoSignalsAssistant:
             return res.data if res.data else []
         except Exception:
             return []
+
+
+# --- Direkter Ausführungspunkt für GitHub Actions ---
+if __name__ == "__main__":
+    from supabase import create_client
+
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_KEY")
+
+    if not url or not key:
+        print("Fehler: SUPABASE_URL oder SUPABASE_KEY sind nicht gesetzt!")
+        sys.exit(1)
+
+    print("Nino startet seine automatisierte Schicht...")
+    supabase_client = create_client(url, key)
+    nino = NinoSignalsAssistant(supabase_client)
+    
+    routine_logs = nino.daily_routine()
+    for log in routine_logs:
+        print(f"[Nino Log]: {log}")
+        
+    print("Nino hat seine Schicht beendet.")
