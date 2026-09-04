@@ -73,7 +73,12 @@ with tab_teamroom:
         if journal_logs:
             latest_nino = journal_logs[0]
             st.write(f"**Letzter Ticker:** {latest_nino.get('ticker')} ({latest_nino.get('signal_typ')})")
-            st.info(f"Status: {latest_nino.get('status')} | Max-Perf (5D): {latest_nino.get('max_performance_5_tage', 0):+.2f}%")
+            
+            # Sicherer Abfang von None/NULL Werten für die Performance
+            perf = latest_nino.get('max_performance_5_tage')
+            perf_val = float(perf) if perf is not None else 0.0
+            
+            st.info(f"Status: {latest_nino.get('status')} | Max-Perf (5D): {perf_val:+.2f}%")
         else:
             st.warning("Das Journal ist noch leer.")
         
