@@ -46,6 +46,16 @@ class NinoSignalsAssistant:
                     logs.append(f"Neu im Journal: {ticker} vom {sig_date_iso}")
 
         except Exception as e:
+            print("------------ SUPABASE FEHLER DETAILS ------------")
+            print(f"Typ: {type(e)}")
+            print(f"Fehler: {e}")
+            if hasattr(e, 'code'):
+                print(f"Code: {e.code}")
+            if hasattr(e, 'message'):
+                print(f"Message: {e.message}")
+            if hasattr(e, 'details'):
+                print(f"Details: {e.details}")
+            print("---------------------------------------------------")
             logs.append(f"Fehler beim Einlesen neuer Signale: {e}")
 
         # --- SCHRITT 2: Auswertung für Signale nach 5 Handelstagen ---
