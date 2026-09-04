@@ -4,6 +4,14 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
 
+# Hauptverzeichnis in den Pfad aufnehmen, um `db.py` korrekt zu finden
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+from db import get_db_client
+
 class NinoSignalsAssistant:
     def __init__(self, supabase_client):
         self.supabase = supabase_client
@@ -26,9 +34,9 @@ class NinoSignalsAssistant:
 
             for sig in active_signals:
                 ticker = sig.get('ticker')
-                sig_date_str = sig.get('datum') or sig.get('signal_datum')
-                sig_type = sig.get('signal_typ', 'Standard')
-                sig_price = float(sig.get('preis', 0))
+                sig_date_str = sig.get('datum') or sig.get('signal_datum') or sig.get('candle_time')
+                sig_type = sig.get('signal_type') or sig.get('signal_typ', 'Standard')
+                sig_price = float(sig.get('entry_price') or sig.get('preis', 0))
 
                 if not ticker or not sig_date_str:
                     continue
@@ -46,14 +54,6 @@ class NinoSignalsAssistant:
                     logs.append(f"Neu im Journal: {ticker} vom {sig_date_iso}")
 
         except Exception as e:
-            print("------------ SUPABASE FEHLER DETAILS ------------")
-            print(f"Typ: {type(e)}")
-            print(f"Fehler: {e}")
-            if hasattr(e, 'code'):
-                print(f"Code: {e.code}")
-            if hasattr(e, 'message'):
-                print(f"Message: {e.message}")
-            print("---------------------------------------------------")
             logs.append(f"Fehler beim Einlesen neuer Signale: {e}")
 
         # --- SCHRITT 2: Auswertung für Signale nach 5 Handelstagen ---
@@ -129,20 +129,10 @@ class NinoSignalsAssistant:
 
 # --- Direkter Ausführungspunkt für GitHub Actions ---
 if __name__ == "__main__":
-    from supabase import create_client
-
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_KEY")
-
-    if not url or not key:
-        print("Fehler: SUPABASE_URL oder SUPABASE_KEY sind nicht gesetzt!")
-        sys.exit(1)
-
-    # Trailing Slash entfernen, um URL-Fehler bei PostgREST zu verhindern
-    url = url.rstrip('/')
-
     print("Nino startet seine automatisierte Schicht...")
-    supabase_client = create_client(url, key)
+    
+    # Exakt dieselbe Methode wie im funktionierenden Screener verwenden
+    supabase_client = get_db_client()
     nino = NinoSignalsAssistant(supabase_client)
     
     routine_logs = nino.daily_routine()
