@@ -9,7 +9,7 @@ class NinoSignalsAssistant:
         self.supabase = supabase_client
         self.name = "Nino (Signals Assistent)"
         self.description = "Scannt täglich neue Screener-Signale, archiviert sie und wertet nach 5 Tagen den Peak und Schlusskurs aus."
-        self.table_journal = "signals_journal"
+        self.table_journal = "nino_log"
         self.table_active_signals = "signals"
 
     def daily_routine(self):
