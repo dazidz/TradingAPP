@@ -138,6 +138,9 @@ if __name__ == "__main__":
         print("Fehler: SUPABASE_URL oder SUPABASE_KEY sind nicht gesetzt!")
         sys.exit(1)
 
+    # Trailing Slash entfernen, um URL-Fehler bei PostgREST zu verhindern
+    url = url.rstrip('/')
+
     print("Nino startet seine automatisierte Schicht...")
     supabase_client = create_client(url, key)
     nino = NinoSignalsAssistant(supabase_client)
