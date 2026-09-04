@@ -17,10 +17,10 @@ class NinoSignalsAssistant:
         
         # --- SCHRITT 1: Neue Signale ins Journal holen ---
         try:
-            active_res = self.supabase.schema("public").table(self.table_active_signals).select("*").execute()
+            active_res = self.supabase.table(self.table_active_signals).select("*").execute()
             active_signals = active_res.data or []
             
-            journal_res = self.supabase.schema("public").table(self.table_journal).select("ticker, signal_datum").execute()
+            journal_res = self.supabase.table(self.table_journal).select("ticker, signal_datum").execute()
             journal_data = journal_res.data or []
             existing_set = {(j['ticker'], str(j['signal_datum'])[:10]) for j in journal_data if j.get('signal_datum')}
 
@@ -36,7 +36,7 @@ class NinoSignalsAssistant:
                 sig_date_iso = pd.to_datetime(sig_date_str).strftime('%Y-%m-%d')
 
                 if (ticker.upper(), sig_date_iso) not in existing_set:
-                    self.supabase.schema("public").table(self.table_journal).insert({
+                    self.supabase.table(self.table_journal).insert({
                         "ticker": ticker.upper(),
                         "signal_datum": pd.to_datetime(sig_date_str).isoformat(),
                         "signal_typ": sig_type,
@@ -50,7 +50,7 @@ class NinoSignalsAssistant:
 
         # --- SCHRITT 2: Auswertung für Signale nach 5 Handelstagen ---
         try:
-            pending_res = self.supabase.schema("public").table(self.table_journal).select("*").eq("status", "Offen (warte auf 5D)").execute()
+            pending_res = self.supabase.table(self.table_journal).select("*").eq("status", "Offen (warte auf 5D)").execute()
             pending_signals = pending_res.data or []
 
             today = datetime.now().date()
@@ -96,7 +96,7 @@ class NinoSignalsAssistant:
                         max_perf_pct = ((max_kurs - base_preis) / base_preis) * 100 if base_preis > 0 else 0
                         end_perf_pct = ((end_kurs - base_preis) / base_preis) * 100 if base_preis > 0 else 0
 
-                        self.supabase.schema("public").table(self.table_journal).update({
+                        self.supabase.table(self.table_journal).update({
                             "max_kurs_5_tage": max_kurs,
                             "max_performance_5_tage": max_perf_pct,
                             "end_kurs_5_tage": end_kurs,
@@ -113,7 +113,7 @@ class NinoSignalsAssistant:
 
     def get_signals_history(self):
         try:
-            res = self.supabase.schema("public").table(self.table_journal).select("*").order("signal_datum", desc=True).execute()
+            res = self.supabase.table(self.table_journal).select("*").order("signal_datum", desc=True).execute()
             return res.data if res.data else []
         except Exception:
             return []
