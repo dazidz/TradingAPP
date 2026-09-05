@@ -17,7 +17,7 @@ class NinoSignalsAssistant:
     def __init__(self, supabase_client):
         self.supabase = supabase_client
         self.name = "Nino (Signals Assistent)"
-        self.description = "Scannt täglich neue Screener-Signale, archiviert sie (inkl. SMI, ADX & Favoriten) und wertet nach 5 Tagen den Peak/Schlusskurs aus."
+        self.description = "Scannt täglich neue Screener-Signale, archiviert sie (inkl. SMI, ADX, Favoriten & EMA20-Status) und wertet nach 5 Tagen aus."
         self.table_journal = "signal_journal"
         self.table_active_signals = "signals"
         self.table_favorites = "favorites"
@@ -25,7 +25,7 @@ class NinoSignalsAssistant:
     def daily_routine(self):
         logs = []
         
-        # --- SCHRITT 1: Favoriten aus der 'favorites'-Tabelle vorab laden ---
+        # --- SCHRITT 1: Favoriten laden ---
         favorite_tickers = set()
         try:
             fav_res = self.supabase.table(self.table_favorites).select("ticker").execute()
@@ -34,7 +34,7 @@ class NinoSignalsAssistant:
         except Exception as e:
             logs.append(f"Hinweis beim Laden der Favoriten: {e}")
 
-        # --- SCHRITT 2: Neue Signale ins Journal holen ---
+        # --- SCHRITT 2: Neue Signale ins Journal holen & EMA20 prüfen ---
         try:
             active_res = self.supabase.table(self.table_active_signals).select("*").execute()
             active_signals = active_res.data or []
@@ -59,10 +59,9 @@ class NinoSignalsAssistant:
                 sig_date_iso = pd.to_datetime(sig_date_str).strftime('%Y-%m-%d')
 
                 if (ticker_upper, sig_date_iso) not in existing_set:
-                    # Meta-Daten (SMI & ADX) aus dem Screener parsen
+                    # Meta-Daten (SMI & ADX) parsen
                     meta_raw = sig.get('meta_data', '{}')
-                    smi_val = None
-                    adx_val = None
+                    smi_val, adx_val = None, None
                     
                     try:
                         if isinstance(meta_raw, str):
@@ -77,10 +76,28 @@ class NinoSignalsAssistant:
                     except Exception:
                         pass
 
-                    # Prüfen, ob Ticker in der 'favorites'-Tabelle steht
+                    # Favoriten-Status prüfen
                     is_fav = ticker_upper in favorite_tickers
 
-                    # Ins Journal schreiben inklusive SMI, ADX und Favoriten-Status
+                    # EMA 20 Status ermitteln (ob Kurs über oder unter EMA 20 liegt)
+                    above_ema = False
+                    try:
+                        df_ema = yf.download(ticker_upper, period="2mo", interval="1d", progress=False, auto_adjust=True)
+                        if isinstance(df_ema.columns, pd.MultiIndex):
+                            df_ema.columns = df_ema.columns.get_level_values(0)
+                        if 'Close' in df_ema.columns and len(df_ema) >= 20:
+                            ema_series = df_ema['Close'].ewm(span=20, adjust=False).mean()
+                            # Letzter bekannter Wert vor oder am Signal-Datum
+                            target_dt = pd.to_datetime(sig_date_iso)
+                            historical_slice = df_ema[df_ema.index <= target_dt]
+                            if not historical_slice.empty:
+                                last_close = float(historical_slice['Close'].iloc[-1])
+                                last_ema = float(ema_series.loc[historical_slice.index[-1]])
+                                above_ema = last_close >= last_ema
+                    except Exception:
+                        pass
+
+                    # Ins Journal schreiben
                     self.supabase.table(self.table_journal).insert({
                         "ticker": ticker_upper,
                         "signal_datum": pd.to_datetime(sig_date_str).isoformat(),
@@ -89,19 +106,19 @@ class NinoSignalsAssistant:
                         "smi": float(smi_val) if smi_val is not None else None,
                         "adx": float(adx_val) if adx_val is not None else None,
                         "is_favorite": is_fav,
+                        "above_ema20": above_ema,
                         "status": "Offen (warte auf 5D)"
                     }).execute()
                     
-                    logs.append(f"Neu im Journal: {ticker_upper} ({sig_type}) | Fav: {is_fav} | SMI: {smi_val} | ADX: {adx_val}")
+                    logs.append(f"Neu im Journal: {ticker_upper} | Fav: {is_fav} | Über EMA20: {above_ema}")
 
         except Exception as e:
             logs.append(f"Fehler beim Einlesen neuer Signale: {e}")
 
-        # --- SCHRITT 3: Auswertung für Signale nach 5 Handelstagen ---
+        # --- SCHRITT 3: 5-Tages-Auswertung für offene Signale ---
         try:
             pending_res = self.supabase.table(self.table_journal).select("*").eq("status", "Offen (warte auf 5D)").execute()
             pending_signals = pending_res.data or []
-
             today = datetime.now().date()
 
             for sig in pending_signals:
@@ -167,8 +184,6 @@ class NinoSignalsAssistant:
         except Exception:
             return []
 
-
-# --- Direkter Ausführungspunkt für GitHub Actions ---
 if __name__ == "__main__":
     print("Nino startet seine Schicht...")
     supabase_client = get_db_client()
