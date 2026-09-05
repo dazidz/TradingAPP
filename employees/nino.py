@@ -12,7 +12,7 @@ class NinoSignalsAssistant:
         self.table_favorites = "favorites"
 
     def background_routine(self):
-        """Läuft automatisch im Hintergrund beim Aufruf der Seite"""
+        """Ninos autonome Aufgabe: Prüft Signale, gleicht das Journal ab und berechnet die 5-Tages-Performance."""
         favorite_tickers = set()
         try:
             fav_res = self.supabase.table(self.table_favorites).select("ticker").execute()
@@ -114,6 +114,7 @@ class NinoSignalsAssistant:
             pass
 
     def get_signals_history(self):
+        """Holt das fertige Journal aus der Datenbank für die Dashboard-Ansicht"""
         try:
             res = self.supabase.table(self.table_journal).select("*").order("signal_datum", desc=True).execute()
             return res.data if res.data else []
