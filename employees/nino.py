@@ -17,7 +17,7 @@ class NinoSignalsAssistant:
     def __init__(self, supabase_client):
         self.supabase = supabase_client
         self.name = "Nino (Signals Assistent)"
-        self.description = "Scannt täglich neue Screener-Signale, archiviert sie (inkl. SMI, ADX, Favoriten & EMA20-Status) und wertet nach 5 Tagen aus."
+        self.description = "Scannt täglich neue Screener-Signale, archiviert sie (inkl. SMI, ADX, Favoriten & exaktem EMA20-Status) und wertet nach 5 Tagen aus."
         self.table_journal = "signal_journal"
         self.table_active_signals = "signals"
         self.table_favorites = "favorites"
@@ -34,7 +34,7 @@ class NinoSignalsAssistant:
         except Exception as e:
             logs.append(f"Hinweis beim Laden der Favoriten: {e}")
 
-        # --- SCHRITT 2: Neue Signale ins Journal holen & EMA20 prüfen ---
+        # --- SCHRITT 2: Neue Signale ins Journal holen & EMA20 aus Meta-Daten übernehmen ---
         try:
             active_res = self.supabase.table(self.table_active_signals).select("*").execute()
             active_signals = active_res.data or []
@@ -59,9 +59,10 @@ class NinoSignalsAssistant:
                 sig_date_iso = pd.to_datetime(sig_date_str).strftime('%Y-%m-%d')
 
                 if (ticker_upper, sig_date_iso) not in existing_set:
-                    # Meta-Daten (SMI & ADX) parsen
+                    # Meta-Daten (SMI, ADX & exakter EMA 20 Status zur Kerzenzeit) parsen
                     meta_raw = sig.get('meta_data', '{}')
                     smi_val, adx_val = None, None
+                    above_ema = False
                     
                     try:
                         if isinstance(meta_raw, str):
@@ -73,29 +74,12 @@ class NinoSignalsAssistant:
                             
                         smi_val = meta_dict.get('smi')
                         adx_val = meta_dict.get('adx')
+                        above_ema = bool(meta_dict.get('above_ema20', False))
                     except Exception:
                         pass
 
                     # Favoriten-Status prüfen
                     is_fav = ticker_upper in favorite_tickers
-
-                    # EMA 20 Status ermitteln (ob Kurs über oder unter EMA 20 liegt)
-                    above_ema = False
-                    try:
-                        df_ema = yf.download(ticker_upper, period="2mo", interval="1d", progress=False, auto_adjust=True)
-                        if isinstance(df_ema.columns, pd.MultiIndex):
-                            df_ema.columns = df_ema.columns.get_level_values(0)
-                        if 'Close' in df_ema.columns and len(df_ema) >= 20:
-                            ema_series = df_ema['Close'].ewm(span=20, adjust=False).mean()
-                            # Letzter bekannter Wert vor oder am Signal-Datum
-                            target_dt = pd.to_datetime(sig_date_iso)
-                            historical_slice = df_ema[df_ema.index <= target_dt]
-                            if not historical_slice.empty:
-                                last_close = float(historical_slice['Close'].iloc[-1])
-                                last_ema = float(ema_series.loc[historical_slice.index[-1]])
-                                above_ema = last_close >= last_ema
-                    except Exception:
-                        pass
 
                     # Ins Journal schreiben
                     self.supabase.table(self.table_journal).insert({

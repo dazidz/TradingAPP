@@ -41,12 +41,17 @@ def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, get
             "gettex_ticker": gettex_ticker,
             "entry_price": float(entry_price),
             "created_at": datetime.datetime.now(pytz.UTC).isoformat(),
-            "meta_data": str(meta_data)
+            "meta_data": meta_data  # Direkt als dict übergeben (Supabase/PostgREST mappt das auf jsonb)
         }
-        supabase.table("signals").insert(data).execute()
+        
+        # Hartes Ausführen ohne das Verschlucken von Fehlern
+        response = supabase.table("signals").insert(data).execute()
         print(f"✅ {ticker} -> {signal_type} gespeichert (Einstieg: {entry_price:.2f})")
+        
     except Exception as e:
-        print(f"❌ Fehler beim Speichern von {ticker}: {e}")
+        print(f"❌ KRITISCHER FEHLER beim Speichern von {ticker}: {e}")
+        # Wir werfen den Fehler bewusst hoch, damit GitHub Actions sofort fehlschlägt und wir es sehen!
+        raise e
 
 def get_ticker_list_with_names():
     try:
@@ -184,8 +189,6 @@ if __name__ == "__main__":
     print("🧹 Räume alte Signale (> 5 Tage) in der aktiven Tabelle auf...")
     try:
         cutoff_5days = (datetime.datetime.now(pytz.UTC) - datetime.timedelta(days=5)).isoformat()
-        
-        # Löscht alte Signale rein aus der 'signals'-Tabelle (keine History-Tabellen mehr hier)
         supabase.table("signals").delete().lt("created_at", cutoff_5days).execute()
         print("✅ Alte Signale erfolgreich bereinigt.")
     except Exception as e: 
@@ -198,5 +201,6 @@ if __name__ == "__main__":
             scan_ticker(t_info)
             time.sleep(0.5)
         except Exception as e: 
-            print(f"❌ Fehler bei {t_info['ticker']}: {e}")
+            print(f"❌ Abgebrochen bei Ticker {t_info['ticker']} wegen Fehler: {e}")
+            # Optional: sys.exit(1) falls der gesamte Job bei einem Fehler abbrechen soll
     print("🏁 Scan abgeschlossen.")

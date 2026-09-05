@@ -41,16 +41,14 @@ def save_to_supabase(ticker, company_name, signal_type, candle_time, sector, get
             "gettex_ticker": gettex_ticker,
             "entry_price": float(entry_price),
             "created_at": datetime.datetime.now(pytz.UTC).isoformat(),
-            "meta_data": meta_data  # Direkt als dict übergeben (Supabase/PostgREST mappt das auf jsonb)
+            "meta_data": meta_data  # Enthält jetzt auch 'above_ema20'
         }
         
-        # Hartes Ausführen ohne das Verschlucken von Fehlern
         response = supabase.table("signals").insert(data).execute()
         print(f"✅ {ticker} -> {signal_type} gespeichert (Einstieg: {entry_price:.2f})")
         
     except Exception as e:
         print(f"❌ KRITISCHER FEHLER beim Speichern von {ticker}: {e}")
-        # Wir werfen den Fehler bewusst hoch, damit GitHub Actions sofort fehlschlägt und wir es sehen!
         raise e
 
 def get_ticker_list_with_names():
@@ -110,6 +108,9 @@ def scan_ticker(ticker_info):
     
     high, low, close = data['high'], data['low'], data['close']
     
+    # EMA 20 auf Intraday-Basis berechnen
+    ema20_series = close.ewm(span=20, adjust=False).mean()
+    
     # ADX Berechnung
     tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
     def rma(series, length): return series.ewm(alpha=1/length, adjust=False).mean()
@@ -150,8 +151,15 @@ def scan_ticker(ticker_info):
         candle_time = data.index[i].tz_localize(None).tz_localize('UTC')
         if (heute - candle_time).days > 5: break
             
-        meta = {"smi": round(float(smiV.iloc[i]), 2), "adx": round(float(adxV.iloc[i]), 2)}
-        current_price = float(data['close'].iloc[i])
+        current_price = float(close.iloc[i])
+        ema_val = float(ema20_series.iloc[i])
+        above_ema = current_price >= ema_val
+
+        meta = {
+            "smi": round(float(smiV.iloc[i]), 2), 
+            "adx": round(float(adxV.iloc[i]), 2),
+            "above_ema20": above_ema
+        }
         
         if is_elite.iloc[i]:
             save_to_supabase(ticker, name, "ELITE", candle_time, sector, gettex_ticker, meta, current_price)
@@ -165,7 +173,7 @@ def scan_ticker(ticker_info):
     if not signal_found:
         print(f"ℹ️ {ticker}: Kein Signal.")
 
-    # EMA-CHECK
+    # EMA-CHECK (für Telegram / Ticker Status)
     try:
         df = yf.download(ticker, period="1mo", interval="1d", progress=False)
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
@@ -202,5 +210,4 @@ if __name__ == "__main__":
             time.sleep(0.5)
         except Exception as e: 
             print(f"❌ Abgebrochen bei Ticker {t_info['ticker']} wegen Fehler: {e}")
-            # Optional: sys.exit(1) falls der gesamte Job bei einem Fehler abbrechen soll
     print("🏁 Scan abgeschlossen.")
