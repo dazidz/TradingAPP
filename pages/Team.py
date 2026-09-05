@@ -36,7 +36,7 @@ st.title("🏢 VisionDZ - Team & Kommandozentrale")
 tab_teamroom, tab_otto, tab_nino, tab_peter = st.tabs([
     "💬 Teamroom", 
     "📊 Otto (History & Macro)", 
-    "⚡ Signals Journal (Nino)",
+    "⚡ Nino - Signal Agent",
     "🕵️ Peter (Market Intel)"
 ])
 
@@ -146,24 +146,65 @@ with tab_otto:
                 st.warning("Bitte Nachricht eingeben.")
 
 # ==========================================
-# TAB 3: NINO (Reines Signals Journal)
+# TAB 3: NINO (Signal Performance Dashboard)
 # ==========================================
 with tab_nino:
-    st.subheader("⚡ Signals Journal")
-    st.markdown("Autonomes Archiv aller Screener-Signale inklusive 5-Tages-Peak- und Schlusskurs-Auswertung.")
+    st.subheader("⚡ Nino - Signal Agent")
+    st.markdown("Visuelle Auswertung der autonomen 5-Tages-Signal-Analysen.")
     
     st.divider()
 
-    # Das Journal direkt laden und anzeigen
-    journal_data = nino.get_signals_history()
+    history_data = nino.get_signals_history()
     
-    if journal_data:
-        df_nino = pd.DataFrame(journal_data)
-        if "id" in df_nino.columns:
-            df_nino = df_nino.drop(columns=["id"])
-        st.dataframe(df_nino, use_container_width=True)
+    if history_data:
+        df_journal = pd.DataFrame(history_data)
+        
+        # Nur ausgewertete Signale für das Dashboard nutzen
+        df_eval = df_journal[df_journal['status'].str.contains('Ausgewertet', na=False)].copy()
+        
+        if not df_eval.empty:
+            # 1. KPI-METRIKEN OBEN
+            total_eval = len(df_eval)
+            wins = len(df_eval[df_eval['end_performance_5_tage'] > 0])
+            losses = len(df_eval[df_eval['end_performance_5_tage'] <= 0])
+            win_rate = (wins / total_eval) * 100 if total_eval > 0 else 0
+            
+            avg_perf_total = df_eval['end_performance_5_tage'].mean()
+            max_perf_all = df_eval['max_performance_5_tage'].max() if 'max_performance_5_tage' in df_eval.columns else 0
+            
+            col1, col2, col3, col4, col5 = st.columns(5)
+            with col1: st.metric("Ausgewertete Signale", f"{total_eval}")
+            with col2: st.metric("Win-Rate", f"{win_rate:.1f}%", f"{wins} Win / {losses} Loss")
+            with col3: st.metric("Ø End-Performance (5D)", f"{avg_perf_total:+.2f}%")
+            with col4: st.metric("Bester Peak (5D)", f"{max_perf_all:+.2f}%")
+            with col5: st.metric("Offene Signale", f"{len(df_journal) - total_eval}")
+                
+            st.markdown("---")
+            
+            # 2. VISUELLE CHARTS (DASHBOARD-BEREICH)
+            col_chart1, col_chart2 = st.columns(2)
+            
+            with col_chart1:
+                st.markdown("#### 📊 Performance nach Ticker (End-Perf. in %)")
+                if 'ticker' in df_eval.columns and 'end_performance_5_tage' in df_eval.columns:
+                    df_chart = df_eval.set_index('ticker')[['end_performance_5_tage']].dropna()
+                    if not df_chart.empty:
+                        st.bar_chart(df_chart)
+                    else:
+                        st.info("Keine Daten für Chart verfügbar.")
+                        
+            with col_chart2:
+                st.markdown("#### 🚀 Max-Peak vs. End-Performance")
+                if 'max_performance_5_tage' in df_eval.columns and 'end_performance_5_tage' in df_eval.columns:
+                    df_comparison = df_eval.set_index('ticker')[['max_performance_5_tage', 'end_performance_5_tage']].dropna()
+                    if not df_comparison.empty:
+                        st.line_chart(df_comparison)
+                    else:
+                        st.info("Keine Vergleichsdaten verfügbar.")
+        else:
+            st.warning("⚠️ Noch keine 5-Tages-Auswertungen vorhanden. Sobald Signale ausgewertet sind, füllt sich das Dashboard automatisch.")
     else:
-        st.info("Das Signals Journal ist noch leer. Sobald Nino im Hintergrund seine Arbeit verrichtet, erscheinen hier die Daten.")
+        st.info("Das Journal ist komplett leer.")
 
 # ==========================================
 # TAB 4: PETER (Market Intel & Insider)
