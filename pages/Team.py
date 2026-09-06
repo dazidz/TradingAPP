@@ -161,6 +161,7 @@ with tab_nino:
         df_eval = df_journal[df_journal['status'].str.contains('Ausgewertet', na=False)].copy()
         
         if not df_eval.empty:
+            # 1. KPI-METRIKEN OBEN (inkl. Favoriten-Zählung)
             total_eval = len(df_eval)
             wins = len(df_eval[df_eval['end_performance_5_tage'] > 0])
             losses = len(df_eval[df_eval['end_performance_5_tage'] <= 0])
@@ -169,15 +170,19 @@ with tab_nino:
             avg_perf_total = df_eval['end_performance_5_tage'].mean()
             max_perf_all = df_eval['max_performance_5_tage'].max() if 'max_performance_5_tage' in df_eval.columns else 0
             
-            col1, col2, col3, col4, col5 = st.columns(5)
-            with col1: st.metric("Ausgewertete Signale", f"{total_eval}")
-            with col2: st.metric("Win-Rate", f"{win_rate:.1f}%", f"{wins} Win / {losses} Loss")
-            with col3: st.metric("Ø End-Performance (5D)", f"{avg_perf_total:+.2f}%")
-            with col4: st.metric("Bester Peak (5D)", f"{max_perf_all:+.2f}%")
-            with col5: st.metric("Offene Signale", f"{len(df_journal) - total_eval}")
+            fav_count = len(df_journal[df_journal['is_favorite'] == True]) if 'is_favorite' in df_journal.columns else 0
+            
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
+            with col1: st.metric("Ausgewertet", f"{total_eval}")
+            with col2: st.metric("Win-Rate", f"{win_rate:.1f}%", f"{wins}W/{losses}L")
+            with col3: st.metric("Ø End-Perf.", f"{avg_perf_total:+.2f}%")
+            with col4: st.metric("Bester Peak", f"{max_perf_all:+.2f}%")
+            with col5: st.metric("Favoriten", f"{fav_count}")
+            with col6: st.metric("Offen", f"{len(df_journal) - total_eval}")
                 
             st.markdown("---")
             
+            # 2. VISUELLE CHARTS (DASHBOARD-BEREICH)
             col_chart1, col_chart2 = st.columns(2)
             
             with col_chart1:
@@ -197,6 +202,23 @@ with tab_nino:
                         st.line_chart(df_comparison)
                     else:
                         st.info("Keine Vergleichsdaten verfügbar.")
+            
+            # 3. FAVORITEN-DETAilanzeige
+            st.markdown("---")
+            st.markdown("### ⭐ Favoriten-Performance im Detail")
+            
+            if 'is_favorite' in df_eval.columns:
+                df_favs = df_eval[df_eval['is_favorite'] == True]
+                if not df_favs.empty:
+                    fav_avg = df_favs['end_performance_5_tage'].mean()
+                    st.info(f"Es sind **{len(df_favs)}** ausgewertete Favoriten-Signale im System mit einer durchschnittlichen End-Performance von **{fav_avg:+.2f}%**.")
+                    
+                    st.dataframe(
+                        df_favs[['signal_datum', 'ticker', 'signal_typ', 'einstiegspreis_zum_signal', 'end_performance_5_tage', 'status']],
+                        use_container_width=True
+                    )
+                else:
+                    st.info("Aktuell sind keine ausgewerteten Signale als Favorit markiert.")
         else:
             st.warning("⚠️ Noch keine 5-Tages-Auswertungen vorhanden. Sobald Signale ausgewertet sind, füllt sich das Dashboard automatisch.")
     else:
