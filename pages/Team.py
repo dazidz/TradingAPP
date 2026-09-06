@@ -10,10 +10,11 @@ if str(root_dir) not in sys.path:
 import streamlit as st
 from supabase import create_client
 
-# Importiere die Mitarbeiter-Klassen
+# Importiere die Mitarbeiter-Klassen (inklusive Aris)
 from employees.otto import OttoAnalyst
 from employees.nino import NinoSignalsAssistant
 from employees.peter import PeterInsiderAnalyst
+from employees.performance_manager import PerformanceManager
 
 st.set_page_config(layout="wide", page_title="VisionDZ - Team & Kommandozentrale", page_icon="🏢")
 
@@ -29,15 +30,17 @@ supabase = create_client(URL, KEY)
 otto = OttoAnalyst(supabase)
 nino = NinoSignalsAssistant(supabase)
 peter = PeterInsiderAnalyst(supabase)
+aris = PerformanceManager(supabase)
 
 st.title("🏢 VisionDZ - Team & Kommandozentrale")
 
-# --- DIE TABS DEFINIEREN ---
-tab_teamroom, tab_otto, tab_nino, tab_peter = st.tabs([
+# --- DIE TABS DEFINIEREN (inkl. Aris) ---
+tab_teamroom, tab_otto, tab_nino, tab_peter, tab_aris = st.tabs([
     "💬 Teamroom", 
     "📊 Otto (History & Macro)", 
     "⚡ Nino - Signal Agent",
-    "🕵️ Peter (Market Intel)"
+    "🕵️ Peter (Market Intel)",
+    "🤖 Aris (Performance Manager)"
 ])
 
 # ==========================================
@@ -65,7 +68,7 @@ with tab_teamroom:
             st.write(f"**Marktphase:** {latest_otto.get('market_phase', 'N/A')}")
             st.info(latest_otto.get('insight', 'Keine Daten'))
         else:
-            st.warning("Otto hat noch kein Standup durchgeführt. Wechsle in den Tab 'Otto'.")
+            st.warning("Otto has noch kein Standup durchgeführt. Wechsle in den Tab 'Otto'.")
             
     with col2:
         st.markdown("#### ⚡ Ninos letzte Journal-Aktivität")
@@ -161,7 +164,6 @@ with tab_nino:
         df_eval = df_journal[df_journal['status'].str.contains('Ausgewertet', na=False)].copy()
         
         if not df_eval.empty:
-            # 1. KPI-METRIKEN OBEN (inkl. Favoriten-Zählung)
             total_eval = len(df_eval)
             wins = len(df_eval[df_eval['end_performance_5_tage'] > 0])
             losses = len(df_eval[df_eval['end_performance_5_tage'] <= 0])
@@ -182,7 +184,6 @@ with tab_nino:
                 
             st.markdown("---")
             
-            # 2. VISUELLE CHARTS (DASHBOARD-BEREICH)
             col_chart1, col_chart2 = st.columns(2)
             
             with col_chart1:
@@ -203,7 +204,6 @@ with tab_nino:
                     else:
                         st.info("Keine Vergleichsdaten verfügbar.")
             
-            # 3. FAVORITEN-DETAilanzeige
             st.markdown("---")
             st.markdown("### ⭐ Favoriten-Performance im Detail")
             
@@ -254,3 +254,23 @@ with tab_peter:
             st.success(f"**Markt- & News-Summary:**\n\n{latest_intel.get('market_news_summary')}")
     else:
         st.info("Noch keine Markt-Intel vorhanden. Starte die Aktualisierung über den Button.")
+
+# ==========================================
+# TAB 5: ARIS (Performance Manager)
+# ==========================================
+with tab_aris:
+    st.subheader(f"🤖 {aris.name} - Performance Manager")
+    st.caption(aris.description)
+    
+    if st.button("🚀 Aris: Portfolio & Journal analysieren", key="btn_run_aris"):
+        with st.spinner("Aris wertet die Daten aus..."):
+            success, result = aris.run_analysis()
+            if success:
+                st.session_state["aris_analysis"] = result
+                st.success("Analyse erfolgreich abgeschlossen!")
+            else:
+                st.error(result)
+
+    if "aris_analysis" in st.session_state:
+        st.divider()
+        st.markdown(st.session_state["aris_analysis"])
