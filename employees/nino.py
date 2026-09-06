@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 class NinoSignalsAssistant:
     def __init__(self, supabase_client):
         self.supabase = supabase_client
-        self.table_journal = "signal_journal"
+        self.table_journal = "signals_journal"  # Hier das 's' ergänzt!
         self.table_active_signals = "signals"
         self.table_favorites = "favorites"
 
@@ -117,8 +117,6 @@ class NinoSignalsAssistant:
         """Holt das fertige Journal aus der Datenbank für die Dashboard-Ansicht"""
         try:
             res = self.supabase.table(self.table_journal).select("*").order("signal_datum", desc=True).execute()
-            print("SUPABASE ANTWORT:", res) # Schaut in euer Terminal/Log
             return res.data if res.data else []
-        except Exception as e:
-            print(f"FEHLER beim Laden des Journals: {e}")
+        except Exception:
             return []

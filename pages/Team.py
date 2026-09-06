@@ -153,13 +153,6 @@ with tab_nino:
     
     st.divider()
 
-    # --- DIREKTER SUPABASE-DIAGNOSE-CHECK ---
-    try:
-        raw_res = supabase.table("signal_journal").select("*").execute()
-        st.caption(f"🔍 [Diagnose] Direkte Supabase-Abfrage liefert `{len(raw_res.data)}` Datensätze aus `signal_journal`.")
-    except Exception as e:
-        st.error(f"🚨 [Diagnose-Fehler] Konnte Tabelle `signal_journal` nicht abfragen: {e}")
-
     history_data = nino.get_signals_history()
     
     if history_data:
