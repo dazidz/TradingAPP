@@ -157,7 +157,7 @@ with tab_journal:
                 avg_performance = 0.0
 
             col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
-            col_kpi1.metric("Gewinntrades", f"{winning_trades} / {total_trades}", f"Win-Rate: {win_rate:.1f}%")
+            col_kpi1.metric("Win-Rate", f"{win_rate:.1f}%", f"Gewinner: {winning_trades} / {total_trades}")
             col_kpi2.metric("Ø Performance", f"{avg_performance:+.2f}%")
             col_kpi3.metric("Gesamt G/V", f"{total_g_v:+,.2f} €")
             col_kpi4.metric("Ø G/V pro Trade", f"{avg_g_v:+,.2f} €")
