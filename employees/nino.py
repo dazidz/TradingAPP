@@ -117,6 +117,8 @@ class NinoSignalsAssistant:
         """Holt das fertige Journal aus der Datenbank für die Dashboard-Ansicht"""
         try:
             res = self.supabase.table(self.table_journal).select("*").order("signal_datum", desc=True).execute()
+            print("SUPABASE ANTWORT:", res) # Schaut in euer Terminal/Log
             return res.data if res.data else []
-        except Exception:
+        except Exception as e:
+            print(f"FEHLER beim Laden des Journals: {e}")
             return []
