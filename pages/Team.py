@@ -10,11 +10,11 @@ if str(root_dir) not in sys.path:
 import streamlit as st
 from supabase import create_client
 
-# Importiere die Mitarbeiter-Klassen (inklusive Aris)
+# Importiere die Mitarbeiter-Klassen
 from employees.otto import OttoAnalyst
 from employees.nino import NinoSignalsAssistant
 from employees.peter import PeterInsiderAnalyst
-from employees.performance_manager import PerformanceManager
+from employees.aris import Aris
 
 st.set_page_config(layout="wide", page_title="VisionDZ - Team & Kommandozentrale", page_icon="🏢")
 
@@ -30,11 +30,11 @@ supabase = create_client(URL, KEY)
 otto = OttoAnalyst(supabase)
 nino = NinoSignalsAssistant(supabase)
 peter = PeterInsiderAnalyst(supabase)
-aris = PerformanceManager(supabase)
+aris = Aris(supabase)
 
 st.title("🏢 VisionDZ - Team & Kommandozentrale")
 
-# --- DIE TABS DEFINIEREN (inkl. Aris) ---
+# --- DIE TABS DEFINIEREN ---
 tab_teamroom, tab_otto, tab_nino, tab_peter, tab_aris = st.tabs([
     "💬 Teamroom", 
     "📊 Otto (History & Macro)", 
@@ -68,7 +68,7 @@ with tab_teamroom:
             st.write(f"**Marktphase:** {latest_otto.get('market_phase', 'N/A')}")
             st.info(latest_otto.get('insight', 'Keine Daten'))
         else:
-            st.warning("Otto has noch kein Standup durchgeführt. Wechsle in den Tab 'Otto'.")
+            st.warning("Otto hat noch kein Standup durchgeführt. Wechsle in den Tab 'Otto'.")
             
     with col2:
         st.markdown("#### ⚡ Ninos letzte Journal-Aktivität")
@@ -104,7 +104,7 @@ with tab_teamroom:
             st.warning("Bitte Text eingeben.")
 
 # ==========================================
-# TAB 2: OTTO (Nutzt ausschließlich `employees/otto.py`)
+# TAB 2: OTTO
 # ==========================================
 with tab_otto:
     st.subheader(f"📊 {otto.name}")
@@ -148,19 +148,17 @@ with tab_otto:
                 st.warning("Bitte Nachricht eingeben.")
 
 # ==========================================
-# TAB 3: NINO (Signal Performance Dashboard)
+# TAB 3: NINO
 # ==========================================
 with tab_nino:
     st.subheader("⚡ Nino - Signal Agent")
     st.markdown("Visuelle Auswertung der autonomen 5-Tages-Signal-Analysen.")
-    
     st.divider()
 
     history_data = nino.get_signals_history()
     
     if history_data:
         df_journal = pd.DataFrame(history_data)
-        
         df_eval = df_journal[df_journal['status'].str.contains('Ausgewertet', na=False)].copy()
         
         if not df_eval.empty:
@@ -171,7 +169,6 @@ with tab_nino:
             
             avg_perf_total = df_eval['end_performance_5_tage'].mean()
             max_perf_all = df_eval['max_performance_5_tage'].max() if 'max_performance_5_tage' in df_eval.columns else 0
-            
             fav_count = len(df_journal[df_journal['is_favorite'] == True]) if 'is_favorite' in df_journal.columns else 0
             
             col1, col2, col3, col4, col5, col6 = st.columns(6)
@@ -185,54 +182,44 @@ with tab_nino:
             st.markdown("---")
             
             col_chart1, col_chart2 = st.columns(2)
-            
             with col_chart1:
                 st.markdown("#### 📊 Performance nach Ticker (End-Perf. in %)")
                 if 'ticker' in df_eval.columns and 'end_performance_5_tage' in df_eval.columns:
                     df_chart = df_eval.set_index('ticker')[['end_performance_5_tage']].dropna()
                     if not df_chart.empty:
                         st.bar_chart(df_chart)
-                    else:
-                        st.info("Keine Daten für Chart verfügbar.")
-                        
             with col_chart2:
                 st.markdown("#### 🚀 Max-Peak vs. End-Performance")
                 if 'max_performance_5_tage' in df_eval.columns and 'end_performance_5_tage' in df_eval.columns:
                     df_comparison = df_eval.set_index('ticker')[['max_performance_5_tage', 'end_performance_5_tage']].dropna()
                     if not df_comparison.empty:
                         st.line_chart(df_comparison)
-                    else:
-                        st.info("Keine Vergleichsdaten verfügbar.")
             
             st.markdown("---")
             st.markdown("### ⭐ Favoriten-Performance im Detail")
-            
             if 'is_favorite' in df_eval.columns:
                 df_favs = df_eval[df_eval['is_favorite'] == True]
                 if not df_favs.empty:
                     fav_avg = df_favs['end_performance_5_tage'].mean()
                     st.info(f"Es sind **{len(df_favs)}** ausgewertete Favoriten-Signale im System mit einer durchschnittlichen End-Performance von **{fav_avg:+.2f}%**.")
-                    
                     st.dataframe(
                         df_favs[['signal_datum', 'ticker', 'signal_typ', 'einstiegspreis_zum_signal', 'end_performance_5_tage', 'status']],
                         use_container_width=True
                     )
-                else:
-                    st.info("Aktuell sind keine ausgewerteten Signale als Favorit markiert.")
         else:
-            st.warning("⚠️ Noch keine 5-Tages-Auswertungen vorhanden. Sobald Signale ausgewertet sind, füllt sich das Dashboard automatisch.")
+            st.warning("⚠️ Noch keine 5-Tages-Auswertungen vorhanden.")
     else:
         st.info("Das Journal ist komplett leer.")
 
 # ==========================================
-# TAB 4: PETER (Market Intel & Insider)
+# TAB 4: PETER
 # ==========================================
 with tab_peter:
     st.subheader(f"🕵️ {peter.name}")
     st.caption(peter.description)
     
     if st.button("🔄 Peter: Markt-Intel & Kennzahlen aktualisieren", key="btn_run_peter"):
-        with st.spinner("Peter holt aktuelle Marktdaten und bereinigt alte Einträge (>6 Monate)..."):
+        with st.spinner("Peter holt aktuelle Marktdaten..."):
             success, msg = peter.fetch_market_intel()
             if success:
                 st.success(msg)
@@ -245,7 +232,6 @@ with tab_peter:
     latest_intel = peter.get_latest_intel()
     if latest_intel:
         st.markdown(f"### 📌 Bericht vom {latest_intel.get('analysis_date')}")
-        
         col1, col2 = st.columns(2)
         with col1:
             st.info(f"**Insider & Aktivität:**\n\n{latest_intel.get('insider_activity')}")
@@ -253,10 +239,10 @@ with tab_peter:
         with col2:
             st.success(f"**Markt- & News-Summary:**\n\n{latest_intel.get('market_news_summary')}")
     else:
-        st.info("Noch keine Markt-Intel vorhanden. Starte die Aktualisierung über den Button.")
+        st.info("Noch keine Markt-Intel vorhanden.")
 
 # ==========================================
-# TAB 5: ARIS (Performance Manager)
+# TAB 5: ARIS (Performance Manager - Komplett gekapselt)
 # ==========================================
 with tab_aris:
     st.subheader(f"🤖 {aris.name} - Performance Manager")
