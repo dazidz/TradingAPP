@@ -93,10 +93,10 @@ with tab_depot:
                     "Ticker": ticker,
                     "Datum Einstieg": row.get('datum_einstieg', 'N/A'),
                     "Anzahl": shares,
-                    "Kaufpreis (€)": f"{buy_price:.2f}",
-                    "Live-Kurs (€)": f"{curr_price:.2f}",
-                    "Gesamtwert (€)": f"{curr_val:.2f}",
-                    "Performance (%)": f"{pnl_pct:+.2f}%"
+                    "Kaufpreis (€)": buy_price,
+                    "Live-Kurs (€)": curr_price,
+                    "Gesamtwert (€)": curr_val,
+                    "Performance (%)": pnl_pct
                 })
 
             total_pnl = total_value - total_invested
@@ -110,7 +110,17 @@ with tab_depot:
             st.divider()
 
             df_display = pd.DataFrame(portfolio_data)
-            st.dataframe(df_display.drop(columns=["ID"]), use_container_width=True)
+            st.dataframe(
+                df_display.drop(columns=["ID"]),
+                column_config={
+                    "Kaufpreis (€)": st.column_config.NumberColumn(format="%.2f €"),
+                    "Live-Kurs (€)": st.column_config.NumberColumn(format="%.2f €"),
+                    "Gesamtwert (€)": st.column_config.NumberColumn(format="%.2f €"),
+                    "Performance (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                    "Anzahl": st.column_config.NumberColumn(format="%.4f")
+                },
+                use_container_width=True
+            )
 
         else:
             st.info(f"Keine offenen Positionen im `{selected_depot_ui}` vorhanden.")
@@ -131,7 +141,49 @@ with tab_journal:
 
         if journal_data:
             df_j = pd.DataFrame(journal_data)
-            st.dataframe(df_j.drop(columns=["id"]), use_container_width=True)
+            
+            # --- AUSWERTUNGEN & KPI METRIKEN ---
+            total_trades = len(df_j)
+            
+            # Gewinn / Verlust Zählung (wenn g_v Spalte existiert und gefüllt ist)
+            if 'g_v' in df_j.columns and df_j['g_v'].notna().any():
+                winning_trades = len(df_j[df_j['g_v'] > 0])
+                losing_trades = len(df_j[df_j['g_v'] < 0])
+                win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
+                total_g_v = df_j['g_v'].sum()
+                avg_g_v = df_j['g_v'].mean()
+            else:
+                winning_trades, losing_trades, win_rate, total_g_v, avg_g_v = 0, 0, 0, 0, 0
+
+            # Durchschnittliche Performance
+            if 'performance' in df_j.columns and df_j['performance'].notna().any():
+                avg_performance = df_j['performance'].mean()
+            else:
+                avg_performance = 0.0
+
+            st.markdown("### 📊 Performance-Auswertung")
+            
+            col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+            col_kpi1.metric("Anzahl Trades", f"{total_trades}", f"Win: {winning_trades} | Loss: {losing_trades} ({win_rate:.1f}%)")
+            col_kpi2.metric("Ø Performance", f"{avg_performance:+.2f}%")
+            col_kpi3.metric("Gesamt G/V", f"{total_g_v:+,.2f} €")
+            col_kpi4.metric("Ø G/V pro Trade", f"{avg_g_v:+,.2f} €")
+
+            st.divider()
+
+            # DataFrame formatieren für schöne Anzeige in Streamlit
+            st.dataframe(
+                df_j.drop(columns=["id"]),
+                column_config={
+                    "einstiegskurs": st.column_config.NumberColumn("Einstiegskurs", format="%.2f €"),
+                    "ausstiegskurs": st.column_config.NumberColumn("Ausstiegskurs", format="%.2f €"),
+                    "gesamtwert": st.column_config.NumberColumn("Gesamtwert", format="%.2f €"),
+                    "g_v": st.column_config.NumberColumn("Gewinn / Verlust (G/V)", format="%.2f €"),
+                    "performance": st.column_config.NumberColumn("Performance", format="%.2f%%"),
+                    "anzahl": st.column_config.NumberColumn("Anzahl", format="%.4f"),
+                },
+                use_container_width=True
+            )
         else:
             st.info("Noch keine geschlossenen Trades im Journal erfasst.")
     except Exception as e:
@@ -225,6 +277,7 @@ with tab_new_trade:
                         buy_p = float(chosen_pos['buy_price'])
                         exit_gesamtwert = s_shares_to_sell * s_price
                         performance_pct = ((s_price - buy_p) / buy_p) * 100 if buy_p > 0 else 0
+                        trade_g_v = (s_price - buy_p) * s_shares_to_sell
                         
                         # Ins Journal schreiben
                         supabase.table("trade_journal").insert({
@@ -235,6 +288,7 @@ with tab_new_trade:
                             "gesamtwert": exit_gesamtwert,
                             "signaltype": sell_depot,
                             "performance": performance_pct,
+                            "g_v": round(trade_g_v, 2),
                             "notiz": s_note
                         }).execute()
                         
