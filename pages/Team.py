@@ -74,7 +74,6 @@ with tab_teamroom:
             latest_nino = journal_logs[0]
             st.write(f"**Letzter Ticker:** {latest_nino.get('ticker')} ({latest_nino.get('signal_typ')})")
             
-            # Sicherer Abfang von None/NULL Werten für die Performance
             perf = latest_nino.get('max_performance_5_tage')
             perf_val = float(perf) if perf is not None else 0.0
             
@@ -154,16 +153,21 @@ with tab_nino:
     
     st.divider()
 
+    # --- DIREKTER SUPABASE-DIAGNOSE-CHECK ---
+    try:
+        raw_res = supabase.table("signal_journal").select("*").execute()
+        st.caption(f"🔍 [Diagnose] Direkte Supabase-Abfrage liefert `{len(raw_res.data)}` Datensätze aus `signal_journal`.")
+    except Exception as e:
+        st.error(f"🚨 [Diagnose-Fehler] Konnte Tabelle `signal_journal` nicht abfragen: {e}")
+
     history_data = nino.get_signals_history()
     
     if history_data:
         df_journal = pd.DataFrame(history_data)
         
-        # Nur ausgewertete Signale für das Dashboard nutzen
         df_eval = df_journal[df_journal['status'].str.contains('Ausgewertet', na=False)].copy()
         
         if not df_eval.empty:
-            # 1. KPI-METRIKEN OBEN
             total_eval = len(df_eval)
             wins = len(df_eval[df_eval['end_performance_5_tage'] > 0])
             losses = len(df_eval[df_eval['end_performance_5_tage'] <= 0])
@@ -181,7 +185,6 @@ with tab_nino:
                 
             st.markdown("---")
             
-            # 2. VISUELLE CHARTS (DASHBOARD-BEREICH)
             col_chart1, col_chart2 = st.columns(2)
             
             with col_chart1:
