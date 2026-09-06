@@ -132,9 +132,6 @@ with tab_depot:
 # TAB 2: DAS TRADING JOURNAL (GESCHLOSSENE TRADES)
 # ==========================================
 with tab_journal:
-    st.subheader("Geschlossene Trades & Performance-Historie")
-    st.markdown("Chronologische Aufzeichnung mit Einstiegs-, Ausstiegsdaten und finaler Notiz.")
-
     try:
         res_journal = supabase.table("trade_journal").select("*").order("ausstieg_datum_zeit", desc=True).execute()
         journal_data = res_journal.data
@@ -145,7 +142,6 @@ with tab_journal:
             # --- AUSWERTUNGEN & KPI METRIKEN ---
             total_trades = len(df_j)
             
-            # Gewinn / Verlust Zählung (wenn g_v Spalte existiert und gefüllt ist)
             if 'g_v' in df_j.columns and df_j['g_v'].notna().any():
                 winning_trades = len(df_j[df_j['g_v'] > 0])
                 losing_trades = len(df_j[df_j['g_v'] < 0])
@@ -155,16 +151,13 @@ with tab_journal:
             else:
                 winning_trades, losing_trades, win_rate, total_g_v, avg_g_v = 0, 0, 0, 0, 0
 
-            # Durchschnittliche Performance
             if 'performance' in df_j.columns and df_j['performance'].notna().any():
                 avg_performance = df_j['performance'].mean()
             else:
                 avg_performance = 0.0
 
-            st.markdown("### 📊 Performance-Auswertung")
-            
             col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
-            col_kpi1.metric("Anzahl Trades", f"{total_trades}", f"Win: {winning_trades} | Loss: {losing_trades} ({win_rate:.1f}%)")
+            col_kpi1.metric("Gewinntrades", f"{winning_trades} / {total_trades}", f"Win-Rate: {win_rate:.1f}%")
             col_kpi2.metric("Ø Performance", f"{avg_performance:+.2f}%")
             col_kpi3.metric("Gesamt G/V", f"{total_g_v:+,.2f} €")
             col_kpi4.metric("Ø G/V pro Trade", f"{avg_g_v:+,.2f} €")
