@@ -173,7 +173,7 @@ def scan_ticker(ticker_info):
     if not signal_found:
         print(f"ℹ️ {ticker}: Kein Signal.")
 
-    # EMA-CHECK (für Telegram / Ticker Status)
+    # EMA-CHECK (für Telegram / Ticker Status) - Robust gemacht
     try:
         df = yf.download(ticker, period="1mo", interval="1d", progress=False)
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
@@ -182,8 +182,17 @@ def scan_ticker(ticker_info):
             c_price = float(df['Close'].iloc[-1])
             ema_val = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
             
-            res = supabase.table("signals").select("notified_ema").eq("ticker", ticker).execute()
-            is_notified = bool(res.data[0].get('notified_ema', False)) if res.data else False
+            res = supabase.table("signals").select("id, notified_ema").eq("ticker", ticker).execute()
+            
+            is_notified = False
+            if res.data:
+                for row in res.data:
+                    val = row.get('notified_ema', False)
+                    if isinstance(val, str):
+                        val = val.lower() == 'true'
+                    if val:
+                        is_notified = True
+                        break
                 
             if c_price >= ema_val and not is_notified:
                 send_telegram(ticker, c_price)
