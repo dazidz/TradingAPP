@@ -311,31 +311,60 @@ with tab_peter:
 with tab_aris:
   st.subheader("🤖 Aris - Performance Manager")
   st.markdown(
-      "Dein KI-Agent analysiert das Signals-Journal, das Trading-Journal"
-      " (inklusive 30-Tage-Post-Exit-Tracking), die Watchlist-Extremwerte und"
-      " Sektoren."
+      "Dein KI-Agent analysiert das Signals-Journal, das Trading-Journal, "
+      "den Screener-Quellcode und steht dir im Chat für Rückfragen zur Verfügung."
   )
 
-  # Session State für Aris-Chat initialisieren
+  # 1. Session State für den Aris-Chat initialisieren
   if "messages_aris" not in st.session_state:
     st.session_state.messages_aris = []
 
   aris_dna = """
-        Du bist Aris, der leitende Performance Manager in dieser Trading-Anwendung. Deine Aufgabe ist es, die Performance objektiv, datenbasiert und gnadenlos ehrlich zu analysieren. Du verzichtest auf leere Floskeln und Schönfärberei. 
-        Analysiere die übergebenen Datenpunkte (Signals Journal, Trading Journal inkl. Post-Exit-Tracking, Watchlist-Tagesextremwerte und Sektoren).
-        Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefere konkrete, direkt umsetzbare Handlungsempfehlungen.
-        Antworte strukturiert, prägnant und auf den Punkt.
-        """
+    Du bist Aris, der leitende Performance Manager in dieser Trading-Anwendung. Deine Aufgabe ist es, die Performance objektiv, datenbasiert und gnadenlos ehrlich zu analysieren. Du verzichtest auf leere Floskeln und Schönfärberei. 
+    Analysiere die übergebenen Datenpunkte:
+    1. Signals Journal (inkl. 5-Tage und 1-Monats-Meilensteine)
+    2. Trading Journal (geschlossene Trades inkl. Post-Exit-Tracking)
+    3. Screener-Quellcode (auf Filterfehler, Schwachstellen und verpasste Chancen prüfen)
+    4. Watchlist (nach Asset-Kategorien: Invest, Swing, High Risk)
 
+    Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefere konkrete, direkt umsetzbare Handlungsempfehlungen. Wenn du Code-Verbesserungen oder eiserne Regeln findest, formuliere sie klar, damit sie in die 'principles_and_insights'-Tabelle übernommen werden können.
+    Antworte strukturiert, prägnant und auf den Punkt.
+    """
+
+  # 0. Gespeicherten Report aus Supabase laden (falls noch kein Chat da ist)
+  if not st.session_state.messages_aris:
+    try:
+      saved_report_res = (
+          supabase.table("agent_reports")
+          .select("*")
+          .eq("agent_name", "Aris")
+          .order("created_at", desc=True)
+          .limit(1)
+          .execute()
+      )
+      if saved_report_res.data:
+        latest_report = saved_report_res.data[0]
+        st.session_state.messages_aris.append({
+            "role": "assistant",
+            "content": (
+                "**Letzter gespeicherter Report ("
+                f"{latest_report['created_at'][:16]}):**\n\n"
+                + latest_report["report_content"]
+            ),
+        })
+    except Exception:
+      pass
+
+  # Button zum Ausführen der Hauptanalyse
   if st.button(
-      "🚀 Aris Tages-Analyse starten",
+      "🚀 Aris Analyse & Screener-Review starten",
       type="primary",
       key="run_aris_btn",
       use_container_width=True,
   ):
     with st.spinner(
-        "Aris analysiert Datenbanken und zieht Post-Exit-Kursdaten über"
-        " yfinance..."
+        "Aris analysiert Datenbanken, liest Screener-Code ein und prüft"
+        " Meilensteine mit Gemini..."
     ):
       try:
         api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get(
@@ -347,38 +376,48 @@ with tab_aris:
 
         genai.configure(api_key=api_key)
 
-        # 1. Daten aus Supabase laden
-        signals_res = supabase.table("signals").select("*").execute()
-        journal_res = supabase.table("trade_journal").select("*").execute()
+        signals_res = (
+            supabase.table("signals_journal")
+            .select("*")
+            .eq("aris_status_5d", False)
+            .execute()
+        )
+        journal_res = (
+            supabase.table("trading_journal")
+            .select("*")
+            .eq("aris_status_5d", False)
+            .execute()
+        )
         watchlist_res = supabase.table("watchlist").select("*").execute()
 
-        signals_df = (
-            pd.DataFrame(signals_res.data)
-            if signals_res.data
-            else pd.DataFrame()
-        )
-        journal_df = (
-            pd.DataFrame(journal_res.data)
-            if journal_res.data
-            else pd.DataFrame()
-        )
-        watchlist_df = (
-            pd.DataFrame(watchlist_res.data)
-            if watchlist_res.data
-            else pd.DataFrame()
-        )
+        signals_df = pd.DataFrame(signals_res.data)
+        journal_df = pd.DataFrame(journal_res.data)
+        watchlist_df = pd.DataFrame(watchlist_res.data)
 
-        # 2. Post-Exit Tracking (30 Tage nach Trade-Schluss)
+        # Screener-Code einlesen
+        screener_code_content = ""
+        try:
+          screener_path = Path("screeners/main_screener.py")
+          if screener_path.exists():
+            screener_code_content = screener_path.read_text(encoding="utf-8")
+          else:
+            screener_files = list(Path(".").glob("**/*screener*.py"))
+            if screener_files:
+              screener_code_content = screener_files[0].read_text(
+                  encoding="utf-8"
+              )
+        except Exception as code_err:
+          screener_code_content = (
+              f"Konnte Screener-Code nicht laden: {code_err}"
+          )
+
+        # Post-Exit Tracking
         post_exit_results = []
         if not journal_df.empty and "ausstieg_datum_zeit" in journal_df.columns:
           for _, row in journal_df.head(20).iterrows():
             ticker = row.get("ticker")
             exit_date_str = row.get("ausstieg_datum_zeit")
             exit_price = float(row.get("ausstiegskurs", 0))
-
-            if not ticker or not exit_date_str:
-              continue
-
             try:
               exit_date = pd.to_datetime(exit_date_str)
               end_date = exit_date + timedelta(days=30)
@@ -405,7 +444,7 @@ with tab_aris:
             except Exception:
               continue
 
-        # 3. Watchlist Extremwerte (Top 10 Gewinner / Verlierer)
+        # Watchlist Extremwerte
         top_winners, top_losers = [], []
         if not watchlist_df.empty:
           watchlist_df["perf_titel"] = pd.to_numeric(
@@ -415,55 +454,76 @@ with tab_aris:
           top_winners = sorted_wl.head(10).to_dict(orient="records")
           top_losers = sorted_wl.tail(10).to_dict(orient="records")
 
-        # 4. Datenkontext für Gemini bündeln
+        # Kontext bündeln
         context_data = f"""
-                --- SIGNALS JOURNAL ---
-                {signals_df.to_string() if not signals_df.empty else "Keine Daten"}
+            --- SIGNALS JOURNAL ---
+            {signals_df.to_string() if not signals_df.empty else "Keine neuen Signale"}
 
-                --- TRADING JOURNAL (GESCHLOSSENE TRADES) ---
-                {journal_df.to_string() if not journal_df.empty else "Keine Daten"}
+            --- TRADING JOURNAL ---
+            {journal_df.to_string() if not journal_df.empty else "Keine offenen Journal-Einträge"}
 
-                --- POST-EXIT TRACKING (30 Tage nach Verkauf) ---
-                {pd.DataFrame(post_exit_results).to_string() if post_exit_results else "Keine Daten"}
+            --- POST-EXIT TRACKING ---
+            {pd.DataFrame(post_exit_results).to_string() if post_exit_results else "Keine Daten"}
 
-                --- WATCHLIST TOP 10 GEWINNER ---
-                {pd.DataFrame(top_winners).to_string() if top_winners else "Keine Daten"}
+            --- SCREENER-QUELLCODE ---
+            {screener_code_content if screener_code_content else "Kein Code gefunden"}
 
-                --- WATCHLIST TOP 10 VERLIERER ---
-                {pd.DataFrame(top_losers).to_string() if top_losers else "Keine Daten"}
-                """
+            --- WATCHLIST TOP GEWINNER / VERLIERER ---
+            Gewinner:\n{pd.DataFrame(top_winners).to_string() if top_winners else "Keine"}
+            Verlierer:\n{pd.DataFrame(top_losers).to_string() if top_losers else "Keine"}
+            """
 
-        # 5. Anfrage an Gemini senden
+        # Gemini Request für den Initial-Report
         model = genai.GenerativeModel(
             model_name="gemini-1.5-flash", system_instruction=aris_dna
         )
         response = model.generate_content(
-            "Hier sind die aktuellen Performance-Daten des Systems. Erstelle"
-            f" deinen täglichen Analyse-Report:\n\n{context_data}"
+            "Erstelle deinen Analyse-Report basierend auf folgenden Daten:\n\n"
+            + context_data
         )
 
-        report_text = response.text
+        report_content = response.text
+
+        # In Supabase speichern
+        try:
+          supabase.table("agent_reports").insert({
+              "agent_name": "Aris",
+              "report_content": report_content,
+          }).execute()
+        except Exception:
+          pass
+
+        # Status aktualisieren
+        if not signals_df.empty and "id" in signals_df.columns:
+          supabase.table("signals_journal").update({"aris_status_5d": True}).in_(
+              "id", signals_df["id"].tolist()
+          ).execute()
+        if not journal_df.empty and "id" in journal_df.columns:
+          supabase.table("trading_journal").update({"aris_status_5d": True}).in_(
+              "id", journal_df["id"].tolist()
+          ).execute()
+
+        # Neuen Report direkt als Assistant-Nachricht in den Chat setzen
         st.session_state.messages_aris.append(
-            {"role": "assistant", "content": report_text}
+            {"role": "assistant", "content": report_content}
         )
         st.success("Analyse erfolgreich abgeschlossen!")
         st.rerun()
 
       except Exception as e:
-        st.error(f"⚠️ Aris-Fehler im Detail: {e}")
+        st.error(f"⚠️ Fehler: {e}")
 
-  st.divider()
-  st.markdown("### 💬 Chat mit Aris")
+  st.markdown("---")
+  st.markdown("### 💬 Diskussion mit Aris")
 
-  # Chatverlauf ausgeben
+  # 2. Bestehenden Chatverlauf rendern
   for message in st.session_state.messages_aris:
     with st.chat_message(message["role"]):
       st.markdown(message["content"])
 
-  # Chat-Eingabe für Rückfragen
+  # 3. Chat-Eingabe für Rückfragen
   if user_query := st.chat_input(
-      "Stelle Aris eine Frage zu den Trades oder der Performance...",
-      key="aris_chat_input",
+      "Stelle Aris eine Frage zu den Trades oder dem Code..."
   ):
     st.session_state.messages_aris.append(
         {"role": "user", "content": user_query}
@@ -493,6 +553,7 @@ with tab_aris:
 
           answer = chat_response.text
           st.markdown(answer)
+
           st.session_state.messages_aris.append(
               {"role": "assistant", "content": answer}
           )
