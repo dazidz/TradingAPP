@@ -382,8 +382,9 @@ with tab_aris:
             .eq("aris_status_5d", False)
             .execute()
         )
+        # Korrigiert von 'trading_journal' auf 'trade_journal'
         journal_res = (
-            supabase.table("trading_journal")
+            supabase.table("trade_journal")
             .select("*")
             .eq("aris_status_5d", False)
             .execute()
@@ -484,7 +485,7 @@ with tab_aris:
 
         report_content = response.text
 
-        # In Supabase speichern
+        # In Supabase speichern (Voraussetzung: Tabelle agent_reports existiert)
         try:
           supabase.table("agent_reports").insert({
               "agent_name": "Aris",
@@ -499,7 +500,7 @@ with tab_aris:
               "id", signals_df["id"].tolist()
           ).execute()
         if not journal_df.empty and "id" in journal_df.columns:
-          supabase.table("trading_journal").update({"aris_status_5d": True}).in_(
+          supabase.table("trade_journal").update({"aris_status_5d": True}).in_(
               "id", journal_df["id"].tolist()
           ).execute()
 
