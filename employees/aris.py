@@ -130,4 +130,3 @@ if st.button(
 
     except Exception as e:
       st.error(f"⚠️ Aris-Fehler im Detail: {e}")
-    )
