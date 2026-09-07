@@ -167,9 +167,9 @@ if st.button(
             Verlierer:\n{pd.DataFrame(top_losers).to_string() if top_losers else "Keine"}
             """
 
-      # Gemini Request mit aktuellem Gemini-3.5-Modell
+      # Gemini Request mit aktuellem Gemini-3.6-Modell
       model = genai.GenerativeModel(
-          model_name="gemini-3.5-flash", system_instruction=ARIS_DNA
+          model_name="gemini-3.6-flash", system_instruction=ARIS_DNA
       )
       response = model.generate_content(
           "Erstelle deinen Analyse-Report basierend auf folgenden Daten:\n\n"
@@ -231,7 +231,7 @@ if user_query := st.chat_input(
           gemini_history.append({"role": role, "parts": [m["content"]]})
 
         model = genai.GenerativeModel(
-            model_name="gemini-3.5-flash", system_instruction=ARIS_DNA
+            model_name="gemini-3.6-flash", system_instruction=ARIS_DNA
         )
         chat_session = model.start_chat(history=gemini_history)
         chat_response = chat_session.send_message(user_query)

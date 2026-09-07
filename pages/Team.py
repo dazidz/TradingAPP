@@ -474,9 +474,9 @@ with tab_aris:
             Verlierer:\n{pd.DataFrame(top_losers).to_string() if top_losers else "Keine"}
             """
 
-        # Gemini Request für den Initial-Report (Aktualisiert auf gemini-3.5-flash)
+        # Gemini Request für den Initial-Report (Aktualisiert auf gemini-3.6-flash)
         model = genai.GenerativeModel(
-            model_name="gemini-3.5-flash", system_instruction=aris_dna
+            model_name="gemini-3.6-flash", system_instruction=aris_dna
         )
         response = model.generate_content(
             "Erstelle deinen Analyse-Report basierend auf folgenden Daten:\n\n"
@@ -544,9 +544,9 @@ with tab_aris:
             role = "user" if m["role"] == "user" else "model"
             gemini_history.append({"role": role, "parts": [m["content"]]})
 
-          # Chat-Modell (Aktualisiert auf gemini-3.5-flash)
+          # Chat-Modell (Aktualisiert auf gemini-3.6-flash)
           model = genai.GenerativeModel(
-              model_name="gemini-3.5-flash", system_instruction=aris_dna
+              model_name="gemini-3.6-flash", system_instruction=aris_dna
           )
           chat_session = model.start_chat(history=gemini_history)
           chat_response = chat_session.send_message(user_query)
