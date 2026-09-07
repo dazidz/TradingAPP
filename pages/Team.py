@@ -306,7 +306,7 @@ with tab_peter:
     st.error(f"Peter-Tab aktuell nicht verfügbar (Fehler: {e})")
 
 # ==========================================
-# TAB 5: ARIS (Performance Manager)
+# TAB 5: ARIS (Performance Manager & Chat)
 # ==========================================
 with tab_aris:
   st.subheader("🤖 Aris - Performance Manager")
@@ -315,6 +315,17 @@ with tab_aris:
       " (inklusive 30-Tage-Post-Exit-Tracking), die Watchlist-Extremwerte und"
       " Sektoren."
   )
+
+  # Session State für Aris-Chat initialisieren
+  if "messages_aris" not in st.session_state:
+    st.session_state.messages_aris = []
+
+  aris_dna = """
+        Du bist Aris, der leitende Performance Manager in dieser Trading-Anwendung. Deine Aufgabe ist es, die Performance objektiv, datenbasiert und gnadenlos ehrlich zu analysieren. Du verzichtest auf leere Floskeln und Schönfärberei. 
+        Analysiere die übergebenen Datenpunkte (Signals Journal, Trading Journal inkl. Post-Exit-Tracking, Watchlist-Tagesextremwerte und Sektoren).
+        Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefere konkrete, direkt umsetzbare Handlungsempfehlungen.
+        Antworte strukturiert, prägnant und auf den Punkt.
+        """
 
   if st.button(
       "🚀 Aris Tages-Analyse starten",
@@ -336,21 +347,26 @@ with tab_aris:
 
         genai.configure(api_key=api_key)
 
-        aris_dna = """
-                Du bist Aris, der leitende Performance Manager in dieser Trading-Anwendung. Deine Aufgabe ist es, die Performance objektiv, datenbasiert und gnadenlos ehrlich zu analysieren. Du verzichtest auf leere Floskeln und Schönfärberei. 
-                Analysiere die übergebenen Datenpunkte (Signals Journal, Trading Journal inkl. Post-Exit-Tracking, Watchlist-Tagesextremwerte und Sektoren).
-                Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefere konkrete, direkt umsetzbare Handlungsempfehlungen.
-                Antworte strukturiert, prägnant und auf den Punkt.
-                """
-
         # 1. Daten aus Supabase laden
         signals_res = supabase.table("signals").select("*").execute()
         journal_res = supabase.table("trade_journal").select("*").execute()
         watchlist_res = supabase.table("watchlist").select("*").execute()
 
-        signals_df = pd.DataFrame(signals_res.data) if signals_res.data else pd.DataFrame()
-        journal_df = pd.DataFrame(journal_res.data) if journal_res.data else pd.DataFrame()
-        watchlist_df = pd.DataFrame(watchlist_res.data) if watchlist_res.data else pd.DataFrame()
+        signals_df = (
+            pd.DataFrame(signals_res.data)
+            if signals_res.data
+            else pd.DataFrame()
+        )
+        journal_df = (
+            pd.DataFrame(journal_res.data)
+            if journal_res.data
+            else pd.DataFrame()
+        )
+        watchlist_df = (
+            pd.DataFrame(watchlist_res.data)
+            if watchlist_res.data
+            else pd.DataFrame()
+        )
 
         # 2. Post-Exit Tracking (30 Tage nach Trade-Schluss)
         post_exit_results = []
@@ -426,14 +442,59 @@ with tab_aris:
             f" deinen täglichen Analyse-Report:\n\n{context_data}"
         )
 
-        st.session_state["aris_analysis"] = response.text
+        report_text = response.text
+        st.session_state.messages_aris.append(
+            {"role": "assistant", "content": report_text}
+        )
         st.success("Analyse erfolgreich abgeschlossen!")
         st.rerun()
 
       except Exception as e:
         st.error(f"⚠️ Aris-Fehler im Detail: {e}")
 
-  if "aris_analysis" in st.session_state:
-    st.divider()
-    st.markdown("### 📊 Aris' Performance-Report")
-    st.markdown(st.session_state["aris_analysis"])
+  st.divider()
+  st.markdown("### 💬 Chat mit Aris")
+
+  # Chatverlauf ausgeben
+  for message in st.session_state.messages_aris:
+    with st.chat_message(message["role"]):
+      st.markdown(message["content"])
+
+  # Chat-Eingabe für Rückfragen
+  if user_query := st.chat_input(
+      "Stelle Aris eine Frage zu den Trades oder der Performance...",
+      key="aris_chat_input",
+  ):
+    st.session_state.messages_aris.append(
+        {"role": "user", "content": user_query}
+    )
+    with st.chat_message("user"):
+      st.markdown(user_query)
+
+    with st.chat_message("assistant"):
+      with st.spinner("Aris denkt nach..."):
+        try:
+          api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get(
+              "GOOGLE_API_KEY"
+          )
+          genai.configure(api_key=api_key)
+
+          # Verlauf für Gemini formatieren
+          gemini_history = []
+          for m in st.session_state.messages_aris[:-1]:
+            role = "user" if m["role"] == "user" else "model"
+            gemini_history.append({"role": role, "parts": [m["content"]]})
+
+          model = genai.GenerativeModel(
+              model_name="gemini-1.5-flash", system_instruction=aris_dna
+          )
+          chat_session = model.start_chat(history=gemini_history)
+          chat_response = chat_session.send_message(user_query)
+
+          answer = chat_response.text
+          st.markdown(answer)
+          st.session_state.messages_aris.append(
+              {"role": "assistant", "content": answer}
+          )
+        except Exception as chat_err:
+          st.error(f"Fehler im Chat: {chat_err}")
