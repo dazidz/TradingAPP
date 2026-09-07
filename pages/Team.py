@@ -263,4 +263,4 @@ with tab_aris:
             st.markdown(st.session_state["aris_analysis"])
             
     except Exception as e:
-        st.warning("🤖 Aris befindet sich aktuell im Aufbau (DNA wird definiert). Die anderen Tabs funktionieren einwandfrei.")
+      st.error(f"⚠️ Aris-Fehler im Detail: {e}")
