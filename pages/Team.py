@@ -373,7 +373,6 @@ with tab_aris:
         " Meilensteine mit Gemini..."
     ):
       try:
-        # Direkter Zugriff analog zu den Supabase-Secrets
         api_key = st.secrets["GEMINI_API_KEY"]
         genai.configure(api_key=api_key)
 
@@ -395,7 +394,7 @@ with tab_aris:
         journal_df = pd.DataFrame(journal_res.data)
         watchlist_df = pd.DataFrame(watchlist_res.data)
 
-        # Screener-Code einlesen
+        # Screener-Code einlesen (Sicherheitsbegrenzung auf 15.000 Zeichen)
         screener_code_content = ""
         try:
           screener_path = Path("screeners/main_screener.py")
@@ -407,6 +406,11 @@ with tab_aris:
               screener_code_content = screener_files[0].read_text(
                   encoding="utf-8"
               )
+          if len(screener_code_content) > 15000:
+            screener_code_content = (
+                screener_code_content[:15000]
+                + "\n... [Code gekürzt wegen Länge]"
+            )
         except Exception as code_err:
           screener_code_content = (
               f"Konnte Screener-Code nicht laden: {code_err}"
@@ -415,7 +419,7 @@ with tab_aris:
         # Post-Exit Tracking
         post_exit_results = []
         if not journal_df.empty and "ausstieg_datum_zeit" in journal_df.columns:
-          for _, row in journal_df.head(20).iterrows():
+          for _, row in journal_df.head(15).iterrows():
             ticker = row.get("ticker")
             exit_date_str = row.get("ausstieg_datum_zeit")
             exit_price = float(row.get("ausstiegskurs", 0))
@@ -474,7 +478,7 @@ with tab_aris:
             Verlierer:\n{pd.DataFrame(top_losers).to_string() if top_losers else "Keine"}
             """
 
-        # Gemini Request für den Initial-Report (Aktualisiert auf gemini-3.6-flash)
+        # Gemini Request für den Initial-Report (mit gemini-3.6-flash)
         model = genai.GenerativeModel(
             model_name="gemini-3.6-flash", system_instruction=aris_dna
         )
@@ -538,13 +542,18 @@ with tab_aris:
           api_key = st.secrets["GEMINI_API_KEY"]
           genai.configure(api_key=api_key)
 
-          # Verlauf für Gemini formatieren
+          # Verlauf für Gemini formatieren (Sicherstellen, dass er sauber mit 'user' startet)
           gemini_history = []
           for m in st.session_state.messages_aris[:-1]:
             role = "user" if m["role"] == "user" else "model"
+
+            # Verhindern, dass die Historie mit 'model' beginnt (wegen des initialen Reports)
+            if not gemini_history and role == "model":
+              continue
+
             gemini_history.append({"role": role, "parts": [m["content"]]})
 
-          # Chat-Modell (Aktualisiert auf gemini-3.6-flash)
+          # Chat-Modell (gemini-3.6-flash)
           model = genai.GenerativeModel(
               model_name="gemini-3.6-flash", system_instruction=aris_dna
           )
