@@ -1,13 +1,20 @@
 from datetime import datetime, timedelta
 from pathlib import Path
+import google.generativeai as genai
 import pandas as pd
 import streamlit as st
 from supabase import create_client
 import yfinance as yf
-from openai import OpenAI
 
-# OpenAI Client initialisieren
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# Gemini Client / API Key initialisieren
+try:
+  api_key = st.secrets["GEMINI_API_KEY"]
+  genai.configure(api_key=api_key)
+except Exception as e:
+  st.error(
+      "Fehler beim Laden von GEMINI_API_KEY aus den Streamlit Secrets:"
+      f" {e}"
+  )
 
 ARIS_DNA = """
 Du bist Aris, der leitende Performance Manager in dieser Trading-Anwendung. Deine Aufgabe ist es, die Performance objektiv, datenbasiert und gnadenlos ehrlich zu analysieren. Du verzichtest auf leere Floskeln und Schönfärberei. 
@@ -43,7 +50,6 @@ try:
   )
   if saved_report_res.data and not st.session_state.messages_aris:
     latest_report = saved_report_res.data[0]
-    # Den letzten Report als initialen Agenten-Beitrag in den Chat legen
     st.session_state.messages_aris.append({
         "role": "assistant",
         "content": (
@@ -63,10 +69,11 @@ if st.button(
     use_container_width=True,
 ):
   with st.spinner(
-      "Aris analysiert Datenbanken, liest Screener-Code ein und prüft Meilensteine..."
+      "Aris analysiert Datenbanken, liest Screener-Code ein und prüft"
+      " Meilensteine mit Gemini..."
   ):
     try:
-      # --- (Hier läuft deine Datenabfrage wie gehabt) ---
+      # --- Datenabfrage ---
       signals_res = (
           supabase.table("signals_journal")
           .select("*")
@@ -96,9 +103,7 @@ if st.button(
           if screener_files:
             screener_code_content = screener_files[0].read_text(encoding="utf-8")
       except Exception as code_err:
-        screener_code_content = (
-            f"Konnte Screener-Code nicht laden: {code_err}"
-        )
+        screener_code_content = f"Konnte Screener-Code nicht laden: {code_err}"
 
       # Post-Exit Tracking
       post_exit_results = []
@@ -162,23 +167,16 @@ if st.button(
             Verlierer:\n{pd.DataFrame(top_losers).to_string() if top_losers else "Keine"}
             """
 
-      # OpenAI Request für den Initial-Report
-      response = client.chat.completions.create(
-          model="gpt-4o",
-          messages=[
-              {"role": "system", "content": ARIS_DNA},
-              {
-                  "role": "user",
-                  "content": (
-                      "Erstelle deinen Analyse-Report basierend auf folgenden"
-                      f" Daten:\n\n{context_data}"
-                  ),
-              },
-          ],
-          temperature=0.3,
+      # Gemini Request mit aktuellem Gemini-3.5-Modell
+      model = genai.GenerativeModel(
+          model_name="gemini-3.5-flash", system_instruction=ARIS_DNA
+      )
+      response = model.generate_content(
+          "Erstelle deinen Analyse-Report basierend auf folgenden Daten:\n\n"
+          + context_data
       )
 
-      report_content = response.choices[0].message.content
+      report_content = response.text
 
       # In Supabase speichern
       try:
@@ -199,10 +197,11 @@ if st.button(
             "id", journal_df["id"].tolist()
         ).execute()
 
-      # Neuen Report direkt als Assistant-Nachricht in den Chat-Verlauf schreiben
       st.session_state.messages_aris.append(
           {"role": "assistant", "content": report_content}
       )
+      st.success("Analyse erfolgreich abgeschlossen!")
+      st.rerun()
 
     except Exception as e:
       st.error(f"⚠️ Fehler: {e}")
@@ -210,38 +209,36 @@ if st.button(
 st.markdown("---")
 st.markdown("### 💬 Diskussion mit Aris")
 
-# 2. Bestehenden Chatverlauf rendern
 for message in st.session_state.messages_aris:
   with st.chat_message(message["role"]):
     st.markdown(message["content"])
 
-# 3. Chat-Eingabe für Rückfragen
-if user_query := st.chat_input("Stelle Aris eine Frage zu den Trades oder dem Code..."):
-  # User-Nachricht anzeigen & speichern
+if user_query := st.chat_input(
+    "Stelle Aris eine Frage zu den Trades oder dem Code..."
+):
   st.session_state.messages_aris.append(
       {"role": "user", "content": user_query}
   )
   with st.chat_message("user"):
     st.markdown(user_query)
 
-  # Antwort von Aris generieren unter Berücksichtigung des bisherigen Chatverlaufs
   with st.chat_message("assistant"):
     with st.spinner("Aris denkt nach..."):
       try:
-        # Wir übergeben die System-DNA + den gesamten bisherigen Chatverlauf an OpenAI
-        chat_messages = [{"role": "system", "content": ARIS_DNA}] + [
-            {"role": m["role"], "content": m["content"]}
-            for m in st.session_state.messages_aris
-        ]
+        gemini_history = []
+        for m in st.session_state.messages_aris[:-1]:
+          role = "user" if m["role"] == "user" else "model"
+          gemini_history.append({"role": role, "parts": [m["content"]]})
 
-        chat_response = client.chat.completions.create(
-            model="gpt-4o", messages=chat_messages, temperature=0.3
+        model = genai.GenerativeModel(
+            model_name="gemini-3.5-flash", system_instruction=ARIS_DNA
         )
+        chat_session = model.start_chat(history=gemini_history)
+        chat_response = chat_session.send_message(user_query)
 
-        answer = chat_response.choices[0].message.content
+        answer = chat_response.text
         st.markdown(answer)
 
-        # Assistenten-Antwort speichern
         st.session_state.messages_aris.append(
             {"role": "assistant", "content": answer}
         )
