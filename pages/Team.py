@@ -419,7 +419,7 @@ with tab_aris:
 
         # 5. Anfrage an Gemini senden
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-pro", system_instruction=aris_dna
+            model_name="gemini-2.5-flash", system_instruction=aris_dna
         )
         response = model.generate_content(
             "Hier sind die aktuellen Performance-Daten des Systems. Erstelle"
