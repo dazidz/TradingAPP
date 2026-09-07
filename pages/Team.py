@@ -367,23 +367,8 @@ with tab_aris:
         " Meilensteine mit Gemini..."
     ):
       try:
-        # Robuster Zugriff auf Streamlit Secrets
-        api_key = None
-        try:
-          if "GEMINI_API_KEY" in st.secrets:
-            api_key = st.secrets["GEMINI_API_KEY"]
-          elif "GOOGLE_API_KEY" in st.secrets:
-            api_key = st.secrets["GOOGLE_API_KEY"]
-        except Exception:
-          pass
-
-        if not api_key:
-          st.error(
-              "Gemini API-Key fehlt in den Streamlit Secrets. Bitte trage"
-              ' GEMINI_API_KEY = "dein_key" in deine secrets.toml ein.'
-          )
-          st.stop()
-
+        # Direkter Zugriff analog zu den Supabase-Secrets
+        api_key = st.secrets["GEMINI_API_KEY"]
         genai.configure(api_key=api_key)
 
         signals_res = (
@@ -544,19 +529,7 @@ with tab_aris:
     with st.chat_message("assistant"):
       with st.spinner("Aris denkt nach..."):
         try:
-          api_key = None
-          try:
-            if "GEMINI_API_KEY" in st.secrets:
-              api_key = st.secrets["GEMINI_API_KEY"]
-            elif "GOOGLE_API_KEY" in st.secrets:
-              api_key = st.secrets["GOOGLE_API_KEY"]
-          except Exception:
-            pass
-
-          if not api_key:
-            st.error("Gemini API-Key fehlt in den Streamlit Secrets.")
-            st.stop()
-
+          api_key = st.secrets["GEMINI_API_KEY"]
           genai.configure(api_key=api_key)
 
           # Verlauf für Gemini formatieren
