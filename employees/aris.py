@@ -129,4 +129,7 @@ if st.button(
       st.markdown(response.choices[0].message.content)
 
     except Exception as e:
-      st.error(f"Fehler bei Aris' Analyse: {e}")
+      st.warning(
+        "🤖 Aris befindet sich aktuell im Aufbau (DNA wird definiert). Die"
+        f" anderen Tabs funktionieren einwandfrei. (Fehler: {e})"
+    )
