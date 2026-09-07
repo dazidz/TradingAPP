@@ -43,7 +43,9 @@ tab_teamroom, tab_otto, tab_nino, tab_peter, tab_aris = st.tabs([
 with tab_teamroom:
   try:
     st.subheader("Tägliches Standup & Synthesis")
-    st.markdown("Nach Ray Dalios Prinzipien: **Radical Truth & Radical Open-Mindedness**.")
+    st.markdown(
+        "Nach Ray Dalios Prinzipien: **Radical Truth & Radical Open-Mindedness**."
+    )
 
     selected_depot = st.selectbox(
         "Fokus-Depot für dieses Meeting:",
@@ -135,7 +137,9 @@ with tab_otto:
 
     col_o1, col_o2 = st.columns([2, 1])
     with col_o1:
-      if st.button("🚀 Otto: Analyse & Tages-Standup starten", key="btn_run_otto"):
+      if st.button(
+          "🚀 Otto: Analyse & Tages-Standup starten", key="btn_run_otto"
+      ):
         with st.spinner("Otto analysiert..."):
           success, msg = otto.run_analysis()
           if success:
@@ -274,7 +278,9 @@ with tab_peter:
     st.subheader(f"🕵️ {peter.name}")
     st.caption(peter.description)
 
-    if st.button("🔄 Peter: Markt-Intel & Kennzahlen aktualisieren", key="btn_run_peter"):
+    if st.button(
+        "🔄 Peter: Markt-Intel & Kennzahlen aktualisieren", key="btn_run_peter"
+    ):
       with st.spinner("Peter holt aktuelle Marktdaten..."):
         success, msg = peter.fetch_market_intel()
         if success:
@@ -468,9 +474,9 @@ with tab_aris:
             Verlierer:\n{pd.DataFrame(top_losers).to_string() if top_losers else "Keine"}
             """
 
-        # Gemini Request für den Initial-Report
+        # Gemini Request für den Initial-Report (Aktualisiert auf gemini-3.5-flash)
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash", system_instruction=aris_dna
+            model_name="gemini-3.5-flash", system_instruction=aris_dna
         )
         response = model.generate_content(
             "Erstelle deinen Analyse-Report basierend auf folgenden Daten:\n\n"
@@ -538,8 +544,9 @@ with tab_aris:
             role = "user" if m["role"] == "user" else "model"
             gemini_history.append({"role": role, "parts": [m["content"]]})
 
+          # Chat-Modell (Aktualisiert auf gemini-3.5-flash)
           model = genai.GenerativeModel(
-              model_name="gemini-1.5-flash", system_instruction=aris_dna
+              model_name="gemini-3.5-flash", system_instruction=aris_dna
           )
           chat_session = model.start_chat(history=gemini_history)
           chat_response = chat_session.send_message(user_query)
