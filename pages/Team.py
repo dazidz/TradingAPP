@@ -367,11 +367,21 @@ with tab_aris:
         " Meilensteine mit Gemini..."
     ):
       try:
-        api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get(
-            "GOOGLE_API_KEY"
-        )
+        # Robuster Zugriff auf Streamlit Secrets
+        api_key = None
+        try:
+          if "GEMINI_API_KEY" in st.secrets:
+            api_key = st.secrets["GEMINI_API_KEY"]
+          elif "GOOGLE_API_KEY" in st.secrets:
+            api_key = st.secrets["GOOGLE_API_KEY"]
+        except Exception:
+          pass
+
         if not api_key:
-          st.error("Gemini API-Key fehlt in den Streamlit Secrets.")
+          st.error(
+              "Gemini API-Key fehlt in den Streamlit Secrets. Bitte trage"
+              ' GEMINI_API_KEY = "dein_key" in deine secrets.toml ein.'
+          )
           st.stop()
 
         genai.configure(api_key=api_key)
@@ -382,7 +392,6 @@ with tab_aris:
             .eq("aris_status_5d", False)
             .execute()
         )
-        # Korrigiert von 'trading_journal' auf 'trade_journal'
         journal_res = (
             supabase.table("trade_journal")
             .select("*")
@@ -485,7 +494,7 @@ with tab_aris:
 
         report_content = response.text
 
-        # In Supabase speichern (Voraussetzung: Tabelle agent_reports existiert)
+        # In Supabase speichern
         try:
           supabase.table("agent_reports").insert({
               "agent_name": "Aris",
@@ -535,9 +544,19 @@ with tab_aris:
     with st.chat_message("assistant"):
       with st.spinner("Aris denkt nach..."):
         try:
-          api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get(
-              "GOOGLE_API_KEY"
-          )
+          api_key = None
+          try:
+            if "GEMINI_API_KEY" in st.secrets:
+              api_key = st.secrets["GEMINI_API_KEY"]
+            elif "GOOGLE_API_KEY" in st.secrets:
+              api_key = st.secrets["GOOGLE_API_KEY"]
+          except Exception:
+            pass
+
+          if not api_key:
+            st.error("Gemini API-Key fehlt in den Streamlit Secrets.")
+            st.stop()
+
           genai.configure(api_key=api_key)
 
           # Verlauf für Gemini formatieren
