@@ -52,6 +52,22 @@ with tab_depot:
   target_table = depot_tables[selected_depot_ui]
 
   try:
+    # Watchlist für das Mapping Ticker -> Firmenname laden
+    try:
+      wl_res = (
+          supabase.table("watchlist").select("ticker, company_name").execute()
+      )
+      ticker_to_name = (
+          {
+              item["ticker"]: item.get("company_name", item["ticker"])
+              for item in wl_res.data
+          }
+          if wl_res.data
+          else {}
+      )
+    except Exception:
+      ticker_to_name = {}
+
     response = supabase.table(target_table).select("*").execute()
     positions = response.data
 
@@ -80,6 +96,7 @@ with tab_depot:
 
       for _, row in df_pos.iterrows():
         ticker = row["ticker"]
+        company_name = ticker_to_name.get(ticker, ticker)
         shares = float(row["anzahl"])
         buy_price = float(row["buy_price"])
         curr_price = live_prices.get(ticker, buy_price)
@@ -107,6 +124,7 @@ with tab_depot:
 
         portfolio_data.append({
             "ID": row["id"],
+            "Unternehmen": company_name,
             "Ticker": ticker,
             "Datum Einstieg": row.get("datum_einstieg", "N/A"),
             "Anzahl": shares,
@@ -247,7 +265,6 @@ with tab_new_trade:
   if action_mode == "Neue Position kaufen (BUY)":
     st.subheader("➕ Neue Position im Depot eröffnen")
 
-    # Watchlist für das Dropdown-Menü abrufen
     try:
       wl_res = (
           supabase.table("watchlist").select("ticker, company_name").execute()
@@ -256,7 +273,6 @@ with tab_new_trade:
     except Exception:
       watchlist_items = []
 
-    # Mapping: "Firmenname (TICKER)" -> Ticker
     ticker_options = {
         f"{item.get('company_name', 'N/A')} ({item['ticker']})": item["ticker"]
         for item in watchlist_items
