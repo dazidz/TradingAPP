@@ -9,12 +9,10 @@ class FairValueScreener:
     self.supabase = supabase_client
 
   def get_or_calculate_fair_values(self, force_refresh=False):
-    """Prüft, ob heute schon Werte da sind. Wenn nicht oder bei force_refresh, neu berechnen."""
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     try:
       if not force_refresh:
-        # Prüfen ob Daten von heute existieren
         res = (
             self.supabase.table("fair_value_cache")
             .select("*")
@@ -22,9 +20,7 @@ class FairValueScreener:
             .execute()
         )
         if res.data and len(res.data) > 0:
-          # Aus Cache laden
           df = pd.DataFrame(res.data)
-          # Spalten für die UI umbenennen / anpassen
           df = df.rename(
               columns={
                   "ticker": "Ticker",
@@ -36,20 +32,17 @@ class FairValueScreener:
                   "status": "Status",
               }
           )
-          # Potential in Prozent-String formatieren falls nötig
           df["Potential (%)"] = df["Potential (%)"].apply(
               lambda x: f"{x}%" if pd.notnull(x) else "N/A"
           )
-          return df, False  # Stammt aus Cache
+          return df, False
     except Exception:
       pass
 
-    # Wenn keine Daten da sind oder erzwungen: Neu berechnen
     df_fresh = self.calculate_and_store_batch()
-    return df_fresh, True  # Neu berechnet
+    return df_fresh, True
 
   def calculate_and_store_batch(self):
-    """Berechnet alles frisch, schreibt es in die DB und gibt das DataFrame zurück."""
     try:
       watchlist_res = self.supabase.table("watchlist").select("*").execute()
       watchlist_df = pd.DataFrame(watchlist_res.data)
@@ -82,23 +75,42 @@ class FairValueScreener:
           fcf = info.get("freeCashflow")
           shares = info.get("sharesOutstanding")
 
-          # Modelle
-          model_pe_val = (eps * 18.0) if (eps and eps > 0) else None
-          model_pb_val = (book_value * 2.0) if (book_value and book_value > 0) else None
-          model_dcf_val = (
-              ((fcf / shares) * 14.0)
-              if (fcf and shares and shares > 0 and fcf > 0)
-              else None
-          )
+          model_pe_val = None
+          model_pb_val = None
+          model_dcf_val = None
+
+          # 1. KGV-Modell (konservativ gedauert: max KGV von 15 angesetzt, nur bei positivem Gewinn)
+          if eps and eps > 0 and eps < current_price:
+            target_pe = min(
+                info.get("trailingPE", 15), 18.0
+            )  Reales KGV oder max 18
+            if target_pe > 0:
+              model_pe_val = eps * target_pe
+
+          # 2. Buchwert-Modell (konservativ: P/B max 1.5 bis 2.0)
+          if book_value and book_value > 0:
+            model_pb_val = book_value * 1.5
+
+          # 3. FCF-Modell (konservativ: FCF-Rendite von min 6% angestrebt -> Multiplikator 12.5)
+          if fcf and shares and shares > 0 and fcf > 0:
+            fcf_per_share = fcf / shares
+            model_dcf_val = fcf_per_share * 12.5
 
           valid_models = [
               m
               for m in [model_pe_val, model_pb_val, model_dcf_val]
               if m and m > 0
           ]
-          fair_value = (
-              sum(valid_models) / len(valid_models) if valid_models else 0
-          )
+
+          if valid_models:
+            raw_fair_value = sum(valid_models) / len(valid_models)
+
+            # SICHERHEITS-CAP: Ein Fair Value darf maximal 2.5x des aktuellen Preises betragen,
+            # um absurde Ausreißer (>150% Potential) durch Yahoo-Datenfehler zu kappen.
+            max_allowed_fv = current_price * 2.5
+            fair_value = min(raw_fair_value, max_allowed_fv)
+          else:
+            fair_value = 0
 
           if fair_value and fair_value > 0:
             upside_pct = round(
@@ -123,7 +135,6 @@ class FairValueScreener:
           name = info.get("shortName", ticker)
           sektor = info.get("sector", "N/A")
 
-          # Für UI
           results.append({
               "Ticker": ticker,
               "Name": name,
@@ -134,7 +145,6 @@ class FairValueScreener:
               "Status": status,
           })
 
-          # Für Supabase Cache (alte Einträge für diesen Ticker vorher löschen oder upserten)
           rows_to_insert.append({
               "ticker": ticker,
               "name": name,
@@ -148,10 +158,8 @@ class FairValueScreener:
         except Exception:
           continue
 
-      # In Supabase speichern (Alten Cache leeren und neu befüllen oder per Upsert)
       if rows_to_insert:
         try:
-          # Wir leeren die Tabelle für einen sauberen Tagesstand
           self.supabase.table("fair_value_cache").delete().neq(
               "ticker", "DUMMY"
           ).execute()
