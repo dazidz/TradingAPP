@@ -13,6 +13,9 @@ class JorisPortfolioManager:
         " High Risk)"
     )
 
+def run_analysis(self, api_key: str):  # api_key übergeben
+  genai.configure(api_key=api_key)
+
     self.joris_dna = """
         Du bist Joris, der leitende Portfolio Manager in unserem Team. Deine Aufgabe ist es, die Analysen aller Teammitglieder (Jano für Makro, Peter für Micro/Insider, Otto für Historie, Nino für Signale und Aris für Performance) zu synthetisieren.
         Du arbeitest strikt nach drei unterschiedlichen Mandaten:
@@ -27,10 +30,6 @@ class JorisPortfolioManager:
   def run_synthesis(self, depot_focus="invest"):
     """Führt die Portfoliowerdung und Mandats-Prüfung durch."""
     try:
-      import streamlit as st
-
-      api_key = st.secrets["GEMINI_API_KEY"]
-      genai.configure(api_key=api_key)
 
       # Neueste Berichte aller Agenten aus der zentralen Tabelle holen
       agents = ["Jano", "Peter", "Otto", "Aris"]

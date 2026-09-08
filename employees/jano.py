@@ -60,12 +60,7 @@ class JanoMacroAnalyst:
   def run_analysis(self):
     """Führt die Makro-Analyse mit Gemini durch und speichert sie in Supabase."""
     try:
-      # API Key aus Streamlit Secrets (wird vorausgesetzt, dass streamlit im Scope ist oder via init übergeben wird)
-      import streamlit as st
-
-      api_key = st.secrets["GEMINI_API_KEY"]
-      genai.configure(api_key=api_key)
-
+      
       macro_metrics = self.fetch_macro_data()
       df_macro = pd.DataFrame(macro_metrics).T
 

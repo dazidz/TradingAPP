@@ -11,6 +11,9 @@ class OttoAnalyst:
         "Pattern Matching & History Analyst (Historische Präzedenzfälle)"
     )
 
+def run_analysis(self, api_key: str):  # api_key übergeben
+  genai.configure(api_key=api_key)
+
     self.otto_dna = """
         Du bist Otto, der Analyst für historische Präzedenzfälle und Muster-Matching in unserem Team. 
         Deine Aufgabe ist es, aktuelle Marktsituationen, Signale oder makroökonomische Phasen mit historischen Ereignissen an den Finanzmärkten abzugleichen (z.B. Zinssenkungszyklen, Inflationsepisoden, Dotcom-Blase, 2018er QT-Schock, COVID-Crash etc.).
@@ -24,10 +27,6 @@ class OttoAnalyst:
   def run_analysis(self):
     """Führt Ottos Muster-Analyse aus und speichert sie zentral in agent_reports."""
     try:
-      import streamlit as st
-
-      api_key = st.secrets["GEMINI_API_KEY"]
-      genai.configure(api_key=api_key)
 
       # Optional: Wir können Janos letzten Makro-Bericht oder aktuelle Marktdaten einbinden, falls vorhanden
       jano_res = (

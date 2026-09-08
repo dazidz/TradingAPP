@@ -26,9 +26,16 @@ URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(URL, KEY)
 
+# Zentraler API-Key Check für alle Agenten
+try:
+  GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+except Exception as e:
+  st.error(f"Fehler beim Laden von GEMINI_API_KEY aus den Streamlit Secrets: {e}")
+  st.stop()
+
 st.title("🏢 VisionDZ - Team & Kommandozentrale")
 
-# --- DIE TABS DEFINIEREN (Inklusive Joris & Jano) ---
+# --- DIE TABS DEFINIEREN ---
 tab_teamroom, tab_jano, tab_peter, tab_otto, tab_nino, tab_aris = st.tabs([
     "💬 Teamroom & Joris",
     "🌍 Jano (Macro)",
@@ -52,7 +59,6 @@ with tab_teamroom:
         "Nach Ray Dalios Prinzipien: **Radical Truth & Radical Open-Mindedness**."
     )
 
-    # Depot-Auswahl für Joris & Team-Beschluss
     selected_depot_label = st.selectbox(
         "Fokus-Depot für dieses Meeting:",
         [
@@ -63,7 +69,6 @@ with tab_teamroom:
         key="teamroom_depot_select",
     )
 
-    # Mapping für den internen Code (invest, swing, high_risk)
     depot_mapping = {
         "Invest (Langfristiges Fundament / Core)": "invest",
         "Swing (Mittelfristige Trendfolge)": "swing",
@@ -80,7 +85,9 @@ with tab_teamroom:
         with st.spinner(
             f"Joris synthetisiert Berichte für '{current_depot_focus}'..."
         ):
-          success, msg = joris.run_synthesis(depot_focus=current_depot_focus)
+          success, msg = joris.run_synthesis(
+              depot_focus=current_depot_focus, api_key=GEMINI_API_KEY
+          )
           if success:
             st.success(msg)
             st.rerun()
@@ -89,7 +96,6 @@ with tab_teamroom:
 
     st.divider()
 
-    # Joris neuesten Bericht für dieses Depot anzeigen
     latest_joris = joris.get_latest_report(depot_focus=current_depot_focus)
     if latest_joris:
       st.markdown(f"### 🎯 Joris Mandats-Empfehlung ({selected_depot_label})")
@@ -150,7 +156,7 @@ with tab_jano:
 
     if st.button("🚀 Jano: Makro-Analyse starten", key="btn_run_jano"):
       with st.spinner("Jano analysiert die Makrolage..."):
-        success, msg = jano.run_analysis()
+        success, msg = jano.run_analysis(api_key=GEMINI_API_KEY)
         if success:
           st.success(msg)
           st.rerun()
@@ -181,7 +187,7 @@ with tab_peter:
 
     if st.button("🔄 Peter: Fundamentaldaten & Insider analysieren"):
       with st.spinner("Peter holt Watchlist & Insider-Daten..."):
-        success, msg = peter.run_analysis()
+        success, msg = peter.run_analysis(api_key=GEMINI_API_KEY)
         if success:
           st.success(msg)
           st.rerun()
@@ -212,7 +218,7 @@ with tab_otto:
 
     if st.button("🚀 Otto: Historisches Muster-Matching starten"):
       with st.spinner("Otto gleicht mit der Börsenhistorie ab..."):
-        success, msg = otto.run_analysis()
+        success, msg = otto.run_analysis(api_key=GEMINI_API_KEY)
         if success:
           st.success(msg)
           st.rerun()
@@ -312,7 +318,6 @@ with tab_aris:
     Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefere konkrete, direkt umsetzbare Handlungsempfehlungen.
     """
 
-  # Letzten Aris-Report laden, falls Chat leer
   if not st.session_state.messages_aris:
     try:
       saved_report_res = (
@@ -339,8 +344,7 @@ with tab_aris:
   if st.button("🚀 Aris Analyse & Screener-Review starten", type="primary"):
     with st.spinner("Aris analysiert Datenbanken und Code..."):
       try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-        genai.configure(api_key=api_key)
+        genai.configure(api_key=GEMINI_API_KEY)
 
         signals_res = supabase.table("signals_journal").select("*").execute()
         journal_res = supabase.table("trade_journal").select("*").execute()
@@ -392,8 +396,7 @@ with tab_aris:
     with st.chat_message("assistant"):
       with st.spinner("Aris denkt nach..."):
         try:
-          api_key = st.secrets["GEMINI_API_KEY"]
-          genai.configure(api_key=api_key)
+          genai.configure(api_key=GEMINI_API_KEY)
 
           gemini_history = []
           for m in st.session_state.messages_aris[:-1]:

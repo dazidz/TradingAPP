@@ -13,6 +13,10 @@ class PeterInsiderAnalyst:
         "Micro-Analyst (Einzelunternehmen, Fundamentaldaten, News, Insider)"
     )
 
+
+def run_analysis(self, api_key: str):  # api_key übergeben
+  genai.configure(api_key=api_key)
+
     self.peter_dna = """
         Du bist Peter, der leitende Micro- und Insider-Analyst in unserem Team. Deine Brille ist strikt Bottom-Up.
         Du analysierst Einzelwerte, fundamentale Kennzahlen, Branchen-News und Insider-Transaktionen (Käufe/Verkäufe von C-Level-Managern und großen institutionellen Haltern).
@@ -33,7 +37,7 @@ class PeterInsiderAnalyst:
         return "Keine Watchlist-Einträge gefunden."
 
       summaries = []
-      for _, row in watchlist_df.head(15).iterrows():  # Limit auf Top 15 für Performance
+      for _, row in watchlist_df.head(15).iterrows():
         ticker = row.get("ticker")
         try:
           t = yf.Ticker(ticker)
@@ -55,16 +59,12 @@ class PeterInsiderAnalyst:
           else "Keine Fundamental-Daten abrufbar."
       )
     except Exception as e:
-      return f Fehler beim Laden der Watchlist: {e}"
+      return f"Fehler beim Laden der Watchlist: {e}"
 
   def run_analysis(self):
     """Führt die Peter-Analyse aus und speichert sie zentral in agent_reports."""
     try:
-      import streamlit as st
-
-      api_key = st.secrets["GEMINI_API_KEY"]
-      genai.configure(api_key=api_key)
-
+      
       fundamental_context = self.fetch_bottom_up_data()
 
       context = f"""
@@ -93,6 +93,10 @@ class PeterInsiderAnalyst:
     except Exception as e:
       return False, f"Fehler bei Peters Analyse: {e}"
 
+  # Alias zur Sicherheit, falls irgendwo noch fetch_market_intel aufgerufen wird
+  def fetch_market_intel(self):
+    return self.run_analysis()
+
   def get_latest_report(self):
     """Holt den neuesten Bericht von Peter aus der zentralen Tabelle."""
     try:
@@ -107,3 +111,16 @@ class PeterInsiderAnalyst:
       return res.data[0] if res.data else None
     except Exception:
       return None
+
+  # Alias zur Kompatibilität mit älteren UI-Aufrufen
+  def get_latest_intel(self):
+    res = self.get_latest_report()
+    if res:
+      # Da wir jetzt den zentralen Text speichern, mappen wir es zur Not ins alte Format
+      return {
+          "analysis_date": res.get("created_at", "N/A")[:16],
+          "insider_activity": res.get("report_content"),
+          "analyst_consensus": "Siehe Hauptbericht",
+          "market_news_summary": "Siehe Hauptbericht",
+      }
+    return None
