@@ -40,7 +40,7 @@ class JorisPortfolioManager:
             {reports_text}
             """
 
-      model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+      model = genai.GenerativeModel(model_name="gemini-3.6-flash")
       response = model.generate_content(prompt)
       report_content = response.text
 
