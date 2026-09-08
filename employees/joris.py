@@ -14,20 +14,61 @@ class JorisPortfolioManager:
 
     self.joris_dna = """
         Du bist Joris, der leitende Portfolio Manager in unserem Team. Du steuerst das Team nach Ray Dalios Prinzipien: 
-        Radical Truth & Radical Open-Mindedness. Deine Aufgabe ist es, die Berichte der Spezialisten (Jano für Makro, Peter für Micro/Insider, Otto für Historie/Muster) zu nehmen, kritisch zu hinterfragen und zu einer fundierten, kohärenten Portfolio-Synthese für das gewählte Mandat zu verdichten.
+        Radical Truth & Radical Open-Mindedness. Deine Aufgabe ist es, die Berichte der Spezialisten kritisch zu hinterfragen und zu einer fundierten, kohärenten Portfolio-Synthese für das gewählte Mandat zu verdichten.
         
-        Deine Aufgabe:
-        1. Führe die Erkenntnisse der anderen Agenten zusammen.
-        2. Setze sie in direkten Bezug zum gewählten Depot-Fokus (Invest, Swing oder High Risk).
-        3. Formuliere klare, kompromisslose Handlungsempfehlungen und Risikohinweise.
+        WICHTIG - MANDATS- UND SIGNAL-DISZIPLIN:
+        1. Bei Mandaten wie 'Swing' oder 'High Risk' darfst du NUR Titel berücksichtigen, die nachweislich ein aktives technisches Signal in unserer Signalliste haben. Werte ohne technisches Signal fliegen rigoros raus!
+        2. Bei 'Invest' Mandaten steht der innere Wert (Fair Value) und die Bilanzstärke im Vordergrund.
+        Formuliere klare, kompromisslose Handlungsempfehlungen und Risikohinweise.
         """
 
+  def _get_active_signals(self, depot_focus: str):
+    """Holt aktive Signale aus der Datenbank, falls das Mandat einen Signal-Filter erfordert."""
+    try:
+      # Wir mappen den Depot-Fokus auf die Strategie-Typen in der DB
+      focus_lower = depot_focus.lower()
+      if "swing" in focus_lower:
+        strategy_filter = "Swing"
+      elif "risk" in focus_lower or "high risk" in focus_lower:
+        strategy_filter = "High Risk"
+      else:
+        return None  # Kein strikter Signal-Filter bei Invest / Allgemein
+
+      res = (
+          self.supabase.table("signals")
+          .select("ticker, signal_status, indicator_details")
+          .ilike("strategy_type", f"%{strategy_filter}%")
+          .execute()
+      )
+      return res.data if res.data else []
+    except Exception:
+      return []
+
   def run_synthesis(self, depot_focus: str, api_key: str):
-    """Führt die Portfolio-Synthese für das gewählte Mandat aus und speichert sie."""
+    """Führt die Portfolio-Synthese für das gewählte Mandat aus (mit Signal-Validierung für Swing/Risk)."""
     try:
       genai.configure(api_key=api_key)
 
-      # Die neuesten Reports der anderen Agenten einsammeln
+      # 1. Prüfen ob Signale erforderlich sind
+      active_signals = self._get_active_signals(depot_focus)
+      signal_context = ""
+
+      if active_signals is not None:
+        if len(active_signals) == 0:
+          return (
+              False,
+              f"Stopp: Für das Mandat '{depot_focus}' wurden keine aktiven"
+              " Einträge in der `signals`-Tabelle gefunden. Keine Synthese"
+              " möglich.",
+          )
+        signal_df = pd.DataFrame(active_signals)
+        signal_context = f"""
+                --- AKTIVE TECHNISCHE SIGNALE (PFLICHT-FILTER FÜR DIESES MANDAT) ---
+                NUR DIE FOLGENDEN TICKER DÜRFEN GEHANDELT/EMPFOHLEN WERDEN:
+                {signal_df.to_string(index=False)}
+                """
+
+      # 2. Die neuesten Reports der anderen Agenten einsammeln
       def get_report(agent_name):
         try:
           res = (
@@ -54,6 +95,8 @@ class JorisPortfolioManager:
             --- GEWÄHLTES MANDAT / DEPOT-FOKUS ---
             {depot_focus}
 
+            {signal_context}
+
             --- JANO (MAKRO-BERICHT) ---
             {jano_report}
 
@@ -68,14 +111,13 @@ class JorisPortfolioManager:
           model_name="gemini-3.6-flash", system_instruction=self.joris_dna
       )
       response = model.generate_content(
-          "Erstelle auf Basis der Team-Berichte eine fundierte"
-          f" Portfolio-Synthese für das Mandat '{depot_focus}':\n\n{context}"
+          "Erstelle auf Basis der Team-Berichte und der Signal-Disziplin eine"
+          f" fundierte Portfolio-Synthese für das Mandat '{depot_focus}':\n\n{context}"
       )
 
       report_content = response.text
       today_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-      # In agent_reports mit speziellem Mandatsbezug speichern
       self.supabase.table("agent_reports").insert({
           "agent_name": f"Joris_{depot_focus}",
           "report_content": (
@@ -86,7 +128,8 @@ class JorisPortfolioManager:
 
       return (
           True,
-          f"Joris hat die Portfolio-Synthese für '{depot_focus}' abgeschlossen.",
+          f"Joris hat die Portfolio-Synthese für '{depot_focus}' unter"
+          " Berücksichtigung der Signale abgeschlossen.",
       )
     except Exception as e:
       return False, f"Fehler bei Joris Synthese: {e}"
