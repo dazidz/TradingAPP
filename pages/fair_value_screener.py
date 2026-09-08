@@ -1,10 +1,9 @@
-import sys
 from pathlib import Path
+import sys
 import pandas as pd
 import streamlit as st
 from supabase import create_client
 
-# Pfad anpassen, damit Module aus dem Hauptverzeichnis geladen werden können
 root_dir = Path(__file__).resolve().parent.parent
 if str(root_dir) not in sys.path:
   sys.path.append(str(root_dir))
@@ -21,7 +20,6 @@ if not st.session_state.get("password_correct", False):
   st.warning("Bitte melde dich zuerst auf der Hauptseite an.")
   st.stop()
 
-# Supabase Verbindung
 try:
   URL = st.secrets["SUPABASE_URL"]
   KEY = st.secrets["SUPABASE_KEY"]
@@ -32,35 +30,29 @@ except Exception as e:
 
 st.title("📐 Autonomer Fair Value Screener")
 st.markdown(
-    "Ermittlung des inneren Wertes (Multi-Modell Blend aus KGV, Buchwert und"
-    " Free Cash Flow) für alle Watchlist-Titel – angelehnt an institutionelle"
-    " Bewertungsmodelle."
+    "Tagesaktuelle Bewertung des inneren Wertes (Multi-Modell Blend aus KGV,"
+    " Buchwert und Free Cash Flow) für alle Watchlist-Titel."
 )
 
 screener = FairValueScreener(supabase)
 
-col1, col2 = st.columns([1, 4])
-with col1:
-  run_button = st.button(
-      "🔄 Fair Values berechnen", type="primary", use_container_width=True
-  )
+# Automatisches Laden aus dem Cache (einmal am Tag / Tagesstand)
+col1, col2 = st.columns([3, 1])
+with col2:
+  force_refresh = st.button("🔄 Tagesstand neu berechnen", use_container_width=True)
 
 st.divider()
 
-# Cache oder Live-Berechnung bei Klick
-if "fv_df" not in st.session_state:
-  st.session_state.fv_df = pd.DataFrame()
+with st.spinner("Lade Fair-Value-Daten..."):
+  df, was_refreshed = screener.get_or_calculate_fair_values(
+      force_refresh=force_refresh
+  )
 
-if run_button:
-  with st.spinner(
-      "Analysiere Bilanzen, Cashflows und berechne faire Werte..."
-  ):
-    st.session_state.fv_df = screener.calculate_fair_value_batch()
+if was_refreshed:
+  st.toast("Tagesaktuelle Fair Values wurden neu berechnet und gespeichert!", icon="🔄")
 
-if not st.session_state.fv_df.empty:
-  df = st.session_state.fv_df
-
-  # Filter-Optionen in der Sidebar oder direkt oben
+if not df.empty:
+  # Filter-Optionen
   col_f1, col_f2 = st.columns(2)
   with col_f1:
     status_filter = st.multiselect(
@@ -74,7 +66,6 @@ if not st.session_state.fv_df.empty:
   st.markdown("### 📊 Bewertungsübersicht")
   st.dataframe(filtered_df, use_container_width=True, hide_index=True)
 
-  # Visuelle Hervorhebung der Top-Chancen (Stark unterbewertet)
   st.markdown("### 🚀 Top Unterbewertete Chancen (Margin of Safety)")
   undervalued = df[df["Status"].str.contains("Stark Unterbewertet", na=False)]
   if not undervalued.empty:
@@ -90,9 +81,7 @@ if not st.session_state.fv_df.empty:
         "Aktuell befinden sich keine Titel mit 'Stark Unterbewertet' auf der"
         " Watchlist."
     )
-
 else:
-  st.info(
-      "Klicke oben auf **'Fair Values berechnen'**, um den Screener zu"
-      " starten."
+  st.warning(
+      "Keine Daten im Fair-Value-Cache gefunden oder Watchlist ist leer."
   )
