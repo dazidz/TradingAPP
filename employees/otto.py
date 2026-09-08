@@ -1,5 +1,7 @@
 from datetime import datetime
 import google.generativeai as genai
+import pandas as pd
+import yfinance as yf
 
 
 class OttoAnalyst:
@@ -8,52 +10,57 @@ class OttoAnalyst:
     self.supabase = supabase_client
     self.name = "Otto"
     self.description = (
-        "Pattern Matching & History Analyst (Historische Präzedenzfälle)"
+        "History & Patterns Analyst (Muster-Matching, historische"
+        " Korrelationen, analoge Börsenphasen)"
     )
 
-def run_analysis(self, api_key: str):  # api_key übergeben
-  genai.configure(api_key=api_key)
-
     self.otto_dna = """
-        Du bist Otto, der Analyst für historische Präzedenzfälle und Muster-Matching in unserem Team. 
-        Deine Aufgabe ist es, aktuelle Marktsituationen, Signale oder makroökonomische Phasen mit historischen Ereignissen an den Finanzmärkten abzugleichen (z.B. Zinssenkungszyklen, Inflationsepisoden, Dotcom-Blase, 2018er QT-Schock, COVID-Crash etc.).
+        Du bist Otto, der leitende Historien- und Muster-Analyst in unserem Team. Deine Brille ist strikt quantitativ-historisch.
+        Du vergleichst aktuelle Marktphasen, Volatilitäten und Zinsumfelder mit historischen Krisen, Blasen und Boom-Phasen (z.B. 2000, 2008, 2020, 2022).
         
         Deine Aufgabe:
-        1. Identifiziere historische Parallelen zur aktuellen Marktlage.
-        2. Analysiere, wie Märkte damals reagiert haben und welche Sektoren gewannen oder verloren.
-        3. Liefere prägnante, warnende oder bestätigende Muster-Erkenntnisse ("Das hatten wir schon mal..."). Keine Spekulation ins Blaue, sondern historische Evidenz.
+        1. Analysiere historische Muster anhand von Kurs- und Volatilitätsdaten.
+        2. Zeige Parallelen und Unterschiede zu früheren Börsenzyklen auf.
+        3. Warne vor historischen Fallen oder bestätige historische Chancen faktenbasiert.
         """
 
-  def run_analysis(self):
-    """Führt Ottos Muster-Analyse aus und speichert sie zentral in agent_reports."""
+  def fetch_historical_context(self):
+    """Holt historische S&P 500 Daten für das Muster-Matching."""
     try:
+      t = yf.Ticker("^GSPC")
+      hist = t.history(period="5y")
+      if hist.empty:
+        return "Keine historischen Daten verfügbar."
 
-      # Optional: Wir können Janos letzten Makro-Bericht oder aktuelle Marktdaten einbinden, falls vorhanden
-      jano_res = (
-          self.supabase.table("agent_reports")
-          .select("*")
-          .eq("agent_name", "Jano")
-          .order("created_at", desc=True)
-          .limit(1)
-          .execute()
+      recent_close = hist["Close"].iloc[-1]
+      high_1y = hist["Close"].tail(252).max()
+      low_1y = hist["Close"].tail(252).min()
+
+      return (
+          f"S&P 500 aktueller Stand: {recent_close:.2f}\n1-Jahres-Hoch:"
+          f" {high_1y:.2f}\n1-Jahres-Tief: {low_1y:.2f}"
       )
-      jano_context = (
-          jano_res.data[0]["report_content"]
-          if jano_res.data
-          else "Keine aktuellen Makro-Daten von Jano verfügbar."
-      )
+    except Exception as e:
+      return f"Fehler beim Laden historischer Daten: {e}"
+
+  def run_analysis(self, api_key: str):
+    """Führt Ottos historische Muster-Analyse aus und speichert sie in agent_reports."""
+    try:
+      genai.configure(api_key=api_key)
+
+      history_context = self.fetch_historical_context()
 
       context = f"""
-            --- LETZTER MAKRO-KONTEXT (VON JANO) ---
-            {jano_context}
+            --- HISTORISCHER KONTEXT & MARKT-MUSTER ---
+            {history_context}
             """
 
       model = genai.GenerativeModel(
           model_name="gemini-3.6-flash", system_instruction=self.otto_dna
       )
       response = model.generate_content(
-          "Vergleiche die aktuelle Marktlage mit historischen Präzedenzfällen"
-          f" und liefere dein Muster-Matching:\n\n{context}"
+          "Führe ein historisches Muster-Matching und einen"
+          f" Zyklus-Vergleich durch:\n\n{context}"
       )
 
       report_content = response.text

@@ -14,53 +14,51 @@ class JanoMacroAnalyst:
     )
 
     self.jano_dna = """
-        Du bist Jano, der leitende Makro-Analyst in unserem Investment-Team. Deine Brille ist strikt Top-Down. 
-        Du analysierst die globale Großwetterlage: Zinsen, Zinskurven, den VIX (Volatilitätsindex), Rohstoffe (Öl, Gold etc.) und breite Marktindizes (S&P 500, Nasdaq).
+        Du bist Jano, der leitende Makro-Analyst in unserem Team. Deine Brille ist strikt Top-Down.
+        Du analysierst Zyklen, Zinsen, den VIX, Rohstoffe, globale Liquidität und die übergeordnete Marktphase (Bullenmarkt, Bärenmarkt, Seitwärtsphase/Korrektur).
         
         Deine Aufgabe:
-        1. Bestimme die aktuelle Marktphase (z.B. Bullenmarkt, Korrektur, Hochvolatiler Übergang, Rezessionsangst).
-        2. Leite daraus ab, wie aggressiv oder defensiv wir agieren sollten.
-        3. Fasse deine Erkenntnisse prägnant und datenbasiert zusammen. Keine leeren Worthülsen.
+        1. Bewerte die aktuelle makroökonomische Großwetterlage anhand der gelieferten Kennzahlen.
+        2. Leite daraus ab, welches Marktumfeld wir aktuell haben und ob Risiko-Assets (wie Aktien) Rückenwind oder Gegenwind haben.
+        3. Fasse deine Erkenntnisse prägnant, analytisch und ungeschönt zusammen.
         """
 
   def fetch_macro_data(self):
-    """Holt aktuelle Makro-Indikatoren über yfinance."""
+    """Holt wichtige Makro-Indikatoren über yfinance."""
     tickers = {
         "S&P 500": "^GSPC",
         "Nasdaq 100": "^NDX",
-        "VIX (Volatilität)": "^VIX",
-        "10Y US Treasury Yield": "^TNX",
+        "VIX (Volatility)": "^VIX",
+        "US 10Y Yield": "^TNX",
         "Gold": "GC=F",
         "Crude Oil": "CL=F",
+        "EUR/USD": "EURUSD=X",
     }
 
     macro_data = {}
     for name, ticker in tickers.items():
       try:
-        df = yf.download(ticker, period="5d", progress=False)
-        if not df.empty and "Close" in df:
-          # Handle potential multi-index columns from yfinance
-          close_series = (
-              df["Close"].iloc[:, 0]
-              if isinstance(df["Close"], pd.DataFrame)
-              else df["Close"]
-          )
-          current = float(close_series.iloc[-1])
-          previous = float(close_series.iloc[-2])
-          change = ((current - previous) / previous) * 100
+        t = yf.Ticker(ticker)
+        hist = t.history(period="5d")
+        if not hist.empty:
+          current_val = hist["Close"].iloc[-1]
+          prev_val = hist["Close"].iloc[0]
+          change_pct = ((current_val - prev_val) / prev_val) * 100
           macro_data[name] = {
-              "aktuell": round(current, 2),
-              "änderung_%": round(change, 2),
+              "Aktuell": round(current_val, 2),
+              "5T-Change (%)": round(change_pct, 2),
           }
       except Exception:
         continue
 
     return macro_data
 
-  def run_analysis(self):
-    """Führt die Makro-Analyse mit Gemini durch und speichert sie in Supabase."""
+  def run_analysis(self, api_key: str):
+    """Führt die Makro-Analyse aus und speichert sie zentral in agent_reports."""
     try:
-      
+      # Gemini mit dem übergebenen Key konfigurieren
+      genai.configure(api_key=api_key)
+
       macro_metrics = self.fetch_macro_data()
       df_macro = pd.DataFrame(macro_metrics).T
 
@@ -77,36 +75,27 @@ class JanoMacroAnalyst:
           f" und bestimme die Marktphase:\n\n{context}"
       )
 
-      insight_text = response.text
-      today_str = datetime.now().strftime("%Y-%m-%d")
+      report_content = response.text
+      today_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-      # Marktphase extrahieren oder standardmäßig setzen
-      market_phase = "Neutral / Unbekannt"
-      if "Bullenmarkt" in insight_text:
-        market_phase = "Bullenmarkt"
-      elif "Korrektur" in insight_text:
-        market_phase = "Korrektur"
-      elif "High Volatility" in insight_text or "Volatil" in insight_text:
-        market_phase = "Hohe Volatilität"
-
-      # In Supabase speichern (Tabelle: macro_logs)
-      self.supabase.table("macro_logs").insert({
-          "analysis_date": today_str,
-          "market_phase": market_phase,
-          "insight": insight_text,
+      # Zentral in agent_reports speichern
+      self.supabase.table("agent_reports").insert({
+          "agent_name": self.name,
+          "report_content": f"**Report vom {today_str}:**\n\n{report_content}",
       }).execute()
 
       return True, "Jano hat die Makro-Analyse erfolgreich abgeschlossen."
     except Exception as e:
       return False, f"Fehler bei Janos Analyse: {e}"
 
-  def get_latest_log(self):
-    """Holt den neuesten Makro-Log aus Supabase."""
+  def get_latest_report(self):
+    """Holt den neuesten Bericht von Jano aus der zentralen Tabelle."""
     try:
       res = (
-          self.supabase.table("macro_logs")
+          self.supabase.table("agent_reports")
           .select("*")
-          .order("analysis_date", desc=True)
+          .eq("agent_name", self.name)
+          .order("created_at", desc=True)
           .limit(1)
           .execute()
       )

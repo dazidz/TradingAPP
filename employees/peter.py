@@ -13,10 +13,6 @@ class PeterInsiderAnalyst:
         "Micro-Analyst (Einzelunternehmen, Fundamentaldaten, News, Insider)"
     )
 
-
-def run_analysis(self, api_key: str):  # api_key übergeben
-  genai.configure(api_key=api_key)
-
     self.peter_dna = """
         Du bist Peter, der leitende Micro- und Insider-Analyst in unserem Team. Deine Brille ist strikt Bottom-Up.
         Du analysierst Einzelwerte, fundamentale Kennzahlen, Branchen-News und Insider-Transaktionen (Käufe/Verkäufe von C-Level-Managern und großen institutionellen Haltern).
@@ -61,10 +57,11 @@ def run_analysis(self, api_key: str):  # api_key übergeben
     except Exception as e:
       return f"Fehler beim Laden der Watchlist: {e}"
 
-  def run_analysis(self):
+  def run_analysis(self, api_key: str):
     """Führt die Peter-Analyse aus und speichert sie zentral in agent_reports."""
     try:
-      
+      genai.configure(api_key=api_key)
+
       fundamental_context = self.fetch_bottom_up_data()
 
       context = f"""
@@ -93,9 +90,9 @@ def run_analysis(self, api_key: str):  # api_key übergeben
     except Exception as e:
       return False, f"Fehler bei Peters Analyse: {e}"
 
-  # Alias zur Sicherheit, falls irgendwo noch fetch_market_intel aufgerufen wird
-  def fetch_market_intel(self):
-    return self.run_analysis()
+  def fetch_market_intel(self, api_key: str):
+    """Alias zur Kompatibilität mit eventuell älteren Aufrufen."""
+    return self.run_analysis(api_key)
 
   def get_latest_report(self):
     """Holt den neuesten Bericht von Peter aus der zentralen Tabelle."""
@@ -112,11 +109,10 @@ def run_analysis(self, api_key: str):  # api_key übergeben
     except Exception:
       return None
 
-  # Alias zur Kompatibilität mit älteren UI-Aufrufen
   def get_latest_intel(self):
+    """Alias zur Kompatibilität."""
     res = self.get_latest_report()
     if res:
-      # Da wir jetzt den zentralen Text speichern, mappen wir es zur Not ins alte Format
       return {
           "analysis_date": res.get("created_at", "N/A")[:16],
           "insider_activity": res.get("report_content"),

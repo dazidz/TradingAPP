@@ -9,98 +9,96 @@ class JorisPortfolioManager:
     self.supabase = supabase_client
     self.name = "Joris"
     self.description = (
-        "Portfolio Manager (Synthese & Mandats-Regelwerk für Invest, Swing,"
-        " High Risk)"
+        "Lead Portfolio Manager (Synthese nach Ray Dalios Prinzipien)"
     )
 
-def run_analysis(self, api_key: str):  # api_key übergeben
-  genai.configure(api_key=api_key)
-
     self.joris_dna = """
-        Du bist Joris, der leitende Portfolio Manager in unserem Team. Deine Aufgabe ist es, die Analysen aller Teammitglieder (Jano für Makro, Peter für Micro/Insider, Otto für Historie, Nino für Signale und Aris für Performance) zu synthetisieren.
-        Du arbeitest strikt nach drei unterschiedlichen Mandaten:
-        1. **Invest (Langfristiges Fundament / Core):** Fokus auf Jano + Peter. Keine Hektik, breite Streuung, niedrige Umschlagshäufigkeit, keine Derivate.
-        2. **Swing (Mittelfristige Trendfolge):** Fokus auf Aris + Otto + Peter (Sektor-Momentum). Klare Ein- und Ausstiegspunkte, striktes Risikomanagement.
-        3. **High Risk (Spekulation / Alpha-Jagd):** Aggressive Einzelwerte, Earnings-Plays. Maximales Budget-Cap von 10%. Wenn Gewinne entstehen, MUSS rebalanciert werden.
-
+        Du bist Joris, der leitende Portfolio Manager in unserem Team. Du steuerst das Team nach Ray Dalios Prinzipien: 
+        Radical Truth & Radical Open-Mindedness. Deine Aufgabe ist es, die Berichte der Spezialisten (Jano für Makro, Peter für Micro/Insider, Otto für Historie/Muster) zu nehmen, kritisch zu hinterfragen und zu einer fundierten, kohärenten Portfolio-Synthese für das gewählte Mandat zu verdichten.
+        
         Deine Aufgabe:
-        Nimm die Berichte der anderen Agenten und den aktuellen Depot-Status, prüfe die Risikoparameter und sprich eine konkrete, mandatsbezogene Empfehlung aus.
+        1. Führe die Erkenntnisse der anderen Agenten zusammen.
+        2. Setze sie in direkten Bezug zum gewählten Depot-Fokus (Invest, Swing oder High Risk).
+        3. Formuliere klare, kompromisslose Handlungsempfehlungen und Risikohinweise.
         """
 
-  def run_synthesis(self, depot_focus="invest"):
-    """Führt die Portfoliowerdung und Mandats-Prüfung durch."""
+  def run_synthesis(self, depot_focus: str, api_key: str):
+    """Führt die Portfolio-Synthese für das gewählte Mandat aus und speichert sie."""
     try:
+      genai.configure(api_key=api_key)
 
-      # Neueste Berichte aller Agenten aus der zentralen Tabelle holen
-      agents = ["Jano", "Peter", "Otto", "Aris"]
-      team_context = ""
-      for agent in agents:
-        res = (
-            self.supabase.table("agent_reports")
-            .select("*")
-            .eq("agent_name", agent)
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        if res.data:
-          team_context += (
-              f"\n--- {agent.upper()} REPORT ---\n"
-              f"{res.data[0]['report_content']}\n"
+      # Die neuesten Reports der anderen Agenten einsammeln
+      def get_report(agent_name):
+        try:
+          res = (
+              self.supabase.table("agent_reports")
+              .select("report_content")
+              .eq("agent_name", agent_name)
+              .order("created_at", desc=True)
+              .limit(1)
+              .execute()
           )
+          return (
+              res.data[0]["report_content"]
+              if res.data
+              else "Kein Bericht verfügbar."
+          )
+        except Exception:
+          return "Fehler beim Laden."
 
-      # Aktuelle Positionen des gewählten Depots aus Supabase holen
-      depot_res = (
-          self.supabase.table("trade_journal")
-          .select("*")
-          .eq("depot_type", depot_focus)
-          .execute()
-      )
-      depot_df = pd.DataFrame(depot_res.data)
+      jano_report = get_report("Jano")
+      peter_report = get_report("Peter")
+      otto_report = get_report("Otto")
 
       context = f"""
-            GEWÄHLTES MANDAT / DEPOT: {depot_focus.upper()}
-            
-            --- AKTUELLE POSITIONEN IM DEPOT ---
-            {depot_df.to_string() if not depot_df.empty else "Keine offenen Positionen in diesem Depot."}
-            
-            --- TEAM BERICHTE ---
-            {team_context if team_context else "Keine Team-Berichte gefunden."}
+            --- GEWÄHLTES MANDAT / DEPOT-FOKUS ---
+            {depot_focus}
+
+            --- JANO (MAKRO-BERICHT) ---
+            {jano_report}
+
+            --- PETER (MICRO & INSIDER-BERICHT) ---
+            {peter_report}
+
+            --- OTTO (HISTORISCHER MISTER-BERICHT) ---
+            {otto_report}
             """
 
       model = genai.GenerativeModel(
           model_name="gemini-3.6-flash", system_instruction=self.joris_dna
       )
       response = model.generate_content(
-          f"Erstelle deine Portfolio-Synthese und Handlungsempfehlung speziell"
-          f" für das Mandat '{depot_focus}':\n\n{context}"
+          "Erstelle auf Basis der Team-Berichte eine fundierte"
+          f" Portfolio-Synthese für das Mandat '{depot_focus}':\n\n{context}"
       )
 
       report_content = response.text
       today_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-      # Zentral in agent_reports speichern (mit Hinweis auf das Depot)
+      # In agent_reports mit speziellem Mandatsbezug speichern
       self.supabase.table("agent_reports").insert({
-          "agent_name": f"{self.name} ({depot_focus.upper()})",
-          "report_content": f"**Portfolio-Synthese für {depot_focus.upper()} vom {today_str}:**\n\n{report_content}",
+          "agent_name": f"Joris_{depot_focus}",
+          "report_content": (
+              f"**Portfolio-Synthese ({depot_focus}) vom {today_str}:**\n\n"
+              f"{report_content}"
+          ),
       }).execute()
 
       return (
           True,
-          f"Joris hat die Synthese für das Mandat '{depot_focus}' erfolgreich"
-          " abgeschlossen.",
+          f"Joris hat die Portfolio-Synthese für '{depot_focus}' abgeschlossen.",
       )
     except Exception as e:
       return False, f"Fehler bei Joris Synthese: {e}"
 
-  def get_latest_report(self, depot_focus="invest"):
+  def get_latest_report(self, depot_focus: str):
     """Holt den neuesten Joris-Bericht für das spezifische Mandat."""
     try:
-      target_name = f"{self.name} ({depot_focus.upper()})"
+      agent_key = f"Joris_{depot_focus}"
       res = (
           self.supabase.table("agent_reports")
           .select("*")
-          .eq("agent_name", target_name)
+          .eq("agent_name", agent_key)
           .order("created_at", desc=True)
           .limit(1)
           .execute()
