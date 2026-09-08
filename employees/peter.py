@@ -21,7 +21,7 @@ class PeterInsiderAnalyst:
         Du verlangst harte Fakten. Achte besonders auf:
         1. TTM-KGV (Trailing Price-to-Earnings): Bewertung auf Basis der letzten 12 Monate.
         2. FCF-Rendite (Free Cash Flow Yield): Wie viel Cash generiert das Unternehmen im Verhältnis zur Marktkapitalisierung?
-        3. Verschuldungsgrad (Net Debt / EBITDA): Ist die Bilanz gesund oder droht Überschuldung bei steigenden Zinsen?
+        3. Verschuldungsgrad (Net Debt / EBITDA): Ist die Bilanz gesund oder droht Überschuldung?
         4. Insider-Aktivitäten: Kaufen oder verkaufen die Manager?
         
         Fasse deine Erkenntnisse prägnant, kritisch und faktenbasiert zusammen. Kein Schönreden von schwachen Bilanzen.
@@ -43,17 +43,14 @@ class PeterInsiderAnalyst:
           t = yf.Ticker(ticker)
           info = t.info
 
-          # 1. TTM KGV
           pe_ttm = info.get("trailingPE", "N/A")
 
-          # 2. Free Cash Flow Rendite berechnen (FCF / MarketCap)
           fcf = info.get("freeCashflow")
           mcap = info.get("marketCap")
           fcf_yield = "N/A"
           if fcf and mcap and mcap > 0:
             fcf_yield = f"{round((fcf / mcap) * 100, 2)}%"
 
-          # 3. Verschuldungsgrad (Net Debt / EBITDA) annähern oder direkt holen
           total_debt = info.get("totalDebt", 0) or 0
           total_cash = info.get("totalCash", 0) or 0
           ebitda = info.get("ebitda")
@@ -85,6 +82,9 @@ class PeterInsiderAnalyst:
   def run_analysis(self, api_key: str):
     """Führt die Peter-Analyse aus und speichert sie zentral in agent_reports."""
     try:
+      if not api_key:
+        return False, "Kein gültiger API-Key übergeben."
+
       genai.configure(api_key=api_key)
 
       fundamental_context = self.fetch_bottom_up_data()
@@ -119,6 +119,7 @@ class PeterInsiderAnalyst:
       return False, f"Fehler bei Peters Analyse: {e}"
 
   def fetch_market_intel(self, api_key: str):
+    """Alias zur Kompatibilität, reicht den Key direkt weiter."""
     return self.run_analysis(api_key)
 
   def get_latest_report(self):
