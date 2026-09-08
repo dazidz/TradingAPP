@@ -180,16 +180,50 @@ with tab_journal:
     if journal_data:
       df_j = pd.DataFrame(journal_data)
 
-      total_trades = len(df_j)
+      # Watchlist für Firmennamen im Journal laden
+      try:
+        wl_res = (
+            supabase.table("watchlist").select("ticker, company_name").execute()
+        )
+        j_ticker_to_name = (
+            {
+                item["ticker"]: item.get("company_name", item["ticker"])
+                for item in wl_res.data
+            }
+            if wl_res.data
+            else {}
+        )
+      except Exception:
+        j_ticker_to_name = {}
 
-      if "g_v" in df_j.columns and df_j["g_v"].notna().any():
-        winning_trades = len(df_j[df_j["g_v"] > 0])
-        losing_trades = len(df_j[df_j["g_v"] < 0])
+      df_j["Unternehmen"] = df_j["ticker"].map(
+          lambda t: j_ticker_to_name.get(t, t)
+      )
+
+      # Filter für Mandate im Journal
+      filter_options = ["Alle Mandate"] + list(depot_tables.keys())
+      selected_journal_filter = st.selectbox(
+          "Journal filtern nach Mandat:", filter_options
+      )
+
+      if selected_journal_filter != "Alle Mandate":
+        df_j_filtered = df_j[df_j["signaltype"] == selected_journal_filter]
+      else:
+        df_j_filtered = df_j
+
+      total_trades = len(df_j_filtered)
+
+      if (
+          "g_v" in df_j_filtered.columns
+          and df_j_filtered["g_v"].notna().any()
+      ):
+        winning_trades = len(df_j_filtered[df_j_filtered["g_v"] > 0])
+        losing_trades = len(df_j_filtered[df_j_filtered["g_v"] < 0])
         win_rate = (
             (winning_trades / total_trades) * 100 if total_trades > 0 else 0
         )
-        total_g_v = df_j["g_v"].sum()
-        avg_g_v = df_j["g_v"].mean()
+        total_g_v = df_j_filtered["g_v"].sum()
+        avg_g_v = df_j_filtered["g_v"].mean()
       else:
         winning_trades, losing_trades, win_rate, total_g_v, avg_g_v = (
             0,
@@ -199,8 +233,11 @@ with tab_journal:
             0,
         )
 
-      if "performance" in df_j.columns and df_j["performance"].notna().any():
-        avg_performance = df_j["performance"].mean()
+      if (
+          "performance" in df_j_filtered.columns
+          and df_j_filtered["performance"].notna().any()
+      ):
+        avg_performance = df_j_filtered["performance"].mean()
       else:
         avg_performance = 0.0
 
@@ -216,27 +253,43 @@ with tab_journal:
 
       st.divider()
 
+      # Spaltenreihenfolge für saubere Ansicht anpassen
+      display_cols = [
+          c
+          for c in [
+              "Unternehmen",
+              "ticker",
+              "signaltype",
+              "einstieg_datum_zeit",
+              "ausstieg_datum_zeit",
+              "anzahl",
+              "gesamtwert",
+              "performance",
+              "g_v",
+              "notiz",
+          ]
+          if c in df_j_filtered.columns
+      ]
+
       st.dataframe(
-          df_j.drop(columns=["id"]),
+          df_j_filtered[display_cols],
           column_config={
-              "einstiegskurs": st.column_config.NumberColumn(
-                  "Einstiegskurs", format="%.2f €"
-              ),
-              "ausstiegskurs": st.column_config.NumberColumn(
-                  "Ausstiegskurs", format="%.2f €"
-              ),
+              "Unternehmen": "Unternehmen",
+              "ticker": "Ticker",
+              "signaltype": "Mandat",
+              "einstieg_datum_zeit": "Einstieg",
+              "ausstieg_datum_zeit": "Ausstieg",
+              "anzahl": st.column_config.NumberColumn("Anzahl", format="%.4f"),
               "gesamtwert": st.column_config.NumberColumn(
                   "Gesamtwert", format="%.2f €"
-              ),
-              "g_v": st.column_config.NumberColumn(
-                  "Gewinn / Verlust (G/V)", format="%.2f €"
               ),
               "performance": st.column_config.NumberColumn(
                   "Performance", format="%.2f%%"
               ),
-              "anzahl": st.column_config.NumberColumn(
-                  "Anzahl", format="%.4f"
+              "g_v": st.column_config.NumberColumn(
+                  "Gewinn / Verlust (G/V)", format="%.2f €"
               ),
+              "notiz": "Notiz / Lernkurve",
           },
           use_container_width=True,
       )
@@ -415,7 +468,7 @@ with tab_new_trade:
             )
             trade_g_v = (s_price - buy_p) * s_shares_to_sell
 
-            # 1. Den verkauften Teil ins Journal schreiben
+            # 1. Den verkauften Teil ins Journal schreiben (inkl. exaktem Depot-Namen)
             supabase.table("trade_journal").insert({
                 "ticker": chosen_pos["ticker"],
                 "einstieg_datum_zeit": chosen_pos["datum_einstieg"],
@@ -428,9 +481,8 @@ with tab_new_trade:
                 "notiz": s_note,
             }).execute()
 
-            # 2. Unterscheiden: Komplett- oder Teilverkauf
+            # 2. Komplett- oder Teilverkauf
             if s_shares_to_sell >= total_shares_owned:
-              # Komplettverkauf: Zeile löschen
               supabase.table(sell_tbl).delete().eq(
                   "id", chosen_pos["id"]
               ).execute()
@@ -439,7 +491,6 @@ with tab_new_trade:
                   " ins Journal übertragen!"
               )
             else:
-              # Teilverkauf: Bestand im Depot anpassen (reduzieren)
               remaining_shares = total_shares_owned - s_shares_to_sell
               remaining_gesamtwert = remaining_shares * buy_p
 
