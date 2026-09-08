@@ -107,7 +107,7 @@ class JorisPortfolioManager:
             4. **Top-Empfehlungen des Tages:** Gleiche die Depot-Ziele mit den aktuellen Signalen aus dem Screener ab und präsentiere die besten High-Conviction-Kandidaten für dieses Mandat.
             """
 
-      model = genai.GenerativeModel(model_name="gemini-2.5-flash")
+      model = genai.GenerativeModel(model_name="gemini-3.6-flash")
       response = model.generate_content(prompt)
       report_content = response.text
 
@@ -159,7 +159,7 @@ class JorisPortfolioManager:
         history.append({"role": role, "parts": [m["content"]]})
 
       model = genai.GenerativeModel(
-          model_name="gemini-2.5-flash",
+          model_name="gemini-3.6-flash",
           system_instruction=(
               f"Du bist Joris, Portfolio Manager für das Depot-Mandat"
               f" '{depot_focus}'. Du hast Zugriff auf das Depot, den Screener"
