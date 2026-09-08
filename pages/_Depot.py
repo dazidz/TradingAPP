@@ -52,7 +52,6 @@ with tab_depot:
   target_table = depot_tables[selected_depot_ui]
 
   try:
-    # Watchlist für das Mapping Ticker -> Firmenname laden
     try:
       wl_res = (
           supabase.table("watchlist").select("ticker, company_name").execute()
@@ -74,7 +73,6 @@ with tab_depot:
     if positions:
       df_pos = pd.DataFrame(positions)
 
-      # Live-Preise über yfinance holen
       tickers = df_pos["ticker"].unique().tolist()
       live_prices = {}
       if tickers:
@@ -112,7 +110,6 @@ with tab_depot:
         total_invested += inv_val
         total_value += curr_val
 
-        # Live-Werte in Supabase aktualisieren
         try:
           supabase.table(target_table).update({
               "live_kurs": curr_price,
@@ -347,7 +344,9 @@ with tab_new_trade:
           st.warning("Bitte Ticker eingeben.")
 
   else:
-    st.subheader("❌ Position schließen & ins Journal übertragen")
+    st.subheader(
+        "❌ Position schließen / Teilverkauf & ins Journal übertragen"
+    )
 
     sell_depot = st.selectbox(
         "Aus welchem Depot wird verkauft?",
@@ -368,7 +367,7 @@ with tab_new_trade:
         }
 
         selected_pos_label = st.selectbox(
-            "Wähle die zu schließende Position:", list(pos_options.keys())
+            "Wähle die Position:", list(pos_options.keys())
         )
         chosen_pos = pos_options[selected_pos_label]
 
@@ -382,7 +381,7 @@ with tab_new_trade:
                 format="%.2f",
             )
             s_shares_to_sell = st.number_input(
-                "Anzahl Anteile",
+                "Anzahl Anteile zum Verkaufen",
                 min_value=0.0001,
                 max_value=float(chosen_pos["anzahl"]),
                 value=float(chosen_pos["anzahl"]),
@@ -395,25 +394,28 @@ with tab_new_trade:
             )
 
           s_note = st.text_area(
-              "Notiz / Lernkurve (Warum wurde der Trade geschlossen?):",
+              "Notiz / Lernkurve (Warum wurde verkauft?):",
               placeholder=(
-                  "Z.B.: 'Makro-Umfeld hat sich gedreht, Take-Profit erreicht.'"
+                  "Z.B.: 'Teilgewinnmitnahme nach starkem Anstieg.'"
               ),
           )
 
           submitted_sell = st.form_submit_button(
-              "Trade schließen & ins Journal schreiben"
+              "Verkauf ausführen & ins Journal schreiben"
           )
 
           if submitted_sell:
             s_timestamp = datetime.combine(s_date, s_time).isoformat()
             buy_p = float(chosen_pos["buy_price"])
+            total_shares_owned = float(chosen_pos["anzahl"])
+
             exit_gesamtwert = s_shares_to_sell * s_price
             performance_pct = (
                 ((s_price - buy_p) / buy_p) * 100 if buy_p > 0 else 0
             )
             trade_g_v = (s_price - buy_p) * s_shares_to_sell
 
+            # 1. Den verkauften Teil ins Journal schreiben
             supabase.table("trade_journal").insert({
                 "ticker": chosen_pos["ticker"],
                 "einstieg_datum_zeit": chosen_pos["datum_einstieg"],
@@ -426,17 +428,34 @@ with tab_new_trade:
                 "notiz": s_note,
             }).execute()
 
-            supabase.table(sell_tbl).delete().eq(
-                "id", chosen_pos["id"]
-            ).execute()
+            # 2. Unterscheiden: Komplett- oder Teilverkauf
+            if s_shares_to_sell >= total_shares_owned:
+              # Komplettverkauf: Zeile löschen
+              supabase.table(sell_tbl).delete().eq(
+                  "id", chosen_pos["id"]
+              ).execute()
+              st.success(
+                  f"Position für {chosen_pos['ticker']} komplett geschlossen und"
+                  " ins Journal übertragen!"
+              )
+            else:
+              # Teilverkauf: Bestand im Depot anpassen (reduzieren)
+              remaining_shares = total_shares_owned - s_shares_to_sell
+              remaining_gesamtwert = remaining_shares * buy_p
 
-            st.success(
-                f"Trade für {chosen_pos['ticker']} erfolgreich geschlossen und"
-                " im Journal verankert!"
-            )
+              supabase.table(sell_tbl).update({
+                  "anzahl": remaining_shares,
+                  "gesamtwert": remaining_gesamtwert,
+              }).eq("id", chosen_pos["id"]).execute()
+              st.success(
+                  f"Teilverkauf von {s_shares_to_sell} Anteilen"
+                  f" {chosen_pos['ticker']} verbucht. Rest im Depot:"
+                  f" {remaining_shares} Anteile."
+              )
+
             st.rerun()
       else:
         st.info(f"Keine offenen Positionen in `{sell_depot}` vorhanden.")
 
     except Exception as e:
-      st.error(f"Fehler beim Laden der Positionen: {e}")
+      st.error(f"Fehler beim Verarbeiten des Verkaufs: {e}")
