@@ -88,7 +88,7 @@ class JorisPortfolioManager:
         history.append({"role": role, "parts": [m["content"]]})
 
       model = genai.GenerativeModel(
-          model_name="gemini-1.5-flash",
+          model_name="gemini-3.6-flash",
           system_instruction=(
               f"Du bist Joris, Portfolio Manager für das Depot-Mandat"
               f" '{depot_focus}'. Antworte direkt, ehrlich und datenbasiert"
