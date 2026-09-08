@@ -1,237 +1,460 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
+import sys
 import google.generativeai as genai
 import pandas as pd
+import streamlit as st
+from supabase import create_client
+import yfinance as yf
 
+# Setzt das Hauptverzeichnis fest in den Suchpfad von Python
+root_dir = Path(__file__).resolve().parent.parent
+if str(root_dir) not in sys.path:
+  sys.path.append(str(root_dir))
 
-class JorisPortfolioManager:
+st.set_page_config(
+    layout="wide",
+    page_title="VisionDZ - Team & Kommandozentrale",
+    page_icon="🏢",
+)
 
-  def __init__(self, supabase_client):
-    self.supabase = supabase_client
-    self.name = "Joris"
-    self.description = (
-        "Lead Portfolio Manager (Synthese & Depot-Überwachung nach Ray Dalio)"
+if not st.session_state.get("password_correct", False):
+  st.warning("Bitte melde dich zuerst auf der Hauptseite an.")
+  st.stop()
+
+URL = st.secrets["SUPABASE_URL"]
+KEY = st.secrets["SUPABASE_KEY"]
+supabase = create_client(URL, KEY)
+
+# Zentraler API-Key Check für alle Agenten (genau wie in deinem Originalcode)
+try:
+  GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+except Exception as e:
+  st.error(f"Fehler beim Laden von GEMINI_API_KEY aus den Streamlit Secrets: {e}")
+  st.stop()
+
+st.title("🏢 VisionDZ - Team & Kommandozentrale")
+
+# --- DIE TABS DEFINIEREN ---
+tab_teamroom, tab_jano, tab_peter, tab_otto, tab_nino, tab_aris = st.tabs([
+    "💬 Teamroom & Joris",
+    "🌍 Jano (Macro)",
+    "🕵️ Peter (Micro/Insider)",
+    "📊 Otto (History)",
+    "⚡ Nino (Signals)",
+    "🤖 Aris (Performance)",
+])
+
+# ==========================================
+# TAB 1: DER TEAMROOM & JORIS (PORTFOLIO MANAGER)
+# ==========================================
+with tab_teamroom:
+  try:
+    from employees.joris import JorisPortfolioManager
+
+    joris = JorisPortfolioManager(supabase)
+
+    st.subheader("Tägliches Standup & Portfolio-Synthese")
+    st.markdown(
+        "Nach Ray Dalios Prinzipien: **Radical Truth & Radical"
+        " Open-Mindedness**."
     )
 
-    self.joris_dna = """
-        Du bist Joris, der leitende Portfolio Manager in unserem Team. Du steuerst das Team nach Ray Dalios Prinzipien: 
-        Radical Truth & Radical Open-Mindedness. Deine Aufgaben sind:
-        1. Die Berichte der Spezialisten zu einer kohärenten Synthese für das gewählte Mandat zu verdichten.
-        2. Das entsprechende Depot des Nutzers (Invest-, Swing- oder Risk-Depot) kritisch auf Diversifikation, Klumpenrisiken und Rebalancing-Bedarf zu prüfen.
-        3. Konkrete KAUF- und VERKAUFSEMPFEHLUNGEN auszusprechen – basierend auf den harten technischen Signalen (inkl. der bereitgestellten TradingView-Links) und den Fundamentaldaten.
-        
-        WICHTIG - MANDATS- UND SIGNAL-DISZIPLIN:
-        Bei Mandaten wie 'Swing', 'Invest' oder 'High Risk' darfst du NUR Titel berücksichtigen, die nachweislich ein aktives technisches Signal in unserer Signalliste haben.
-        """
+    selected_depot_label = st.selectbox(
+        "Fokus-Depot für dieses Meeting:",
+        [
+            "Invest (Langfristiges Fundament / Core)",
+            "Swing (Mittelfristige Trendfolge)",
+            "High Risk (Aggressive / Spekulative Plays)",
+        ],
+        key="teamroom_depot_select",
+    )
 
-  def _get_active_signals(self, depot_focus: str):
-    """Holt aktive Signale inklusive TradingView/Gettex-Daten aus der signals-Tabelle."""
-    try:
-      focus_lower = depot_focus.lower()
-      if "risk" in focus_lower or "high" in focus_lower:
-        strategy_target = "High Risk"
-      else:
-        strategy_target = "Swing"
+    depot_mapping = {
+        "Invest (Langfristiges Fundament / Core)": "invest",
+        "Swing (Mittelfristige Trendfolge)": "swing",
+        "High Risk (Aggressive / Spekulative Plays)": "high_risk",
+    }
+    current_depot_focus = depot_mapping[selected_depot_label]
 
-      res = (
-          self.supabase.table("signals")
-          .select(
-              "ticker, company_name, signal_type, entry_price, created_at,"
-              " strategy_type, gettex_ticker, meta_data"
+    col_j1, col_j2 = st.columns([2, 1])
+    with col_j1:
+      if st.button(
+          "🚀 Joris: Portfolio-Synthese für dieses Mandat starten",
+          type="primary",
+      ):
+        with st.spinner(
+            f"Joris synthetisiert Berichte für '{current_depot_focus}'..."
+        ):
+          success, msg = joris.run_synthesis(
+              depot_focus=current_depot_focus, api_key=GEMINI_API_KEY
           )
-          .ilike("strategy_type", f"%{strategy_target}%")
-          .execute()
+          if success:
+            st.success(msg)
+            st.rerun()
+          else:
+            st.error(msg)
+
+    st.divider()
+
+    latest_joris = joris.get_latest_report(depot_focus=current_depot_focus)
+    if latest_joris:
+      st.markdown(f"### 🎯 Joris Mandats-Empfehlung ({selected_depot_label})")
+      st.info(latest_joris["report_content"])
+    else:
+      st.warning(
+          "Joris hat für dieses Depot noch keine Synthese durchgeführt."
       )
 
-      if not res.data:
-        return []
+    # ==========================================
+    # INTERAKTIVER CHAT MIT JORIS
+    # ==========================================
+    st.divider()
+    st.markdown(f"### 🤖 Diskussion mit Joris ({selected_depot_label})")
 
-      # TradingView-Link direkt für jede Zeile generieren
-      signals_processed = []
-      for row in res.data:
-        t = row.get("ticker")
-        gettex = row.get("gettex_ticker")
-        tv_symbol = gettex if gettex else t
-        tv_link = f"https://www.tradingview.com/chart/?symbol={tv_symbol}"
+    chat_session_key = f"joris_chat_history_{current_depot_focus}"
+    if chat_session_key not in st.session_state:
+      st.session_state[chat_session_key] = []
 
-        row_copy = row.copy()
-        row_copy["TradingView"] = tv_link
-        signals_processed.append(row_copy)
+    for message in st.session_state[chat_session_key]:
+      with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-      return signals_processed
-    except Exception as e:
-      print(f"Fehler beim Abrufen der Signale: {e}")
-      return []
-
-  def _get_current_portfolio(self, depot_focus: str):
-    """Holt das zugehörige Depot (invest_depot, swing_depot oder risk_depot) aus Supabase."""
-    try:
-      focus_lower = depot_focus.lower()
-
-      if "invest" in focus_lower:
-        table_name = "invest_depot"
-      elif "risk" in focus_lower or "high" in focus_lower:
-        table_name = "risk_depot"
-      else:
-        table_name = "swing_depot"
-
-      res = self.supabase.table(table_name).select("*").execute()
-      return (
-          res.data
-          if res.data
-          else f"Kein Bestand in `{table_name}` hinterlegt."
+    if user_query_joris := st.chat_input(
+        f"Diskutiere mit Joris über das Mandat '{selected_depot_label}'..."
+    ):
+      st.session_state[chat_session_key].append(
+          {"role": "user", "content": user_query_joris}
       )
-    except Exception as e:
-      return f"Depot konnte nicht geladen werden ({e})."
+      with st.chat_message("user"):
+        st.markdown(user_query_joris)
 
-  def run_synthesis(self, depot_focus: str, api_key: str):
-    """Führt die Portfolio-Synthese und den Depot-Check für das gewählte Mandat aus."""
-    try:
-      genai.configure(api_key=api_key)
+      with st.chat_message("assistant"):
+        with st.spinner("Joris prüft die Daten und antwortet..."):
+          success_chat, reply_chat = joris.chat_with_joris(
+              depot_focus=current_depot_focus,
+              user_message=user_query_joris,
+              chat_history=st.session_state[chat_session_key][:-1],
+              api_key=GEMINI_API_KEY,
+          )
+          if success_chat:
+            st.markdown(reply_chat)
+            st.session_state[chat_session_key].append(
+                {"role": "assistant", "content": reply_chat}
+            )
+          else:
+            st.error(reply_chat)
 
-      # 1. Signale für das Mandat abrufen
-      active_signals = self._get_active_signals(depot_focus)
+    st.divider()
+    st.markdown("### 📊 Letzte Einzelberichte im Team")
 
-      if not active_signals or len(active_signals) == 0:
-        focus_label = (
-            "High Risk"
-            if "risk" in depot_focus.lower() or "high" in depot_focus.lower()
-            else "Swing"
+    col1, col2, col3, col4 = st.columns(4)
+
+    def get_last_agent_report(agent_name):
+      try:
+        res = (
+            supabase.table("agent_reports")
+            .select("*")
+            .eq("agent_name", agent_name)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
         )
-        return (
-            False,
-            f"Stopp: Für das Mandat '{depot_focus}' wurden keine aktiven"
-            f" Einträge (strategy_type: '{focus_label}') in der `signals`-Tabelle"
-            " gefunden. Keine Synthese möglich.",
+        return res.data[0]["report_content"] if res.data else "Kein Bericht."
+      except Exception:
+        return "Fehler beim Laden."
+
+    with col1:
+      st.markdown("#### 🌍 Jano (Macro)")
+      st.write(get_last_agent_report("Jano")[:300] + "...")
+
+    with col2:
+      st.markdown("#### 🕵️ Peter (Micro)")
+      st.write(get_last_agent_report("Peter")[:300] + "...")
+
+    with col3:
+      st.markdown("#### 📊 Otto (History)")
+      st.write(get_last_agent_report("Otto")[:300] + "...")
+
+    with col4:
+      st.markdown("#### 🤖 Aris (Performance)")
+      st.write(get_last_agent_report("Aris")[:300] + "...")
+
+  except Exception as e:
+    st.error(f"Fehler im Teamroom: {e}")
+
+# ==========================================
+# TAB 2: JANO (MACRO ANALYST)
+# ==========================================
+with tab_jano:
+  try:
+    from employees.jano import JanoMacroAnalyst
+
+    jano = JanoMacroAnalyst(supabase)
+    st.subheader(f"🌍 {jano.name}")
+    st.caption(jano.description)
+
+    if st.button("🚀 Jano: Makro-Analyse starten", key="btn_run_jano"):
+      with st.spinner("Jano analysiert die Makrolage..."):
+        success, msg = jano.run_analysis(api_key=GEMINI_API_KEY)
+        if success:
+          st.success(msg)
+          st.rerun()
+        else:
+          st.error(msg)
+
+    st.divider()
+    latest_jano = jano.get_latest_report()
+    if latest_jano:
+      st.markdown(f"### Bericht vom {latest_jano['created_at'][:16]}")
+      st.write(latest_jano["report_content"])
+    else:
+      st.info("Noch kein Makro-Bericht vorhanden.")
+  except Exception as e:
+    st.error(f"Jano-Tab aktuell nicht verfügbar (Fehler: {e})")
+
+# ==========================================
+# TAB 3: PETER (MARKET INTEL & INSIDER)
+# ==========================================
+with tab_peter:
+  try:
+    from employees.peter import PeterInsiderAnalyst
+
+    peter = PeterInsiderAnalyst(supabase)
+
+    st.subheader(f"🕵️ {peter.name}")
+    st.caption(peter.description)
+
+    if st.button("🔄 Peter: Fundamentaldaten & Insider analysieren"):
+      with st.spinner("Peter holt Watchlist & Insider-Daten..."):
+        success, msg = peter.run_analysis(api_key=GEMINI_API_KEY)
+        if success:
+          st.success(msg)
+          st.rerun()
+        else:
+          st.error(msg)
+
+    st.divider()
+    latest_peter = peter.get_latest_report()
+    if latest_peter:
+      st.markdown(f"### Bericht vom {latest_peter['created_at'][:16]}")
+      st.write(latest_peter["report_content"])
+    else:
+      st.info("Noch keine Peter-Berichte vorhanden.")
+  except Exception as e:
+    st.error(f"Peter-Tab aktuell nicht verfügbar (Fehler: {e})")
+
+# ==========================================
+# TAB 4: OTTO (HISTORY & PATTERNS)
+# ==========================================
+with tab_otto:
+  try:
+    from employees.otto import OttoAnalyst
+
+    otto = OttoAnalyst(supabase)
+
+    st.subheader(f"📊 {otto.name}")
+    st.caption(otto.description)
+
+    if st.button("🚀 Otto: Historisches Muster-Matching starten"):
+      with st.spinner("Otto gleicht mit der Börsenhistorie ab..."):
+        success, msg = otto.run_analysis(api_key=GEMINI_API_KEY)
+        if success:
+          st.success(msg)
+          st.rerun()
+        else:
+          st.error(msg)
+
+    st.divider()
+    latest_otto = otto.get_latest_report()
+    if latest_otto:
+      st.markdown(f"### Bericht vom {latest_otto['created_at'][:16]}")
+      st.write(latest_otto["report_content"])
+    else:
+      st.info("Noch keine Otto-Berichte vorhanden.")
+  except Exception as e:
+    st.error(f"Otto-Tab aktuell nicht verfügbar (Fehler: {e})")
+
+# ==========================================
+# TAB 5: NINO (SIGNAL AGENT)
+# ==========================================
+with tab_nino:
+  try:
+    from employees.nino import NinoSignalsAssistant
+
+    nino = NinoSignalsAssistant(supabase)
+
+    st.subheader("⚡ Nino - Signal Agent")
+    st.markdown("Visuelle Auswertung der autonomen 5-Tages-Signal-Analysen.")
+    st.divider()
+
+    history_data = nino.get_signals_history()
+    if history_data:
+      df_journal = pd.DataFrame(history_data)
+      df_eval = (
+          df_journal[df_journal["status"].str.contains("Ausgewertet", na=False)]
+          .copy()
+      )
+
+      if not df_eval.empty:
+        total_eval = len(df_eval)
+        wins = len(df_eval[df_eval["end_performance_5_tage"] > 0])
+        losses = len(df_eval[df_eval["end_performance_5_tage"] <= 0])
+        win_rate = (wins / total_eval) * 100 if total_eval > 0 else 0
+
+        avg_perf_total = df_eval["end_performance_5_tage"].mean()
+        max_perf_all = (
+            df_eval["max_performance_5_tage"].max()
+            if "max_performance_5_tage" in df_eval.columns
+            else 0
+        )
+        fav_count = (
+            len(df_journal[df_journal["is_favorite"] == True])
+            if "is_favorite" in df_journal.columns
+            else 0
         )
 
-      signal_df = pd.DataFrame(active_signals)
-      signal_context = f"""
-            --- AKTIVE TECHNISCHE SIGNALE & TRADINGVIEW-LINKS (PFLICHT-FILTER) ---
-            {signal_df.to_string(index=False)}
-            """
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        with col1:
+          st.metric("Ausgewertet", f"{total_eval}")
+        with col2:
+          st.metric("Win-Rate", f"{win_rate:.1f}%", f"{wins}W/{losses}L")
+        with col3:
+          st.metric("Ø End-Perf.", f"{avg_perf_total:+.2f}%")
+        with col4:
+          st.metric("Bester Peak", f"{max_perf_all:+.2f}%")
+        with col5:
+          st.metric("Favoriten", f"{fav_count}")
+        with col6:
+          st.metric("Offen", f"{len(df_journal) - total_eval}")
+      else:
+        st.warning("⚠️ Noch keine 5-Tages-Auswertungen vorhanden.")
+    else:
+      st.info("Das Journal ist komplett leer.")
+  except Exception as e:
+    st.error(f"Nino-Tab aktuell nicht verfügbar (Fehler: {e})")
 
-      # 2. Das passende Depot laden
-      current_portfolio = self._get_current_portfolio(depot_focus)
-      portfolio_context = f"""
-            --- AKTUELLES DEPOT ({depot_focus}) & BESTÄNDE ---
-            {current_portfolio}
-            """
+# ==========================================
+# TAB 6: ARIS (PERFORMANCE MANAGER & CHAT)
+# ==========================================
+with tab_aris:
+  st.subheader("🤖 Aris - Performance Manager")
+  st.markdown(
+      "Dein KI-Agent analysiert das Signals-Journal, das Trading-Journal, "
+      "den Screener-Quellcode und steht dir im Chat für Rückfragen zur Verfügung."
+  )
 
-      # 3. Spezialisten-Berichte einsammeln
-      def get_report(agent_name):
-        try:
-          res = (
-              self.supabase.table("agent_reports")
-              .select("report_content")
-              .eq("agent_name", agent_name)
-              .order("created_at", desc=True)
-              .limit(1)
-              .execute()
-          )
-          return (
-              res.data[0]["report_content"]
-              if res.data
-              else "Kein Bericht verfügbar."
-          )
-        except Exception:
-          return "Fehler beim Laden."
+  if "messages_aris" not in st.session_state:
+    st.session_state.messages_aris = []
 
-      context = f"""
-            --- GEWÄHLTES MANDAT / DEPOT-FOKUS ---
-            {depot_focus}
+  aris_dna = """
+    Du bist Aris, der leitende Performance Manager in dieser Trading-Anwendung. Deine Aufgabe ist es, die Performance objektiv, datenbasiert und gnadenlos ehrlich zu analysieren. Du verzichtest auf leere Floskeln und Schönfärberei. 
+    Analysiere die übergebenen Datenpunkte:
+    1. Signals Journal (inkl. 5-Tage und 1-Monats-Meilensteine)
+    2. Trading Journal (geschlossene Trades inkl. Post-Exit-Tracking)
+    3. Screener-Quellcode (auf Filterfehler, Schwachstellen und verpasste Chancen prüfen)
+    4. Watchlist (nach Asset-Kategorien: Invest, Swing, High Risk)
 
-            {signal_context}
+    Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefere konkrete, direkt umsetzbare Handlungsempfehlungen.
+    """
 
-            {portfolio_context}
-
-            --- JANO (MAKRO-BERICHT) ---
-            {get_report('Jano')}
-
-            --- PETER (MICRO & INSIDER-BERICHT) ---
-            {get_report('Peter')}
-
-            --- OTTO (HISTORISCHER MISTER-BERICHT) ---
-            {get_report('Otto')}
-            """
-
-      model = genai.GenerativeModel(
-          model_name="gemini-3.6-flash", system_instruction=self.joris_dna
-      )
-      response = model.generate_content(
-          "Erstelle eine Portfolio-Synthese für das Mandat"
-          f" '{depot_focus}'. Prüfe das aktuelle Depot auf Diversifikation,"
-          " sprich konkrete KAUF- und VERKAUFSEMPFEHLUNGEN aus und binde die"
-          " TradingView-Links aus der Signalliste direkt als Markdown-Links bei"
-          f" den jeweiligen Aktien ein:\n\n{context}"
-      )
-
-      report_content = response.text
-      today_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-      self.supabase.table("agent_reports").insert({
-          "agent_name": f"Joris_{depot_focus}",
-          "report_content": (
-              f"**Portfolio-Synthese & Depot-Check ({depot_focus}) vom"
-              f" {today_str}:**\n\n{report_content}"
-          ),
-      }).execute()
-
-      return (
-          True,
-          f"Joris hat die Synthese und den Depot-Check für '{depot_focus}'"
-          " erfolgreich abgeschlossen.",
-      )
-    except Exception as e:
-      return False, f"Fehler bei Joris Synthese: {e}"
-
-  def chat_with_joris(
-      self, depot_focus: str, user_message: str, chat_history: list, api_key: str
-  ):
-    """Führt eine interaktive Chat-Konversation mit Joris unter Berücksichtigung des Depot- und Signalkontexts."""
+  if not st.session_state.messages_aris:
     try:
-      genai.configure(api_key=api_key)
-
-      # Aktuellen Kontext laden, damit Joris im Chat genau weiß, worüber geredet wird
-      active_signals = self._get_active_signals(depot_focus)
-      current_portfolio = self._get_current_portfolio(depot_focus)
-
-      context_injection = f"""
-            --- AKTUELLER KONTEXT FÜR DEN CHAT ---
-            Gewähltes Mandat: {depot_focus}
-            Aktives Depot: {current_portfolio}
-            Aktive Signale: {active_signals}
-            """
-
-      system_prompt = f"{self.joris_dna}\n\n{context_injection}"
-      model = genai.GenerativeModel(
-          model_name="gemini-3.6-flash", system_instruction=system_prompt
-      )
-
-      # Verlauf für das Gemini-Chatformat aufbereiten
-      formatted_history = []
-      for msg in chat_history:
-        role = "model" if msg["role"] == "assistant" else "user"
-        formatted_history.append({"role": role, "parts": [msg["content"]]})
-
-      chat = model.start_chat(history=formatted_history)
-      response = chat.send_message(user_message)
-
-      return True, response.text
-    except Exception as e:
-      return False, f"Fehler im Joris-Chat: {e}"
-
-  def get_latest_report(self, depot_focus: str):
-    """Holt den neuesten Joris-Bericht für das spezifische Mandat."""
-    try:
-      agent_key = f"Joris_{depot_focus}"
-      res = (
-          self.supabase.table("agent_reports")
+      saved_report_res = (
+          supabase.table("agent_reports")
           .select("*")
-          .eq("agent_name", agent_key)
+          .eq("agent_name", "Aris")
           .order("created_at", desc=True)
           .limit(1)
           .execute()
       )
-      return res.data[0] if res.data else None
+      if saved_report_res.data:
+        latest_report = saved_report_res.data[0]
+        st.session_state.messages_aris.append({
+            "role": "assistant",
+            "content": (
+                "**Letzter gespeicherter Report ("
+                f"{latest_report['created_at'][:16]}):**\n\n"
+                + latest_report["report_content"]
+            ),
+        })
     except Exception:
-      return None
+      pass
+
+  if st.button("🚀 Aris Analyse & Screener-Review starten", type="primary"):
+    with st.spinner("Aris analysiert Datenbanken und Code..."):
+      try:
+        genai.configure(api_key=GEMINI_API_KEY)
+
+        signals_res = supabase.table("signals_journal").select("*").execute()
+        journal_res = supabase.table("trade_journal").select("*").execute()
+        signals_df = pd.DataFrame(signals_res.data)
+        journal_df = pd.DataFrame(journal_res.data)
+
+        context_data = f"""
+            --- SIGNALS JOURNAL ---
+            {signals_df.to_string() if not signals_df.empty else "Keine Signale"}
+            --- TRADING JOURNAL ---
+            {journal_df.to_string() if not journal_df.empty else "Keine Trades"}
+            """
+
+        model = genai.GenerativeModel(
+            model_name="gemini-3.6-flash", system_instruction=aris_dna
+        )
+        response = model.generate_content(
+            "Erstelle deinen Analyse-Report:\n\n" + context_data
+        )
+        report_content = response.text
+
+        supabase.table("agent_reports").insert({
+            "agent_name": "Aris",
+            "report_content": report_content,
+        }).execute()
+
+        st.session_state.messages_aris.append(
+            {"role": "assistant", "content": report_content}
+        )
+        st.success("Analyse erfolgreich abgeschlossen!")
+        st.rerun()
+      except Exception as e:
+        st.error(f"⚠️ Fehler: {e}")
+
+  st.markdown("---")
+  st.markdown("### 💬 Diskussion mit Aris")
+
+  for message in st.session_state.messages_aris:
+    with st.chat_message(message["role"]):
+      st.markdown(message["content"])
+
+  if user_query := st.chat_input("Stelle Aris eine Frage...", key="aris_chat_input"):
+    st.session_state.messages_aris.append(
+        {"role": "user", "content": user_query}
+    )
+    with st.chat_message("user"):
+      st.markdown(user_query)
+
+    with st.chat_message("assistant"):
+      with st.spinner("Aris denkt nach..."):
+        try:
+          genai.configure(api_key=GEMINI_API_KEY)
+
+          gemini_history = []
+          for m in st.session_state.messages_aris[:-1]:
+            role = "user" if m["role"] == "user" else "model"
+            if not gemini_history and role == "model":
+              continue
+            gemini_history.append({"role": role, "parts": [m["content"]]})
+
+          model = genai.GenerativeModel(
+              model_name="gemini-3.6-flash", system_instruction=aris_dna
+          )
+          chat_session = model.start_chat(history=gemini_history)
+          chat_response = chat_session.send_message(user_query)
+
+          answer = chat_response.text
+          st.markdown(answer)
+          st.session_state.messages_aris.append(
+              {"role": "assistant", "content": answer}
+          )
+        except Exception as chat_err:
+          st.error(f"Fehler im Chat: {chat_err}")
