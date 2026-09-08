@@ -79,19 +79,19 @@ class FairValueScreener:
           model_pb_val = None
           model_dcf_val = None
 
-          # 1. KGV-Modell (konservativ gedauert: max KGV von 15 angesetzt, nur bei positivem Gewinn)
+          # 1. KGV-Modell (konservativ gedauert: max KGV von 18 angesetzt)
           if eps and eps > 0 and eps < current_price:
+            raw_pe = info.get("trailingPE", 15)
             target_pe = min(
-                info.get("trailingPE", 15), 18.0
-            )  Reales KGV oder max 18
-            if target_pe > 0:
-              model_pe_val = eps * target_pe
+                raw_pe if raw_pe and raw_pe > 0 else 15, 18.0
+            )  # Reales KGV oder max 18
+            model_pe_val = eps * target_pe
 
-          # 2. Buchwert-Modell (konservativ: P/B max 1.5 bis 2.0)
+          # 2. Buchwert-Modell (konservativ: P/B max 1.5)
           if book_value and book_value > 0:
             model_pb_val = book_value * 1.5
 
-          # 3. FCF-Modell (konservativ: FCF-Rendite von min 6% angestrebt -> Multiplikator 12.5)
+          # 3. FCF-Modell (konservativ: FCF-Rendite von min 8% angestrebt -> Multiplikator 12.5)
           if fcf and shares and shares > 0 and fcf > 0:
             fcf_per_share = fcf / shares
             model_dcf_val = fcf_per_share * 12.5
@@ -105,8 +105,7 @@ class FairValueScreener:
           if valid_models:
             raw_fair_value = sum(valid_models) / len(valid_models)
 
-            # SICHERHEITS-CAP: Ein Fair Value darf maximal 2.5x des aktuellen Preises betragen,
-            # um absurde Ausreißer (>150% Potential) durch Yahoo-Datenfehler zu kappen.
+            # SICHERHEITS-CAP: Fair Value max 2.5x des aktuellen Preises
             max_allowed_fv = current_price * 2.5
             fair_value = min(raw_fair_value, max_allowed_fv)
           else:
