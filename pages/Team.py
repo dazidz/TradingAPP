@@ -56,7 +56,8 @@ with tab_teamroom:
 
     st.subheader("Tägliches Standup & Portfolio-Synthese")
     st.markdown(
-        "Nach Ray Dalios Prinzipien: **Radical Truth & Radical Open-Mindedness**."
+        "Nach Ray Dalios Prinzipien: **Radical Truth & Radical"
+        " Open-Mindedness**."
     )
 
     selected_depot_label = st.selectbox(
@@ -104,6 +105,45 @@ with tab_teamroom:
       st.warning(
           "Joris hat für dieses Depot noch keine Synthese durchgeführt."
       )
+
+    # ==========================================
+    # INTERAKTIVER CHAT MIT JORIS
+    # ==========================================
+    st.divider()
+    st.markdown(f"### 🤖 Diskussion mit Joris ({selected_depot_label})")
+
+    chat_session_key = f"joris_chat_history_{current_depot_focus}"
+    if chat_session_key not in st.session_state:
+      st.session_state[chat_session_key] = []
+
+    for message in st.session_state[chat_session_key]:
+      with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+    if user_query_joris := st.chat_input(
+        f"Diskutiere mit Joris über das Mandat '{selected_depot_label}'..."
+    ):
+      st.session_state[chat_session_key].append(
+          {"role": "user", "content": user_query_joris}
+      )
+      with st.chat_message("user"):
+        st.markdown(user_query_joris)
+
+      with st.chat_message("assistant"):
+        with st.spinner("Joris prüft die Daten und antwortet..."):
+          success_chat, reply_chat = joris.chat_with_joris(
+              depot_focus=current_depot_focus,
+              user_message=user_query_joris,
+              chat_history=st.session_state[chat_session_key][:-1],
+              api_key=GEMINI_API_KEY,
+          )
+          if success_chat:
+            st.markdown(reply_chat)
+            st.session_state[chat_session_key].append(
+                {"role": "assistant", "content": reply_chat}
+            )
+          else:
+            st.error(reply_chat)
 
     st.divider()
     st.markdown("### 📊 Letzte Einzelberichte im Team")
@@ -386,7 +426,7 @@ with tab_aris:
     with st.chat_message(message["role"]):
       st.markdown(message["content"])
 
-  if user_query := st.chat_input("Stelle Aris eine Frage..."):
+  if user_query := st.chat_input("Stelle Aris eine Frage...", key="aris_chat_input"):
     st.session_state.messages_aris.append(
         {"role": "user", "content": user_query}
     )
