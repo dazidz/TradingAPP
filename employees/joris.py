@@ -17,56 +17,67 @@ class JorisPortfolioManager:
         Radical Truth & Radical Open-Mindedness. Deine Aufgabe ist es, die Berichte der Spezialisten kritisch zu hinterfragen und zu einer fundierten, kohärenten Portfolio-Synthese für das gewählte Mandat zu verdichten.
         
         WICHTIG - MANDATS- UND SIGNAL-DISZIPLIN:
-        1. Bei Mandaten wie 'Swing' oder 'High Risk' darfst du NUR Titel berücksichtigen, die nachweislich ein aktives technisches Signal in unserer Signalliste haben. Werte ohne technisches Signal fliegen rigoros raus!
-        2. Bei 'Invest' Mandaten steht der innere Wert (Fair Value) und die Bilanzstärke im Vordergrund.
+        1. Bei Mandaten wie 'Swing', 'Invest' oder 'High Risk' darfst du NUR Titel berücksichtigen, die nachweislich ein aktives technisches Signal in unserer Signalliste haben. Werte ohne technisches Signal fliegen rigoros raus!
         Formuliere klare, kompromisslose Handlungsempfehlungen und Risikohinweise.
         """
 
   def _get_active_signals(self, depot_focus: str):
-    """Holt aktive Signale aus der Datenbank, falls das Mandat einen Signal-Filter erfordert."""
+    """Holt aktive Signale aus der signals-Tabelle basierend auf dem strategy_type:
+
+    - Swing & Invest -> sucht nach 'Swing'
+    - High Risk -> sucht nach 'High Risk'
+    """
     try:
-      # Wir mappen den Depot-Fokus auf die Strategie-Typen in der DB
       focus_lower = depot_focus.lower()
-      if "swing" in focus_lower:
-        strategy_filter = "Swing"
-      elif "risk" in focus_lower or "high risk" in focus_lower:
-        strategy_filter = "High Risk"
+
+      # Mandats-Logik nach Vorgabe mappen
+      if "risk" in focus_lower or "high" in focus_lower:
+        strategy_target = "High Risk"
       else:
-        return None  # Kein strikter Signal-Filter bei Invest / Allgemein
+        # Gilt für 'Swing' und 'Invest' (Invest greift auf Swing-Signale zu)
+        strategy_target = "Swing"
 
       res = (
           self.supabase.table("signals")
-          .select("ticker, signal_status, indicator_details")
-          .ilike("strategy_type", f"%{strategy_filter}%")
+          .select(
+              "ticker, company_name, signal_type, entry_price, created_at,"
+              " strategy_type, meta_data"
+          )
+          .ilike("strategy_type", f"%{strategy_target}%")
           .execute()
       )
       return res.data if res.data else []
-    except Exception:
+    except Exception as e:
+      print(f"Fehler beim Abrufen der Signale: {e}")
       return []
 
   def run_synthesis(self, depot_focus: str, api_key: str):
-    """Führt die Portfolio-Synthese für das gewählte Mandat aus (mit Signal-Validierung für Swing/Risk)."""
+    """Führt die Portfolio-Synthese für das gewählte Mandat aus (mit striktem Signal-Filter)."""
     try:
       genai.configure(api_key=api_key)
 
-      # 1. Prüfen ob Signale erforderlich sind
+      # 1. Signale für das Mandat abrufen
       active_signals = self._get_active_signals(depot_focus)
-      signal_context = ""
 
-      if active_signals is not None:
-        if len(active_signals) == 0:
-          return (
-              False,
-              f"Stopp: Für das Mandat '{depot_focus}' wurden keine aktiven"
-              " Einträge in der `signals`-Tabelle gefunden. Keine Synthese"
-              " möglich.",
-          )
-        signal_df = pd.DataFrame(active_signals)
-        signal_context = f"""
-                --- AKTIVE TECHNISCHE SIGNALE (PFLICHT-FILTER FÜR DIESES MANDAT) ---
-                NUR DIE FOLGENDEN TICKER DÜRFEN GEHANDELT/EMPFOHLEN WERDEN:
-                {signal_df.to_string(index=False)}
-                """
+      if not active_signals or len(active_signals) == 0:
+        focus_label = (
+            "High Risk"
+            if "risk" in depot_focus.lower() or "high" in depot_focus.lower()
+            else "Swing"
+        )
+        return (
+            False,
+            f"Stopp: Für das Mandat '{depot_focus}' wurden keine aktiven"
+            f" Einträge (strategy_type: '{focus_label}') in der `signals`-Tabelle"
+            " gefunden. Keine Synthese möglich.",
+        )
+
+      signal_df = pd.DataFrame(active_signals)
+      signal_context = f"""
+            --- AKTIVE TECHNISCHE SIGNALE (PFLICHT-FILTER FÜR DIESES MANDAT) ---
+            NUR DIE FOLGENDEN TICKER DÜRFEN GEHANDELT/EMPFOHLEN WERDEN:
+            {signal_df.to_string(index=False)}
+            """
 
       # 2. Die neuesten Reports der anderen Agenten einsammeln
       def get_report(agent_name):
@@ -111,8 +122,9 @@ class JorisPortfolioManager:
           model_name="gemini-3.6-flash", system_instruction=self.joris_dna
       )
       response = model.generate_content(
-          "Erstelle auf Basis der Team-Berichte und der Signal-Disziplin eine"
-          f" fundierte Portfolio-Synthese für das Mandat '{depot_focus}':\n\n{context}"
+          "Erstelle auf Basis der Team-Berichte und der strikten"
+          " Signal-Disziplin eine fundierte Portfolio-Synthese für das Mandat"
+          f" '{depot_focus}':\n\n{context}"
       )
 
       report_content = response.text
@@ -129,7 +141,7 @@ class JorisPortfolioManager:
       return (
           True,
           f"Joris hat die Portfolio-Synthese für '{depot_focus}' unter"
-          " Berücksichtigung der Signale abgeschlossen.",
+          " Berücksichtigung der Signale erfolgreich abgeschlossen.",
       )
     except Exception as e:
       return False, f"Fehler bei Joris Synthese: {e}"
