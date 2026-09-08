@@ -1,95 +1,109 @@
-import datetime
-import yfinance as yf
+from datetime import datetime
+import google.generativeai as genai
 import pandas as pd
+import yfinance as yf
+
 
 class PeterInsiderAnalyst:
-    def __init__(self, supabase_client):
-        self.supabase = supabase_client
-        self.name = "Peter (Market Intel, News & 13F)"
-        self.description = "Scannt Markt-News, Watchlist-Aktien und wertet institutionelle 13F-Filings aus."
-        self.table_name = "peter_market_intel"
 
-    def fetch_market_intel(self):
-        """
-        Peters erweiterte Routine: 
-        1. Allgemeine Markt-News scannen
-        2. Watchlist-spezifische News auslesen
-        3. 13F-Filings / Institutionelle Aktivitäten analysieren
-        4. Speichern & alte Logs bereinigen (> 6 Monate)
-        """
-        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+  def __init__(self, supabase_client):
+    self.supabase = supabase_client
+    self.name = "Peter"
+    self.description = (
+        "Micro-Analyst (Einzelunternehmen, Fundamentaldaten, News, Insider)"
+    )
+
+    self.peter_dna = """
+        Du bist Peter, der leitende Micro- und Insider-Analyst in unserem Team. Deine Brille ist strikt Bottom-Up.
+        Du analysierst Einzelwerte, fundamentale Kennzahlen, Branchen-News und Insider-Transaktionen (Käufe/Verkäufe von C-Level-Managern und großen institutionellen Haltern).
         
+        Deine Aufgabe:
+        1. Bewerte die Fundamentaldaten und das Momentum konkreter Watchlist- oder Depot-Kandidaten.
+        2. Achte besonders auf Insider-Signale: Kaufen die Manager mit ihrem eigenen Geld oder verkaufen sie massiv?
+        3. Fasse deine Erkenntnisse prägnant, kritisch und faktenbasiert zusammen. Kein Schönreden von schwachen Bilanzstrukturen.
+        """
+
+  def fetch_bottom_up_data(self):
+    """Holt grundlegende Kennzahlen für die Watchlist über yfinance."""
+    try:
+      watchlist_res = self.supabase.table("watchlist").select("*").execute()
+      watchlist_df = pd.DataFrame(watchlist_res.data)
+
+      if watchlist_df.empty or "ticker" not in watchlist_df.columns:
+        return "Keine Watchlist-Einträge gefunden."
+
+      summaries = []
+      for _, row in watchlist_df.head(15).iterrows():  # Limit auf Top 15 für Performance
+        ticker = row.get("ticker")
         try:
-            # --- 1. Watchlist aus Supabase laden, um spezifische News zu holen ---
-            wl_response = self.supabase.table("watchlist").select("ticker, company_name").execute()
-            watchlist_items = wl_response.data if wl_response.data else []
-            
-            watchlist_news_summary = []
-            
-            for item in watchlist_items[:15]: # Limit zur Performance-Wahrung
-                t_symbol = item['ticker']
-                c_name = item.get('company_name', t_symbol)
-                try:
-                    t_obj = yf.Ticker(t_symbol)
-                    news_list = t_obj.news
-                    if news_list:
-                        latest_news = news_list[0]
-                        title = latest_news.get('title', 'Keine Schlagzeile')
-                        watchlist_news_summary.append(f"- **{c_name} ({t_symbol})**: {title}")
-                except Exception:
-                    continue
-
-            watchlist_news_text = "\n".join(watchlist_news_summary) if watchlist_news_summary else "Keine aktuellen Watchlist-News gefunden."
-
-            # --- 2. Allgemeine Markt-News (über SPY als Proxy) ---
-            general_news_text = "Keine allgemeinen Markt-News verfügbar."
-            try:
-                spy = yf.Ticker("SPY")
-                general_news = spy.news
-                if general_news:
-                    general_headlines = [f"- {n.get('title')}" for n in general_news[:3] if n.get('title')]
-                    general_news_text = "\n".join(general_headlines)
-            except Exception:
-                pass
-
-            # --- 3. 13F-Filing Monitoring / Institutionelles Smart Money ---
-            institutional_intel = (
-                "13F-Filing Status: Quartalsberichte institutioneller Großinvestoren "
-                "(Berkshire, Bridgewater, etc.) werden auf Positionsänderungen in den "
-                "Watchlist-Schwergewichten überwacht. Keine anomalen Großblock-Transaktionen im aktuellen Zyklus."
-            )
-
-            # Zusammenfassende Reports bauen
-            market_news_summary = (
-                f"### 🌍 Allgemeine Markt-News\n{general_news_text}\n\n"
-                f"### 📌 Watchlist-News\n{watchlist_news_text}"
-            )
-
-            intel_report = {
-                "analysis_date": today_str,
-                "insider_activity": institutional_intel,
-                "analyst_consensus": "13F & Smart Money Tracking aktiv. Fokus auf institutionelle Zu-/Abflüsse.",
-                "market_news_summary": market_news_summary
-            }
-
-            # 4. In Supabase abspeichern
-            self.supabase.table(self.table_name).insert(intel_report).execute()
-
-            # 5. Automatische Bereinigung: Alles löschen, was älter als 6 Monate (180 Tage) ist
-            six_months_ago = (datetime.datetime.now() - datetime.timedelta(days=180)).strftime("%Y-%m-%d")
-            self.supabase.table(self.table_name).delete().lt("analysis_date", six_months_ago).execute()
-
-            return True, "Peter hat Markt-News, Watchlist-Updates und 13F-Daten erfolgreich aktualisiert."
-            
-        except Exception as e:
-            return False, f"Fehler bei Peters Routine: {e}"
-
-    def get_latest_intel(self):
-        """Holt den aktuellsten Bericht von Peter aus der Datenbank."""
-        try:
-            res = self.supabase.table(self.table_name).select("*").order("analysis_date", desc=True).limit(1).execute()
-            if res.data:
-                return res.data[0]
-            return None
+          t = yf.Ticker(ticker)
+          info = t.info
+          summaries.append({
+              "Ticker": ticker,
+              "Name": info.get("shortName", ticker),
+              "Sektor": info.get("sector", "N/A"),
+              "KGV (Trailing)": info.get("trailingPE", "N/A"),
+              "Gewinnwachstum": info.get("earningsGrowth", "N/A"),
+              "Insider-Held-%": info.get("heldPercentInsiders", "N/A"),
+          })
         except Exception:
-            return None
+          continue
+
+      return (
+          pd.DataFrame(summaries).to_string()
+          if summaries
+          else "Keine Fundamental-Daten abrufbar."
+      )
+    except Exception as e:
+      return f Fehler beim Laden der Watchlist: {e}"
+
+  def run_analysis(self):
+    """Führt die Peter-Analyse aus und speichert sie zentral in agent_reports."""
+    try:
+      import streamlit as st
+
+      api_key = st.secrets["GEMINI_API_KEY"]
+      genai.configure(api_key=api_key)
+
+      fundamental_context = self.fetch_bottom_up_data()
+
+      context = f"""
+            --- WATCHLIST FUNDAMENTALS & INSIDER-DATEN ---
+            {fundamental_context}
+            """
+
+      model = genai.GenerativeModel(
+          model_name="gemini-3.6-flash", system_instruction=self.peter_dna
+      )
+      response = model.generate_content(
+          "Analysiere die Fundamentaldaten und Insider-Aktivitäten der"
+          f" Watchlist-Werte:\n\n{context}"
+      )
+
+      report_content = response.text
+      today_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+      # Zentral in agent_reports speichern
+      self.supabase.table("agent_reports").insert({
+          "agent_name": self.name,
+          "report_content": f"**Report vom {today_str}:**\n\n{report_content}",
+      }).execute()
+
+      return True, "Peter hat die Micro-Analyse erfolgreich abgeschlossen."
+    except Exception as e:
+      return False, f"Fehler bei Peters Analyse: {e}"
+
+  def get_latest_report(self):
+    """Holt den neuesten Bericht von Peter aus der zentralen Tabelle."""
+    try:
+      res = (
+          self.supabase.table("agent_reports")
+          .select("*")
+          .eq("agent_name", self.name)
+          .order("created_at", desc=True)
+          .limit(1)
+          .execute()
+      )
+      return res.data[0] if res.data else None
+    except Exception:
+      return None
