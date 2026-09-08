@@ -15,16 +15,20 @@ class PeterInsiderAnalyst:
 
     self.peter_dna = """
         Du bist Peter, der leitende Micro- und Insider-Analyst in unserem Team. Deine Brille ist strikt Bottom-Up.
-        Du analysierst Einzelwerte, fundamentale Kennzahlen, Branchen-News und Insider-Transaktionen (Käufe/Verkäufe von C-Level-Managern und großen institutionellen Haltern).
+        Du analysierst Einzelwerte, fundamentale Kennzahlen, Branchen-News und Insider-Transaktionen.
         
-        Deine Aufgabe:
-        1. Bewerte die Fundamentaldaten und das Momentum konkreter Watchlist- oder Depot-Kandidaten.
-        2. Achte besonders auf Insider-Signale: Kaufen die Manager mit ihrem eigenen Geld oder verkaufen sie massiv?
-        3. Fasse deine Erkenntnisse prägnant, kritisch und faktenbasiert zusammen. Kein Schönreden von schwachen Bilanzstrukturen.
+        WICHTIG - FUNDAMENTAL-FEED PRÄZISION:
+        Du verlangst harte Fakten. Achte besonders auf:
+        1. TTM-KGV (Trailing Price-to-Earnings): Bewertung auf Basis der letzten 12 Monate.
+        2. FCF-Rendite (Free Cash Flow Yield): Wie viel Cash generiert das Unternehmen im Verhältnis zur Marktkapitalisierung?
+        3. Verschuldungsgrad (Net Debt / EBITDA): Ist die Bilanz gesund oder droht Überschuldung bei steigenden Zinsen?
+        4. Insider-Aktivitäten: Kaufen oder verkaufen die Manager?
+        
+        Fasse deine Erkenntnisse prägnant, kritisch und faktenbasiert zusammen. Kein Schönreden von schwachen Bilanzen.
         """
 
   def fetch_bottom_up_data(self):
-    """Holt grundlegende Kennzahlen für die Watchlist über yfinance."""
+    """Holt echte TTM-KGVs, FCF-Renditen und Verschuldungsgrade über yfinance."""
     try:
       watchlist_res = self.supabase.table("watchlist").select("*").execute()
       watchlist_df = pd.DataFrame(watchlist_res.data)
@@ -38,12 +42,33 @@ class PeterInsiderAnalyst:
         try:
           t = yf.Ticker(ticker)
           info = t.info
+
+          # 1. TTM KGV
+          pe_ttm = info.get("trailingPE", "N/A")
+
+          # 2. Free Cash Flow Rendite berechnen (FCF / MarketCap)
+          fcf = info.get("freeCashflow")
+          mcap = info.get("marketCap")
+          fcf_yield = "N/A"
+          if fcf and mcap and mcap > 0:
+            fcf_yield = f"{round((fcf / mcap) * 100, 2)}%"
+
+          # 3. Verschuldungsgrad (Net Debt / EBITDA) annähern oder direkt holen
+          total_debt = info.get("totalDebt", 0) or 0
+          total_cash = info.get("totalCash", 0) or 0
+          ebitda = info.get("ebitda")
+          net_debt_ebitda = "N/A"
+          if ebitda and ebitda > 0:
+            net_debt = total_debt - total_cash
+            net_debt_ebitda = round(net_debt / ebitda, 2)
+
           summaries.append({
               "Ticker": ticker,
               "Name": info.get("shortName", ticker),
               "Sektor": info.get("sector", "N/A"),
-              "KGV (Trailing)": info.get("trailingPE", "N/A"),
-              "Gewinnwachstum": info.get("earningsGrowth", "N/A"),
+              "TTM-KGV": pe_ttm,
+              "FCF-Rendite": fcf_yield,
+              "Net Debt / EBITDA": net_debt_ebitda,
               "Insider-Held-%": info.get("heldPercentInsiders", "N/A"),
           })
         except Exception:
@@ -65,7 +90,7 @@ class PeterInsiderAnalyst:
       fundamental_context = self.fetch_bottom_up_data()
 
       context = f"""
-            --- WATCHLIST FUNDAMENTALS & INSIDER-DATEN ---
+            --- WATCHLIST FUNDAMENTALS & BILANZ-METRIKEN (TTM-KGV, FCF, NET DEBT) ---
             {fundamental_context}
             """
 
@@ -73,29 +98,30 @@ class PeterInsiderAnalyst:
           model_name="gemini-3.6-flash", system_instruction=self.peter_dna
       )
       response = model.generate_content(
-          "Analysiere die Fundamentaldaten und Insider-Aktivitäten der"
-          f" Watchlist-Werte:\n\n{context}"
+          "Analysiere die Fundamentaldaten, insbesondere TTM-KGV, FCF-Rendite"
+          f" und den Verschuldungsgrad der Watchlist-Werte:\n\n{context}"
       )
 
       report_content = response.text
       today_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-      # Zentral in agent_reports speichern
       self.supabase.table("agent_reports").insert({
           "agent_name": self.name,
           "report_content": f"**Report vom {today_str}:**\n\n{report_content}",
       }).execute()
 
-      return True, "Peter hat die Micro-Analyse erfolgreich abgeschlossen."
+      return (
+          True,
+          "Peter hat die Micro-Analyse mit bereinigten Kennzahlen"
+          " abgeschlossen.",
+      )
     except Exception as e:
       return False, f"Fehler bei Peters Analyse: {e}"
 
   def fetch_market_intel(self, api_key: str):
-    """Alias zur Kompatibilität mit eventuell älteren Aufrufen."""
     return self.run_analysis(api_key)
 
   def get_latest_report(self):
-    """Holt den neuesten Bericht von Peter aus der zentralen Tabelle."""
     try:
       res = (
           self.supabase.table("agent_reports")
@@ -110,7 +136,6 @@ class PeterInsiderAnalyst:
       return None
 
   def get_latest_intel(self):
-    """Alias zur Kompatibilität."""
     res = self.get_latest_report()
     if res:
       return {
