@@ -184,6 +184,42 @@ class JorisPortfolioManager:
     except Exception as e:
       return False, f"Fehler bei Joris Synthese: {e}"
 
+  def chat_with_joris(
+      self, depot_focus: str, user_message: str, chat_history: list, api_key: str
+  ):
+    """Führt eine interaktive Chat-Konversation mit Joris unter Berücksichtigung des Depot- und Signalkontexts."""
+    try:
+      genai.configure(api_key=api_key)
+
+      # Aktuellen Kontext laden, damit Joris im Chat genau weiß, worüber geredet wird
+      active_signals = self._get_active_signals(depot_focus)
+      current_portfolio = self._get_current_portfolio(depot_focus)
+
+      context_injection = f"""
+            --- AKTUELLER KONTEXT FÜR DEN CHAT ---
+            Gewähltes Mandat: {depot_focus}
+            Aktives Depot: {current_portfolio}
+            Aktive Signale: {active_signals}
+            """
+
+      system_prompt = f"{self.joris_dna}\n\n{context_injection}"
+      model = genai.GenerativeModel(
+          model_name="gemini-3.6-flash", system_instruction=system_prompt
+      )
+
+      # Verlauf für das Gemini-Chatformat aufbereiten
+      formatted_history = []
+      for msg in chat_history:
+        role = "model" if msg["role"] == "assistant" else "user"
+        formatted_history.append({"role": role, "parts": [msg["content"]]})
+
+      chat = model.start_chat(history=formatted_history)
+      response = chat.send_message(user_message)
+
+      return True, response.text
+    except Exception as e:
+      return False, f"Fehler im Joris-Chat: {e}"
+
   def get_latest_report(self, depot_focus: str):
     """Holt den neuesten Joris-Bericht für das spezifische Mandat."""
     try:
