@@ -253,7 +253,6 @@ with tab_journal:
 
       st.divider()
 
-      # Spaltenreihenfolge für saubere Ansicht anpassen
       display_cols = [
           c
           for c in [
@@ -263,6 +262,8 @@ with tab_journal:
               "einstieg_datum_zeit",
               "ausstieg_datum_zeit",
               "anzahl",
+              "einstiegskurs",
+              "ausstiegskurs",
               "gesamtwert",
               "performance",
               "g_v",
@@ -280,6 +281,12 @@ with tab_journal:
               "einstieg_datum_zeit": "Einstieg",
               "ausstieg_datum_zeit": "Ausstieg",
               "anzahl": st.column_config.NumberColumn("Anzahl", format="%.4f"),
+              "einstiegskurs": st.column_config.NumberColumn(
+                  "Einstiegskurs", format="%.2f €"
+              ),
+              "ausstiegskurs": st.column_config.NumberColumn(
+                  "Ausstiegskurs", format="%.2f €"
+              ),
               "gesamtwert": st.column_config.NumberColumn(
                   "Gesamtwert", format="%.2f €"
               ),
@@ -468,12 +475,14 @@ with tab_new_trade:
             )
             trade_g_v = (s_price - buy_p) * s_shares_to_sell
 
-            # 1. Den verkauften Teil ins Journal schreiben (inkl. exaktem Depot-Namen)
+            # Hier wurden nun einstiegskurs und ausstiegskurs ergänzt:
             supabase.table("trade_journal").insert({
                 "ticker": chosen_pos["ticker"],
                 "einstieg_datum_zeit": chosen_pos["datum_einstieg"],
                 "ausstieg_datum_zeit": s_timestamp,
                 "anzahl": s_shares_to_sell,
+                "einstiegskurs": buy_p,
+                "ausstiegskurs": s_price,
                 "gesamtwert": exit_gesamtwert,
                 "signaltype": sell_depot,
                 "performance": performance_pct,
@@ -481,7 +490,6 @@ with tab_new_trade:
                 "notiz": s_note,
             }).execute()
 
-            # 2. Komplett- oder Teilverkauf
             if s_shares_to_sell >= total_shares_owned:
               supabase.table(sell_tbl).delete().eq(
                   "id", chosen_pos["id"]
