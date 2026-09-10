@@ -133,7 +133,7 @@ class PeterInsiderAnalyst:
           """
 
       completion = client.chat.completions.create(
-          model="llama-3.3-70b-versatile",
+          model="llama-3.1-8b-instant",
           messages=[
               {"role": "system", "content": self.peter_dna},
               {
@@ -237,7 +237,7 @@ class PeterInsiderAnalyst:
               groq_history.append({"role": role, "content": m["content"]})
 
             completion = chat_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model="llama-3.1-8b-instant",
                 messages=groq_history,
                 temperature=0.1,
             )
