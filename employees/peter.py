@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-import os  # <--- FEHLTE BISHER UND HAT DEN FEHLER VERURSACHT
+import os
 from pathlib import Path
 from groq import Groq
 import pandas as pd
@@ -35,6 +35,21 @@ class PeterInsiderAnalyst:
         Antworte strukturiert, prägnant und auf den Punkt.
         """
 
+  def get_latest_report(self):
+    """Holt den neuesten Peter-Bericht aus Supabase."""
+    try:
+      res = (
+          self.supabase.table("agent_reports")
+          .select("*")
+          .eq("agent_name", "Peter")
+          .order("created_at", desc=True)
+          .limit(1)
+          .execute()
+      )
+      return res.data[0] if res.data else None
+    except Exception:
+      return None
+
   def render_ui(self):
     st.subheader("🤖 Peter - Micro & Insider Analyst")
     st.markdown(
@@ -54,16 +69,8 @@ class PeterInsiderAnalyst:
 
     # 0. Gespeicherten Report aus Supabase laden (falls noch kein Chat da ist)
     try:
-      saved_report_res = (
-          self.supabase.table("agent_reports")
-          .select("*")
-          .eq("agent_name", "Peter")
-          .order("created_at", desc=True)
-          .limit(1)
-          .execute()
-      )
-      if saved_report_res.data and not st.session_state.messages_peter:
-        latest_report = saved_report_res.data[0]
+      latest_report = self.get_latest_report()
+      if latest_report and not st.session_state.messages_peter:
         st.session_state.messages_peter.append({
             "role": "assistant",
             "content": (
