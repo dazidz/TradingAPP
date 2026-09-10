@@ -97,7 +97,6 @@ try:
           return x
         if isinstance(x, str) and x.startswith("{"):
           try:
-            # JSON-konform machen (ersetzt einfache Anführungszeichen & true/false)
             fixed_str = (
                 x.replace("'", '"')
                 .replace("true", "true")
@@ -149,15 +148,24 @@ try:
     sector_counts_global = df.groupby("sector").size()
     sector_share_global = (sector_counts_global / total_count_global) * 100
 
-    tab_favs, tab_ueber, tab_unter, tab_gesamt, tab_dip = st.tabs([
+    # Tabs für die einzelnen Kategorien
+    (
+        tab_favs,
+        tab_ema20_elite,
+        tab_ema20,
+        tab_unter_elite,
+        tab_unter_ema20,
+        tab_dip,
+    ) = st.tabs([
         "⭐ Favoriten",
-        "EMA20 🟢",
-        "EMA20 🔴",
-        "📁 Gesamtliste",
+        "🟣 EMA20+ELITE",
+        "🟢 EMA20",
+        "🟡 unter EMA20+ELITE",
+        "🔴 unter EMA20",
         "📉 Dip-Scanner",
     ])
 
-    def show_table(df_subset, is_fav_view=False, is_total_view=False):
+    def show_table(df_subset, category_type="default"):
       d = df_subset.copy()
       if d.empty:
         st.info("Keine Daten für diese Filtereinstellung vorhanden.")
@@ -165,34 +173,55 @@ try:
 
       d["Action"] = False
 
-      if is_total_view:
-        d["⭐"] = d["is_favorite"].apply(lambda x: "⭐" if x else "")
-        cols = [
-            "⭐",
-            "Action",
-            "company_name",
-            "Chart",
-            "Performance (%)",
-            "candle_time",
-            "sector",
-            "signal_type",
-            "gettex_ticker",
-        ]
-      else:
-        cols = [
-            "Action",
-            "company_name",
-            "Chart",
-            "Performance (%)",
-            "candle_time",
-            "sector",
-            "signal_type",
-            "gettex_ticker",
-        ]
+      # Präfix-Logik je nach Kategorie/Zustand
+      def get_company_prefix(row):
+        sig = str(row.get("signal_type", "")).strip().lower()
+        dist = row.get("EMA20_Dist_%", 0)
+        if pd.isna(dist):
+          dist = 0
+
+        if category_type == "favorites":
+          return f"⭐ {row.get('company_name', '')}"
+        elif category_type == "ema20_elite":
+          return f"🟣 {row.get('company_name', '')}"
+        elif category_type == "ema20":
+          return f"🟢 {row.get('company_name', '')}"
+        elif category_type == "unter_elite":
+          return f"🟡 {row.get('company_name', '')}"
+        elif category_type == "unter_ema20":
+          return f"🔴 {row.get('company_name', '')}"
+        else:
+          # Fallback (z.B. Gesamtansicht, falls gewünscht)
+          if "elite" in sig:
+            return (
+                f"🟣 {row.get('company_name', '')}"
+                if dist >= 0
+                else f"🟡 {row.get('company_name', '')}"
+            )
+          else:
+            return (
+                f"🟢 {row.get('company_name', '')}"
+                if dist >= 0
+                else f"🔴 {row.get('company_name', '')}"
+            )
+
+      d["company_name_formatted"] = d.apply(get_company_prefix, axis=1)
+
+      cols = [
+          "Action",
+          "company_name_formatted",
+          "Chart",
+          "Performance (%)",
+          "candle_time",
+          "sector",
+          "signal_type",
+          "gettex_ticker",
+      ]
 
       conf = {
-          "⭐": st.column_config.TextColumn("⭐", width="small"),
-          "company_name": st.column_config.TextColumn("Firma", disabled=True),
+          "company_name_formatted": st.column_config.TextColumn(
+              "Firma", disabled=True
+          ),
           "Chart": st.column_config.LinkColumn("Link", display_text="📈 Öffnen"),
           "Performance (%)": st.column_config.NumberColumn(
               "Performance", format="%.2f%%"
@@ -206,7 +235,8 @@ try:
               "Gettex Ticker", disabled=True
           ),
           "Action": st.column_config.CheckboxColumn(
-              "Entfernen" if is_fav_view else "Favorit", default=False
+              "Entfernen" if category_type == "favorites" else "Favorit",
+              default=False,
           ),
       }
 
@@ -292,11 +322,10 @@ try:
       changed_rows = edited[edited["Action"] == True]
       if not changed_rows.empty:
         for _, row in changed_rows.iterrows():
-          t_symbol = df_subset.loc[
-              df_subset["company_name"] == row["company_name"], "ticker"
-          ].values[0]
+          orig_row_idx = edited[edited["Action"] == True].index[0]
+          t_symbol = d.loc[orig_row_idx, "ticker"]
 
-          if is_fav_view:
+          if category_type == "favorites":
             supabase.table("favorites").delete().eq(
                 "ticker", t_symbol
             ).execute()
@@ -306,18 +335,57 @@ try:
             ).execute()
         st.rerun()
 
+    # Hilfsfunktion zur Prüfung auf Elite im Signaltyp
+    def is_elite(sig):
+      return "elite" in str(sig).lower()
+
+    # Tab 1: Favoriten
     with tab_favs:
-      show_table(df[df["is_favorite"] == True], is_fav_view=True)
-    with tab_ueber:
+      show_table(df[df["is_favorite"] == True], category_type="favorites")
+
+    # Tab 2: EMA20 + ELITE (dist >= 0 und elite)
+    with tab_ema20_elite:
       show_table(
-          df[(df.get("status") == "signal") & (df["EMA20_Dist_%"].fillna(-1) >= 0)]
+          df[
+              (df.get("status") == "signal")
+              & (df["EMA20_Dist_%"].fillna(-1) >= 0)
+              & (df["signal_type"].apply(is_elite))
+          ],
+          category_type="ema20_elite",
       )
-    with tab_unter:
+
+    # Tab 3: EMA20 (dist >= 0 und kein elite)
+    with tab_ema20:
       show_table(
-          df[(df.get("status") == "signal") & (df["EMA20_Dist_%"].fillna(0) < 0)]
+          df[
+              (df.get("status") == "signal")
+              & (df["EMA20_Dist_%"].fillna(-1) >= 0)
+              & (~df["signal_type"].apply(is_elite))
+          ],
+          category_type="ema20",
       )
-    with tab_gesamt:
-      show_table(df, is_total_view=True)
+
+    # Tab 4: unter EMA20 + ELITE (dist < 0 und elite)
+    with tab_unter_elite:
+      show_table(
+          df[
+              (df.get("status") == "signal")
+              & (df["EMA20_Dist_%"].fillna(0) < 0)
+              & (df["signal_type"].apply(is_elite))
+          ],
+          category_type="unter_elite",
+      )
+
+    # Tab 5: unter EMA20 (dist < 0 und kein elite)
+    with tab_unter_ema20:
+      show_table(
+          df[
+              (df.get("status") == "signal")
+              & (df["EMA20_Dist_%"].fillna(0) < 0)
+              & (~df["signal_type"].apply(is_elite))
+          ],
+          category_type="unter_ema20",
+      )
 
     # --- TAB: DIP-SCANNER ---
     with tab_dip:
