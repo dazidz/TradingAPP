@@ -163,6 +163,11 @@ class PeterInsiderAnalyst:
 
   def render_ui(self):
     st.subheader("🤖 Peter - Micro & Insider Analyst")
+
+# NUR ZUM TESTEN (kann danach wieder raus):
+    st.write("Verfügbare Secrets-Schlüssel:", list(st.secrets.keys()))
+    st.write("GROQ_API_KEY vorhanden?:", "GROQ_API_KEY" in st.secrets)
+
     st.markdown(
         "Dein KI-Agent analysiert Live-Daten, News und Insider-Aktivitäten "
         "und steht dir im Chat für Rückfragen zur Verfügung."
