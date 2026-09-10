@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys
+from groq import Groq
 import google.generativeai as genai
 import pandas as pd
 import streamlit as st
@@ -26,12 +27,20 @@ URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(URL, KEY)
 
-# Zentraler API-Key Check für alle Agenten
+# Sicheres Laden der API-Keys (ohne dass die App direkt abstürzt)
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY") if "os" in globals() else None
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY") if "os" in globals() else None
+
+# Fallback falls st.secrets direkt zugreifen soll
 try:
-  GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-except Exception as e:
-  st.error(f"Fehler beim Laden von GEMINI_API_KEY aus den Streamlit Secrets: {e}")
-  st.stop()
+  GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", GROQ_API_KEY)
+except Exception:
+  pass
+
+try:
+  GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", GEMINI_API_KEY)
+except Exception:
+  pass
 
 st.title("🏢 VisionDZ - Team & Kommandozentrale")
 
@@ -46,7 +55,7 @@ tab_teamroom, tab_jano, tab_peter, tab_otto, tab_nino, tab_aris = st.tabs([
 ])
 
 # ==========================================
-# TAB 1: DER TEAMROOM & JORIS (PORTFOLIO MANAGER)
+# TAB 1: DER TEAMROOM & JORIS (GROQ)
 # ==========================================
 with tab_teamroom:
   try:
@@ -87,7 +96,7 @@ with tab_teamroom:
             f"Joris synthetisiert Berichte für '{current_depot_focus}'..."
         ):
           success, msg = joris.run_synthesis(
-              depot_focus=current_depot_focus, api_key=GEMINI_API_KEY
+              depot_focus=current_depot_focus, api_key=GROQ_API_KEY
           )
           if success:
             st.success(msg)
@@ -106,9 +115,7 @@ with tab_teamroom:
           "Joris hat für dieses Depot noch keine Synthese durchgeführt."
       )
 
-    # ==========================================
     # INTERAKTIVER CHAT MIT JORIS
-    # ==========================================
     st.divider()
     st.markdown(f"### 🤖 Diskussion mit Joris ({selected_depot_label})")
 
@@ -135,7 +142,7 @@ with tab_teamroom:
               depot_focus=current_depot_focus,
               user_message=user_query_joris,
               chat_history=st.session_state[chat_session_key][:-1],
-              api_key=GEMINI_API_KEY,
+              api_key=GROQ_API_KEY,
           )
           if success_chat:
             st.markdown(reply_chat)
@@ -184,7 +191,7 @@ with tab_teamroom:
     st.error(f"Fehler im Teamroom: {e}")
 
 # ==========================================
-# TAB 2: JANO (MACRO ANALYST)
+# TAB 2: JANO (MACRO ANALYST - GEMINI)
 # ==========================================
 with tab_jano:
   try:
@@ -214,7 +221,7 @@ with tab_jano:
     st.error(f"Jano-Tab aktuell nicht verfügbar (Fehler: {e})")
 
 # ==========================================
-# TAB 3: PETER (MARKET INTEL & INSIDER)
+# TAB 3: PETER (MARKET INTEL & INSIDER - GROQ)
 # ==========================================
 with tab_peter:
   try:
@@ -227,7 +234,8 @@ with tab_peter:
 
     if st.button("🔄 Peter: Fundamentaldaten & Insider analysieren"):
       with st.spinner("Peter holt Watchlist & Insider-Daten..."):
-        success, msg = peter.run_analysis(api_key=GEMINI_API_KEY)
+        # HIER WURDE KORRIGIERT: GROQ_API_KEY statt GEMINI_API_KEY!
+        success, msg = peter.run_analysis(api_key=GROQ_API_KEY)
         if success:
           st.success(msg)
           st.rerun()
@@ -245,7 +253,7 @@ with tab_peter:
     st.error(f"Peter-Tab aktuell nicht verfügbar (Fehler: {e})")
 
 # ==========================================
-# TAB 4: OTTO (HISTORY & PATTERNS)
+# TAB 4: OTTO (HISTORY & PATTERNS - GEMINI)
 # ==========================================
 with tab_otto:
   try:
@@ -335,7 +343,7 @@ with tab_nino:
     st.error(f"Nino-Tab aktuell nicht verfügbar (Fehler: {e})")
 
 # ==========================================
-# TAB 6: ARIS (PERFORMANCE MANAGER & CHAT)
+# TAB 6: ARIS (PERFORMANCE MANAGER & CHAT - GROQ)
 # ==========================================
 with tab_aris:
   st.subheader("🤖 Aris - Performance Manager")
@@ -384,7 +392,8 @@ with tab_aris:
   if st.button("🚀 Aris Analyse & Screener-Review starten", type="primary"):
     with st.spinner("Aris analysiert Datenbanken und Code..."):
       try:
-        genai.configure(api_key=GEMINI_API_KEY)
+        # ARIS LAUFT JETZT KORREKT ÜBER GROQ (Llama 3.1 8B Instant)
+        groq_client = Groq(api_key=GROQ_API_KEY)
 
         signals_res = supabase.table("signals_journal").select("*").execute()
         journal_res = supabase.table("trade_journal").select("*").execute()
@@ -398,13 +407,20 @@ with tab_aris:
             {journal_df.to_string() if not journal_df.empty else "Keine Trades"}
             """
 
-        model = genai.GenerativeModel(
-            model_name="gemini-3.6-flash", system_instruction=aris_dna
+        completion = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": aris_dna},
+                {
+                    "role": "user",
+                    "content": (
+                        "Erstelle deinen Analyse-Report:\n\n" + context_data
+                    ),
+                },
+            ],
+            temperature=0.1,
         )
-        response = model.generate_content(
-            "Erstelle deinen Analyse-Report:\n\n" + context_data
-        )
-        report_content = response.text
+        report_content = completion.choices[0].message.content
 
         supabase.table("agent_reports").insert({
             "agent_name": "Aris",
@@ -436,22 +452,20 @@ with tab_aris:
     with st.chat_message("assistant"):
       with st.spinner("Aris denkt nach..."):
         try:
-          genai.configure(api_key=GEMINI_API_KEY)
+          groq_client = Groq(api_key=GROQ_API_KEY)
 
-          gemini_history = []
+          groq_history = [{"role": "system", "content": aris_dna}]
           for m in st.session_state.messages_aris[:-1]:
-            role = "user" if m["role"] == "user" else "model"
-            if not gemini_history and role == "model":
-              continue
-            gemini_history.append({"role": role, "parts": [m["content"]]})
+            role = "user" if m["role"] == "user" else "assistant"
+            groq_history.append({"role": role, "content": m["content"]})
 
-          model = genai.GenerativeModel(
-              model_name="gemini-3.6-flash", system_instruction=aris_dna
+          completion = groq_client.chat.completions.create(
+              model="llama-3.1-8b-instant",
+              messages=groq_history,
+              temperature=0.1,
           )
-          chat_session = model.start_chat(history=gemini_history)
-          chat_response = chat_session.send_message(user_query)
 
-          answer = chat_response.text
+          answer = completion.choices[0].message.content
           st.markdown(answer)
           st.session_state.messages_aris.append(
               {"role": "assistant", "content": answer}
