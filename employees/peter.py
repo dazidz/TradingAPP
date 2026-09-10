@@ -50,6 +50,81 @@ class PeterInsiderAnalyst:
     except Exception:
       return None
 
+  def run_analysis(self, api_key: str = None):
+    """Führt die Live-Analyse über Groq durch und speichert sie in Supabase."""
+    try:
+      client = self.groq_client
+      if api_key:
+        client = Groq(api_key=api_key)
+
+      if not client:
+        return (
+            False,
+            f"Kein Groq Client verfügbar: {getattr(self, 'init_error', 'Unbekannter Fehler')}",
+        )
+
+      watchlist_res = self.supabase.table("watchlist").select("ticker").execute()
+      tickers = (
+          [row["ticker"] for row in watchlist_res.data]
+          if watchlist_res.data
+          else ["AAPL", "MSFT", "NVDA"]
+      )
+
+      live_market_data = []
+      for t in tickers[:10]:
+        try:
+          ticker_obj = yf.Ticker(t)
+          hist = ticker_obj.history(period="5d")
+          if not hist.empty:
+            last_close = float(hist["Close"].iloc[-1])
+            prev_close = (
+                float(hist["Close"].iloc[-2])
+                if len(hist) > 1
+                else last_close
+            )
+            change_pct = ((last_close - prev_close) / prev_close) * 100
+            live_market_data.append({
+                "ticker": t,
+                "last_close": round(last_close, 2),
+                "change_pct_5d": round(change_pct, 2),
+            })
+        except Exception:
+          continue
+
+      context_data = f"""
+            --- LIVE MARKT DATEN (yfinance) ---
+            {pd.DataFrame(live_market_data).to_string() if live_market_data else "Keine Live-Daten verfügbar"}
+            """
+
+      completion = client.chat.completions.create(
+          model="llama-3.1-8b-instant",
+          messages=[
+              {"role": "system", "content": self.peter_dna},
+              {
+                  "role": "user",
+                  "content": (
+                      "Erstelle deinen Analyse-Report basierend auf"
+                      f" folgenden Live-Daten:\n\n{context_data}"
+                  ),
+              },
+          ],
+          temperature=0.1,
+      )
+
+      report_content = completion.choices[0].message.content
+
+      try:
+        self.supabase.table("agent_reports").insert({
+            "agent_name": "Peter",
+            "report_content": report_content,
+        }).execute()
+      except Exception:
+        pass
+
+      return True, report_content
+    except Exception as e:
+      return False, f"Fehler bei Peters Analyse: {e}"
+
   def render_ui(self):
     st.subheader("🤖 Peter - Micro & Insider Analyst")
     st.markdown(
@@ -92,75 +167,15 @@ class PeterInsiderAnalyst:
       with st.spinner(
           "Peter ruft Live-Daten ab und analysiert mit Groq (Llama 3.1)..."
       ):
-        try:
-          watchlist_res = (
-              self.supabase.table("watchlist").select("ticker").execute()
-          )
-          tickers = (
-              [row["ticker"] for row in watchlist_res.data]
-              if watchlist_res.data
-              else ["AAPL", "MSFT", "NVDA"]
-          )
-
-          live_market_data = []
-          for t in tickers[:10]:
-            try:
-              ticker_obj = yf.Ticker(t)
-              hist = ticker_obj.history(period="5d")
-              if not hist.empty:
-                last_close = float(hist["Close"].iloc[-1])
-                prev_close = (
-                    float(hist["Close"].iloc[-2])
-                    if len(hist) > 1
-                    else last_close
-                )
-                change_pct = ((last_close - prev_close) / prev_close) * 100
-                live_market_data.append({
-                    "ticker": t,
-                    "last_close": round(last_close, 2),
-                    "change_pct_5d": round(change_pct, 2),
-                })
-            except Exception:
-              continue
-
-          context_data = f"""
-                --- LIVE MARKT DATEN (yfinance) ---
-                {pd.DataFrame(live_market_data).to_string() if live_market_data else "Keine Live-Daten verfügbar"}
-                """
-
-          completion = self.groq_client.chat.completions.create(
-              model="llama-3.1-8b-instant",
-              messages=[
-                  {"role": "system", "content": self.peter_dna},
-                  {
-                      "role": "user",
-                      "content": (
-                          "Erstelle deinen Analyse-Report basierend auf"
-                          f" folgenden Live-Daten:\n\n{context_data}"
-                      ),
-                  },
-              ],
-              temperature=0.1,
-          )
-
-          report_content = completion.choices[0].message.content
-
-          try:
-            self.supabase.table("agent_reports").insert({
-                "agent_name": "Peter",
-                "report_content": report_content,
-            }).execute()
-          except Exception:
-            pass
-
+        success, result = self.run_analysis()
+        if success:
           st.session_state.messages_peter.append(
-              {"role": "assistant", "content": report_content}
+              {"role": "assistant", "content": result}
           )
           st.success("Analyse erfolgreich abgeschlossen!")
           st.rerun()
-
-        except Exception as e:
-          st.error(f"⚠️ Fehler: {e}")
+        else:
+          st.error(f"⚠️ {result}")
 
     st.markdown("---")
     st.markdown("### 💬 Diskussion mit Peter")
