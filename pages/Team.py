@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import os
 from pathlib import Path
 import sys
 from groq import Groq
@@ -27,18 +28,17 @@ URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(URL, KEY)
 
-# Sicheres Laden der API-Keys (ohne dass die App direkt abstürzt)
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY") if "os" in globals() else None
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY") if "os" in globals() else None
+# Sicheres Laden der API-Keys (mit import os)
+GROQ_API_KEY = None
+GEMINI_API_KEY = None
 
-# Fallback falls st.secrets direkt zugreifen soll
 try:
-  GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", GROQ_API_KEY)
+  GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
 except Exception:
   pass
 
 try:
-  GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", GEMINI_API_KEY)
+  GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
 except Exception:
   pass
 
@@ -392,7 +392,6 @@ with tab_aris:
   if st.button("🚀 Aris Analyse & Screener-Review starten", type="primary"):
     with st.spinner("Aris analysiert Datenbanken und Code..."):
       try:
-        # ARIS LAUFT JETZT KORREKT ÜBER GROQ (Llama 3.1 8B Instant)
         groq_client = Groq(api_key=GROQ_API_KEY)
 
         signals_res = supabase.table("signals_journal").select("*").execute()
