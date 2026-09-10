@@ -152,7 +152,7 @@ class JorisPortfolioManager:
 
       # Groq API Request mit Llama 3.3 70B
       completion = groq_client.chat.completions.create(
-          model="llama-3.1-8b-instant",
+          model="openai/gpt-oss-120b",
           messages=[
               {"role": "system", "content": system_instruction},
               {"role": "user", "content": user_prompt},
@@ -244,7 +244,7 @@ class JorisPortfolioManager:
       groq_messages.append({"role": "user", "content": user_message})
 
       completion = groq_client.chat.completions.create(
-          model="llama-3.3-70b-versatile",
+          model="openai/gpt-oss-120b",
           messages=groq_messages,
           temperature=0.1,
       )

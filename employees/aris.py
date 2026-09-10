@@ -184,7 +184,7 @@ if st.button(
 
       # Groq Request mit Llama 3.3 70B (starkes Logik- & Code-Modell)
       completion = groq_client.chat.completions.create(
-          model="llama-3.1-8b-instant",
+          model="openai/gpt-oss-120b",
           messages=[
               {"role": "system", "content": ARIS_DNA},
               {
@@ -253,7 +253,7 @@ if user_query := st.chat_input(
           groq_history.append({"role": role, "content": m["content"]})
 
         completion = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-120b",
             messages=groq_history,
             temperature=0.1,
         )
