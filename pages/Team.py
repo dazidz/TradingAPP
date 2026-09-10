@@ -55,7 +55,7 @@ tab_teamroom, tab_jano, tab_peter, tab_otto, tab_nino, tab_aris = st.tabs([
 ])
 
 # ==========================================
-# TAB 1: DER TEAMROOM & JORIS (GROQ)
+# TAB 1: DER TEAMROOM & JORIS (GEMINI)
 # ==========================================
 with tab_teamroom:
   try:
@@ -95,8 +95,9 @@ with tab_teamroom:
         with st.spinner(
             f"Joris synthetisiert Berichte für '{current_depot_focus}'..."
         ):
+          # KORRIGIERT: Nutzt nun GEMINI_API_KEY für Joris
           success, msg = joris.run_synthesis(
-              depot_focus=current_depot_focus, api_key=GROQ_API_KEY
+              depot_focus=current_depot_focus, api_key=GEMINI_API_KEY
           )
           if success:
             st.success(msg)
@@ -138,11 +139,12 @@ with tab_teamroom:
 
       with st.chat_message("assistant"):
         with st.spinner("Joris prüft die Daten und antwortet..."):
+          # KORRIGIERT: Nutzt nun GEMINI_API_KEY für den Joris-Chat
           success_chat, reply_chat = joris.chat_with_joris(
               depot_focus=current_depot_focus,
               user_message=user_query_joris,
               chat_history=st.session_state[chat_session_key][:-1],
-              api_key=GROQ_API_KEY,
+              api_key=GEMINI_API_KEY,
           )
           if success_chat:
             st.markdown(reply_chat)
@@ -234,7 +236,6 @@ with tab_peter:
 
     if st.button("🔄 Peter: Fundamentaldaten & Insider analysieren"):
       with st.spinner("Peter holt Watchlist & Insider-Daten..."):
-        # HIER WURDE KORRIGIERT: GROQ_API_KEY statt GEMINI_API_KEY!
         success, msg = peter.run_analysis(api_key=GROQ_API_KEY)
         if success:
           st.success(msg)

@@ -2,7 +2,7 @@ from datetime import datetime
 import json
 import os
 import re
-from groq import Groq
+import google.generativeai as genai
 import pandas as pd
 
 
@@ -25,7 +25,7 @@ class JorisPortfolioManager:
     return mapping.get(depot_focus, "invest_depot")
 
   def run_synthesis(self, depot_focus: str, api_key: str):
-    """Führt die tägliche Portfoliosynthese durch via Groq (Llama 3.3 70B):
+    """Führt die tägliche Portfoliosynthese durch via Google Gemini:
 
     - Führt Berichte der anderen Agenten zusammen
     - Prüft das gewählte Depot (invest_depot, swing_depot, risk_depot)
@@ -35,9 +35,13 @@ class JorisPortfolioManager:
     - Gibt konkrete Empfehlungen mit direkten TradingView-Links ab.
     """
     try:
-      # Groq Client initialisieren (nutzt den übergebenen Key oder Fallback auf Environment)
-      active_key = api_key if api_key else os.getenv("GROQ_API_KEY")
-      groq_client = Groq(api_key=active_key)
+      active_key = api_key if api_key else os.getenv("GEMINI_API_KEY")
+      if not active_key:
+        return False, "Kein Gemini API-Key für Joris gefunden."
+
+      genai.configure(api_key=active_key)
+      # Nutzt das stabile, aktuelle Gemini Flash Modell
+      model = genai.GenerativeModel("gemini-3.6-flash")
 
       # 1. Berichte der anderen Agenten abrufen
       reports_res = (
@@ -101,7 +105,7 @@ class JorisPortfolioManager:
         )
 
       # System-Instruktion für Joris inklusive TradingView-Regel
-      system_instruction = f"""
+      prompt_content = f"""
             Du bist Joris, der leitende Portfolio Manager. 
             Deine Arbeitsweise folgt Ray Dalios Prinzipien: **Radical Truth & Radical Open-Mindedness**.
             Fokus-Mandat: {depot_focus.upper()} (Zugehörige Depot-Tabelle: {table_name})
@@ -114,9 +118,7 @@ class JorisPortfolioManager:
             WICHTIG - TRADINGVIEW LINKS:
             Füge bei **jeder** erwähnten Aktie oder Empfehlung (sowohl im Text als auch in Tabellen/Listen) im Markdown-Format einen direkten Link zu TradingView ein. 
             Das Format lautet exakt: `[Ticker](https://www.tradingview.com/chart/?symbol=NASDAQ:TICKER)` (bzw. die entsprechende Börse wie NYSE: oder XETR: falls bekannt, ansonsten Standard-Ticker einsetzen).
-            """
 
-      user_prompt = f"""
             DIR LIEGEN FOLGENDE DATEN VOR:
             
             A) AKTUELLER BESTAND DES GEWÄHLTEN DEPOTS ({table_name}):
@@ -150,16 +152,8 @@ class JorisPortfolioManager:
             (Ersetze AAPL/NVDA durch deine echten Top-Picks des Tages aus der Analyse, gib realistische Fließkommazahlen für target und stop_loss an. Falls keine Picks da sind, gib eine leere Liste `[]` aus).
             """
 
-      # Groq API Request mit Llama 3.3 70B
-      completion = groq_client.chat.completions.create(
-          model="openai/gpt-oss-120b",
-          messages=[
-              {"role": "system", "content": system_instruction},
-              {"role": "user", "content": user_prompt},
-          ],
-          temperature=0.1,
-      )
-      report_content = completion.choices[0].message.content
+      response = model.generate_content(prompt_content)
+      report_content = response.text
 
       # 6. In Datenbank speichern (Agenten-Bericht)
       self.supabase.table("agent_reports").insert({
@@ -196,10 +190,10 @@ class JorisPortfolioManager:
 
       return (
           True,
-          f"Synthese inklusive strukturierter Journal-Einträge für '{table_name}' erfolgreich erstellt via Groq!",
+          f"Synthese inklusive strukturierter Journal-Einträge für '{table_name}' erfolgreich erstellt via Gemini!",
       )
     except Exception as e:
-      return False, f"Fehler bei der Synthese (Groq): {e}"
+      return False, f"Fehler bei der Synthese (Gemini): {e}"
 
   def get_latest_report(self, depot_focus: str):
     """Holt den neuesten Joris-Bericht für das Depot."""
@@ -223,10 +217,14 @@ class JorisPortfolioManager:
       chat_history: list,
       api_key: str,
   ):
-    """Ermöglicht den Chat mit Joris im Teamroom über Groq."""
+    """Ermöglicht den Chat mit Joris im Teamroom über Gemini."""
     try:
-      active_key = api_key if api_key else os.getenv("GROQ_API_KEY")
-      groq_client = Groq(api_key=active_key)
+      active_key = api_key if api_key else os.getenv("GEMINI_API_KEY")
+      if not active_key:
+        return False, "Kein Gemini API-Key für den Chat verfügbar."
+
+      genai.configure(api_key=active_key)
+      model = genai.GenerativeModel("gemini-3.6-flash")
 
       system_msg = (
           f"Du bist Joris, Portfolio Manager für das Depot-Mandat '{depot_focus}'. "
@@ -236,18 +234,19 @@ class JorisPortfolioManager:
           "Füge bei genannten Aktien immer einen TradingView-Markdown-Link ein: [Ticker](https://www.tradingview.com/chart/?symbol=TICKER)."
       )
 
-      groq_messages = [{"role": "system", "content": system_msg}]
+      # Chat-Historie in das von Gemini erwartete Format konvertieren
+      gemini_history = []
       for m in chat_history:
-        role = "user" if m["role"] == "user" else "assistant"
-        groq_messages.append({"role": role, "content": m["content"]})
+        role = "user" if m["role"] == "user" else "model"
+        gemini_history.append({"role": role, "parts": [m["content"]]})
 
-      groq_messages.append({"role": "user", "content": user_message})
+      chat = model.start_chat(history=gemini_history)
 
-      completion = groq_client.chat.completions.create(
-          model="openai/gpt-oss-120b",
-          messages=groq_messages,
-          temperature=0.1,
-      )
-      return True, completion.choices[0].message.content
+      # System-Prompt voranstellen durch Kontext oder als erste Nachricht, 
+      # bei Gemini idealerweise in die Nachricht integrieren oder als Instruction
+      full_prompt = f"[{system_msg}]\n\nFrage des Nutzers: {user_message}"
+      
+      response = chat.send_message(full_prompt)
+      return True, response.text
     except Exception as e:
-      return False, f"Chat-Fehler (Groq): {e}"
+      return False, f"Chat-Fehler (Gemini): {e}"
