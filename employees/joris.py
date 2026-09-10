@@ -1,4 +1,7 @@
 from datetime import datetime
+import json
+import os
+import re
 from groq import Groq
 import pandas as pd
 
@@ -32,11 +35,11 @@ class JorisPortfolioManager:
     - Gibt konkrete Empfehlungen mit direkten TradingView-Links ab.
     """
     try:
-      # Groq Client initialisieren (nutzt den übergebenen Key oder Fallback auf Secrets/Konstante)
+      # Groq Client initialisieren (nutzt den übergebenen Key oder Fallback auf Environment)
       active_key = api_key if api_key else os.getenv("GROQ_API_KEY")
       groq_client = Groq(api_key=active_key)
 
-      # 1. Berichte der anderen Agenten abrufen (Jano, Peter, Otto, Aris etc.)
+      # 1. Berichte der anderen Agenten abrufen
       reports_res = (
           self.supabase.table("agent_reports")
           .select("*")
@@ -131,12 +134,20 @@ class JorisPortfolioManager:
             DEINE AUFGABE:
             Erstelle eine kompromisslose, datenbasierte Portfolio-Synthese für das Mandat '{depot_focus.upper()}'. Gehe dabei strikt auf folgende Punkte ein:
             1. **Zusammenfassung & Synthese:** Führe die Erkenntnisse der anderen Kollegen im Kontext des aktuellen Marktumfelds zusammen.
-            2. **Depot-Prüfung & Diversifikation:** Analysiere das aktuelle Depot ({table_name}) passend zum Mandat (Beim Swing: Sind die Positionen trendkonform? Laufen Stopps oder Momentum aus?).
-            3. **Verkaufsempfehlungen:** Benenne glasklar, welche Positionen im Depot reduziert oder komplett abgestoßen werden sollten (Loss Cutting, Trendbruch oder Gewinnmitnahme).
-            4. **Top-Empfehlungen des Tages:** Gleiche die Depot-Ziele, die Favoriten und die aktuellen Signale aus dem Screener ab und präsentiere die besten High-Conviction-Kandidaten für dieses Mandat. Nutze hierbei überall anklickbare TradingView-Links für die Ticker.
+            2. **Depot-Prüfung & Diversifikation:** Analysiere das aktuelle Depot ({table_name}) passend zum Mandat.
+            3. **Verkaufsempfehlungen:** Benenne glasklar, welche Positionen im Depot reduziert oder komplett abgestoßen werden sollten.
+            4. **Top-Empfehlungen des Tages:** Gleiche die Depot-Ziele, die Favoriten und die aktuellen Signale aus dem Screener ab und präsentiere die besten High-Conviction-Kandidaten.
             
-            ZUSATZ-FORMAT-ANFWEISUNG BEI SWING:
-            Falls der Fokus 'SWIGHT' bzw. 'SWING' ist, gib am Ende deines Reports im Text zwingend eine klare strukturierte Liste deiner Top-Swing-Kandidaten aus mit den Feldern: Ticker (als TradingView-Link), Setup-Grund (setup_reason), Kursziel (target) und Stop-Loss (stop_loss).
+            ZUSATZ-FORMAT FÜR DAS JOURNAL (WICHTIG BEI SWING):
+            Falls der Fokus 'SWING' ist, liste am Ende deines Reports zwingend einen Block im folgenden exakten JSON-Format auf:
+            
+            ===JOURNAL_DATA_START===
+            [
+              {{"ticker": "AAPL", "setup_reason": "Starker Ausbruch über Widerstand mit hohem Volumen", "target": 220.0, "stop_loss": 175.0}},
+              {{"ticker": "NVDA", "setup_reason": "Pullback an gleitenden Durchschnitt erfolgreich beendet", "target": 140.0, "stop_loss": 115.0}}
+            ]
+            ===JOURNAL_DATA_END===
+            (Ersetze AAPL/NVDA durch deine echten Top-Picks des Tages aus der Analyse, gib realistische Fließkommazahlen für target und stop_loss an. Falls keine Picks da sind, gib eine leere Liste `[]` aus).
             """
 
       # Groq API Request mit Llama 3.3 70B
@@ -150,28 +161,42 @@ class JorisPortfolioManager:
       )
       report_content = completion.choices[0].message.content
 
-      # 6. In Datenbank speichern
+      # 6. In Datenbank speichern (Agenten-Bericht)
       self.supabase.table("agent_reports").insert({
           "agent_name": f"Joris_{depot_focus}",
           "report_content": report_content,
       }).execute()
 
-      # 7. Automatisches Schreiben in die joris_journal, falls Fokus SWING ist
+      # 7. Automatisches, sauberes Schreiben in die joris_journal, falls Fokus SWING ist
       if depot_focus.lower() == "swing":
         try:
-          self.supabase.table("joris_journal").insert({
-              "ticker": "AUTO_SWING_SYNTHESIS",
-              "setup_reason": report_content[:500],  # Auszug aus dem Bericht
-              "target": 0.0,
-              "stop_loss": 0.0,
-              "status": "active",
-          }).execute()
+          match = re.search(
+              r"===JOURNAL_DATA_START===\s*(.*?)\s*===JOURNAL_DATA_END===",
+              report_content,
+              re.DOTALL,
+          )
+          if match:
+            json_str = match.group(1)
+            picks = json.loads(json_str)
+
+            for pick in picks:
+              self.supabase.table("joris_journal").insert({
+                  "ticker": pick.get("ticker", "UNKNOWN"),
+                  "setup_reason": pick.get("setup_reason", "Keine Begründung"),
+                  "target": float(pick.get("target", 0.0)),
+                  "stop_loss": float(pick.get("stop_loss", 0.0)),
+                  "status": "active",
+              }).execute()
+          else:
+            print(
+                "Konnte keinen strukturierten Journal-Block im Bericht finden."
+            )
         except Exception as watch_err:
-          print(f"Konnte Swing-Watchlist nicht automatisch befüllen: {watch_err}")
+          print(f"Konnte joris_journal nicht befüllen: {watch_err}")
 
       return (
           True,
-          f"Synthese inklusive Depot-, Screener- und Favoriten-Auswertung für '{table_name}' erfolgreich erstellt via Groq!",
+          f"Synthese inklusive strukturierter Journal-Einträge für '{table_name}' erfolgreich erstellt via Groq!",
       )
     except Exception as e:
       return False, f"Fehler bei der Synthese (Groq): {e}"
