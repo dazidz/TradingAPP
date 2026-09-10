@@ -19,27 +19,41 @@ class PeterInsiderAnalyst:
     self.init_error = None
     self.groq_client = None
 
-    # Versuche den Client vorab zu initialisieren, aber stürze nicht ab wenn nicht sofort da
-    try:
-      groq_api_key = None
+    # Versuche den API-Key auf verschiedene Arten zu finden
+    api_key = self._find_api_key()
+    if api_key:
       try:
-        groq_api_key = st.secrets.get("GROQ_API_KEY")
-      except Exception:
-        pass
-
-      if not groq_api_key:
-        groq_api_key = os.getenv("GROQ_API_KEY")
-
-      if groq_api_key:
-        self.groq_client = Groq(api_key=groq_api_key)
-    except Exception as e:
-      self.init_error = e
+        self.groq_client = Groq(api_key=api_key)
+      except Exception as e:
+        self.init_error = e
 
     self.peter_dna = """
         Du bist Peter, der Micro- & Insider-Analyst in dieser Trading-Anwendung. Deine Aufgabe ist es, Live-Daten, Marktnachrichten, Insider-Aktivitäten und Mikro-Faktoren objektiv und präzise zu analysieren. Du verzichtest auf leere Floskeln und Schönfärberei. 
         Analysiere die übergebenen Live-Daten und News-Ausschnitte. Finde Anomalien, Insider-Käufe/-Verkäufe, Sentiment-Verschiebungen und liefere konkrete, direkt umsetzbare Erkenntnisse.
         Antworte strukturiert, prägnant und auf den Punkt.
         """
+
+  def _find_api_key(self, provided_key: str = None):
+    """Sucht den API-Key in Parametern, Secrets oder Environment-Variablen."""
+    if provided_key:
+      return provided_key
+    
+    # 1. Streamlit Secrets (verschiedene Schreibweisen prüfen)
+    for key_name in ["GROQ_API_KEY", "groq_api_key", "Groq_API_Key"]:
+      try:
+        val = st.secrets.get(key_name)
+        if val:
+          return val
+      except Exception:
+        pass
+
+    # 2. Environment Variablen
+    for key_name in ["GROQ_API_KEY", "groq_api_key"]:
+      val = os.getenv(key_name)
+      if val:
+        return val
+
+    return None
 
   def get_latest_report(self):
     """Holt den neuesten Peter-Bericht aus Supabase."""
@@ -59,21 +73,11 @@ class PeterInsiderAnalyst:
   def run_analysis(self, api_key: str = None):
     """Führt die Live-Analyse für Elite-Signale aus der 'signals'-Tabelle (<= 1% Bewegung) durch."""
     try:
-      # Dynamischer Client-Fallback falls in __init__ nicht geklappt
-      client = self.groq_client
-      if api_key:
-        client = Groq(api_key=api_key)
-      elif not client:
-        # Letzter Versuch über globale Secrets/Env
-        fallback_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
-        if fallback_key:
-          client = Groq(api_key=fallback_key)
+      active_key = self._find_api_key(api_key)
+      if not active_key:
+        return False, "Kein Groq API-Key gefunden. Bitte in den Streamlit Secrets als GROQ_API_KEY hinterlegen."
 
-      if not client:
-        return (
-            False,
-            "Kein Groq API-Key gefunden. Bitte in den Streamlit Secrets hinterlegen.",
-        )
+      client = Groq(api_key=active_key)
 
       # 1. Daten direkt aus der 'signals'-Tabelle holen
       signals_res = self.supabase.table("signals").select("*").execute()
@@ -173,11 +177,9 @@ class PeterInsiderAnalyst:
         "und steht dir im Chat für Rückfragen zur Verfügung."
     )
 
-    # 1. Session State für den Peter-Chat initialisieren
     if "messages_peter" not in st.session_state:
       st.session_state.messages_peter = []
 
-    # 0. Gespeicherten Report aus Supabase laden (falls noch kein Chat da ist)
     try:
       latest_report = self.get_latest_report()
       if latest_report and not st.session_state.messages_peter:
@@ -192,7 +194,6 @@ class PeterInsiderAnalyst:
     except Exception:
       pass
 
-    # Button zum Ausführen der Hauptanalyse
     if st.button(
         "🚀 Peter Live-Analyse starten",
         type="primary",
@@ -232,16 +233,12 @@ class PeterInsiderAnalyst:
       with st.chat_message("assistant"):
         with st.spinner("Peter denkt nach..."):
           try:
-            # Client für den Chat ermitteln
-            chat_client = self.groq_client
-            if not chat_client:
-              fallback_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
-              if fallback_key:
-                chat_client = Groq(api_key=fallback_key)
-
-            if not chat_client:
+            active_key = self._find_api_key()
+            if not active_key:
               st.error("Kein Groq API-Key für den Chat verfügbar.")
               return
+
+            chat_client = Groq(api_key=active_key)
 
             groq_history = [{"role": "system", "content": self.peter_dna}]
             for m in st.session_state.messages_peter[:-1]:
