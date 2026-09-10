@@ -59,7 +59,9 @@ def get_ema_stats_bulk(tickers):
     for ticker in tickers:
       try:
         series = (
-          data[ticker].dropna() if isinstance(data, pd.DataFrame) else data.dropna()
+            data[ticker].dropna()
+            if isinstance(data, pd.DataFrame)
+            else data.dropna()
         )
         if len(series) >= 20:
           ema20 = series.ewm(span=20, adjust=False).mean().iloc[-1]
@@ -80,7 +82,7 @@ try:
   # 2. Favoriten aus der separaten Tabelle laden
   fav_response = supabase.table("favorites").select("ticker").execute()
   fav_tickers = (
-    [row["ticker"] for row in fav_response.data] if fav_response.data else []
+      [row["ticker"] for row in fav_response.data] if fav_response.data else []
   )
 
   if not df.empty:
@@ -117,6 +119,7 @@ try:
         "company_name",
         "candle_time",
         "ticker",
+        "signal_type",
     ]:
       if col not in df.columns:
         df[col] = ""
@@ -172,8 +175,7 @@ try:
             "Performance (%)",
             "candle_time",
             "sector",
-            "exchange",
-            "entry_price",
+            "signal_type",
             "gettex_ticker",
         ]
       else:
@@ -184,8 +186,7 @@ try:
             "Performance (%)",
             "candle_time",
             "sector",
-            "exchange",
-            "entry_price",
+            "signal_type",
             "gettex_ticker",
         ]
 
@@ -198,9 +199,8 @@ try:
           ),
           "candle_time": st.column_config.TextColumn("Candle Time"),
           "sector": st.column_config.TextColumn("Sektor", disabled=True),
-          "exchange": st.column_config.TextColumn("Börse", disabled=True),
-          "entry_price": st.column_config.NumberColumn(
-              "Entry", format="€%.2f"
+          "signal_type": st.column_config.TextColumn(
+              "Signal Type", disabled=True
           ),
           "gettex_ticker": st.column_config.TextColumn(
               "Gettex Ticker", disabled=True
