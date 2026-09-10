@@ -94,7 +94,13 @@ with tab_depot:
 
       for _, row in df_pos.iterrows():
         ticker = row["ticker"]
-        company_name = ticker_to_name.get(ticker, ticker)
+        # Fallback auf Watchlist/yfinance, falls das Feld in Supabase mal leer sein sollte
+        db_unternehmen = row.get("unternehmen", None)
+        if not db_unternehmen or pd.isna(db_unternehmen):
+          company_name = ticker_to_name.get(ticker, ticker)
+        else:
+          company_name = db_unternehmen
+
         shares = float(row["anzahl"])
         buy_price = float(row["buy_price"])
         curr_price = live_prices.get(ticker, buy_price)
@@ -180,7 +186,7 @@ with tab_journal:
     if journal_data:
       df_j = pd.DataFrame(journal_data)
 
-      # Watchlist für Firmennamen im Journal laden
+      # Watchlist für Fallback-Firmennamen im Journal laden
       try:
         wl_res = (
             supabase.table("watchlist").select("ticker, company_name").execute()
@@ -196,9 +202,15 @@ with tab_journal:
       except Exception:
         j_ticker_to_name = {}
 
-      df_j["Unternehmen"] = df_j["ticker"].map(
-          lambda t: j_ticker_to_name.get(t, t)
-      )
+      # Unternehmen aus der DB holen, falls leer per Map ergänzen
+      def resolve_journal_name(row):
+        val = row.get("unternehmen", None)
+        if val and pd.notna(val):
+          return val
+        t = row["ticker"]
+        return j_ticker_to_name.get(t, t)
+
+      df_j["Unternehmen"] = df_j.apply(resolve_journal_name, axis=1)
 
       # Filter für Mandate im Journal
       filter_options = ["Alle Mandate"] + list(depot_tables.keys())
@@ -330,10 +342,15 @@ with tab_new_trade:
     except Exception:
       watchlist_items = []
 
-    ticker_options = {
-        f"{item.get('company_name', 'N/A')} ({item['ticker']})": item["ticker"]
-        for item in watchlist_items
-    }
+    # Map von Anzeigetext zu Ticker & Unternehmensnamen
+    ticker_options = {}
+    for item in watchlist_items:
+      c_name = item.get("company_name", "N/A")
+      t_sym = item["ticker"]
+      ticker_options[f"{c_name} ({t_sym})"] = {
+          "ticker": t_sym,
+          "company_name": c_name,
+      }
 
     with st.form("buy_form"):
       col_b1, col_b2 = st.columns(2)
@@ -344,11 +361,13 @@ with tab_new_trade:
               "Unternehmen aus Watchlist wählen",
               options=list(ticker_options.keys()),
           )
-          b_ticker = ticker_options[selected_display]
+          b_ticker = ticker_options[selected_display]["ticker"]
+          b_company_name = ticker_options[selected_display]["company_name"]
         else:
           b_ticker = st.text_input(
               "Ticker-Symbol (z.B. AAPL, GC=F)"
           ).upper()
+          b_company_name = b_ticker
 
         b_depot = st.selectbox(
             "Ziel-Depot", list(depot_tables.keys()), key="buy_depot"
@@ -381,11 +400,22 @@ with tab_new_trade:
           try:
             b_timestamp = datetime.combine(b_date, b_time).isoformat()
             target_tbl = depot_tables[b_depot]
-
             initial_val = b_shares * b_price
 
+            # Firmenname direkt über yfinance absichern, falls nicht aus Watchlist
+            if not b_company_name or b_company_name == b_ticker:
+              try:
+                info = yf.Ticker(b_ticker).info
+                b_company_name = info.get(
+                    "longName", info.get("shortName", b_ticker)
+                )
+              except Exception:
+                b_company_name = b_ticker
+
+            # Schreiben in Supabase inklusive des Unternehmensnamens
             supabase.table(target_tbl).insert({
                 "ticker": b_ticker,
+                "unternehmen": b_company_name,
                 "datum_einstieg": b_timestamp,
                 "anzahl": b_shares,
                 "buy_price": b_price,
@@ -395,13 +425,14 @@ with tab_new_trade:
             }).execute()
 
             st.success(
-                f"Position {b_ticker} erfolgreich in `{b_depot}` eröffnet!"
+                f"Position {b_company_name} ({b_ticker}) erfolgreich in"
+                f" `{b_depot}` eröffnet!"
             )
             st.rerun()
           except Exception as e:
             st.error(f"Fehler beim Speichern: {e}")
         else:
-          st.warning("Bitte Ticker eingeben.")
+            st.warning("Bitte Ticker eingeben.")
 
   else:
     st.subheader(
@@ -420,11 +451,14 @@ with tab_new_trade:
       open_pos = res_open.data
 
       if open_pos:
-        pos_options = {
-            f"{p['ticker']} ({p['anzahl']} Anteile @ {p['buy_price']}€) [ID:"
-            f" {p['id']}]": p
-            for p in open_pos
-        }
+        pos_options = {}
+        for p in open_pos:
+          comp = p.get("unternehmen", p["ticker"])
+          label = (
+              f"{comp} ({p['ticker']}) - {p['anzahl']} Stk. @"
+              f" {p['buy_price']}€ [ID: {p['id']}]"
+          )
+          pos_options[label] = p
 
         selected_pos_label = st.selectbox(
             "Wähle die Position:", list(pos_options.keys())
@@ -475,9 +509,12 @@ with tab_new_trade:
             )
             trade_g_v = (s_price - buy_p) * s_shares_to_sell
 
-            # Hier wurden nun einstiegskurs und ausstiegskurs ergänzt:
+            # Unternehmensnamen für das Journal übernehmen
+            position_unternehmen = chosen_pos.get("unternehmen", chosen_pos["ticker"])
+
             supabase.table("trade_journal").insert({
                 "ticker": chosen_pos["ticker"],
+                "unternehmen": position_unternehmen,
                 "einstieg_datum_zeit": chosen_pos["datum_einstieg"],
                 "ausstieg_datum_zeit": s_timestamp,
                 "anzahl": s_shares_to_sell,
@@ -495,7 +532,7 @@ with tab_new_trade:
                   "id", chosen_pos["id"]
               ).execute()
               st.success(
-                  f"Position für {chosen_pos['ticker']} komplett geschlossen und"
+                  f"Position für {position_unternehmen} ({chosen_pos['ticker']}) komplett geschlossen und"
                   " ins Journal übertragen!"
               )
             else:
@@ -508,7 +545,7 @@ with tab_new_trade:
               }).eq("id", chosen_pos["id"]).execute()
               st.success(
                   f"Teilverkauf von {s_shares_to_sell} Anteilen"
-                  f" {chosen_pos['ticker']} verbucht. Rest im Depot:"
+                  f" {position_unternehmen} verbucht. Rest im Depot:"
                   f" {remaining_shares} Anteile."
               )
 

@@ -1,19 +1,26 @@
 from datetime import datetime, timedelta
 from pathlib import Path
-import google.generativeai as genai
+from groq import Groq
 import pandas as pd
 import streamlit as st
 from supabase import create_client
 import yfinance as yf
 
-# Gemini Client / API Key initialisieren
+# Groq Client / API Key initialisieren
 try:
-  api_key = st.secrets["GEMINI_API_KEY"]
-  genai.configure(api_key=api_key)
+  # Versuche den Key aus den Streamlit-Secrets oder den Umgebungsvariablen zu holen
+  groq_api_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
+
+  if not groq_api_key:
+    raise ValueError(
+        "Kein Groq API-Key gefunden. Bitte in den Streamlit Secrets oder als"
+        " Environment Variable hinterlegen."
+    )
+
+  groq_client = Groq(api_key=groq_api_key)
 except Exception as e:
   st.error(
-      "Fehler beim Laden von GEMINI_API_KEY aus den Streamlit Secrets:"
-      f" {e}"
+      "Fehler beim Initialisieren des Groq Clients:" f" {e}"
   )
 
 ARIS_DNA = """
@@ -21,8 +28,9 @@ Du bist Aris, der leitende Performance Manager in dieser Trading-Anwendung. Dein
 Analysiere die übergebenen Datenpunkte:
 1. Signals Journal (inkl. 5-Tage und 1-Monats-Meilensteine)
 2. Trading Journal (geschlossene Trades inkl. Post-Exit-Tracking)
-3. Screener-Quellcode (auf Filterfehler, Schwachstellen und verpasste Chancen prüfen)
-4. Watchlist (nach Asset-Kategorien: Invest, Swing, High Risk)
+3. Joris Journal / Swing-Watchlist (von Joris vorgeschlagene Swing-Setups auf Qualität, Setup-Grund, Ziele und Stopps prüfen)
+4. Screener-Quellcode (auf Filterfehler, Schwachstellen und verpasste Chancen prüfen)
+5. Watchlist (nach Asset-Kategorien: Invest, Swing, High Risk)
 
 Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefere konkrete, direkt umsetzbare Handlungsempfehlungen. Wenn du Code-Verbesserungen oder eiserne Regeln findest, formuliere sie klar, damit sie in die 'principles_and_insights'-Tabelle übernommen werden können.
 Antworte strukturiert, prägnant und auf den Punkt.
@@ -30,7 +38,7 @@ Antworte strukturiert, prägnant und auf den Punkt.
 
 st.subheader("🤖 Aris - Performance Manager")
 st.markdown(
-    "Dein KI-Agent analysiert das Signals-Journal, das Trading-Journal, "
+    "Dein KI-Agent analysiert das Signals-Journal, das Trading-Journal, das Joris-Journal, "
     "den Screener-Quellcode und steht dir im Chat für Rückfragen zur Verfügung."
 )
 
@@ -70,7 +78,7 @@ if st.button(
 ):
   with st.spinner(
       "Aris analysiert Datenbanken, liest Screener-Code ein und prüft"
-      " Meilensteine mit Gemini..."
+      " Meilensteine mit Groq (Llama 3.3 70B)..."
   ):
     try:
       # --- Datenabfrage ---
@@ -87,10 +95,14 @@ if st.button(
           .execute()
       )
       watchlist_res = supabase.table("watchlist").select("*").execute()
+      
+      # NEU: joris_journal abrufen
+      joris_journal_res = supabase.table("joris_journal").select("*").execute()
 
       signals_df = pd.DataFrame(signals_res.data)
       journal_df = pd.DataFrame(journal_res.data)
       watchlist_df = pd.DataFrame(watchlist_res.data)
+      joris_journal_df = pd.DataFrame(joris_journal_res.data)
 
       # Screener-Code einlesen
       screener_code_content = ""
@@ -148,13 +160,16 @@ if st.button(
         top_winners = sorted_wl.head(10).to_dict(orient="records")
         top_losers = sorted_wl.tail(10).to_dict(orient="records")
 
-      # Kontext bündeln
+      # Kontext bündeln (Inklusive joris_journal)
       context_data = f"""
             --- SIGNALS JOURNAL ---
             {signals_df.to_string() if not signals_df.empty else "Keine neuen Signale"}
 
             --- TRADING JOURNAL ---
             {journal_df.to_string() if not journal_df.empty else "Keine offenen Journal-Einträge"}
+
+            --- JORIS JOURNAL ---
+            {joris_journal_df.to_string() if not joris_journal_df.empty else "Keine Joris-Journal-Einträge"}
 
             --- POST-EXIT TRACKING ---
             {pd.DataFrame(post_exit_results).to_string() if post_exit_results else "Keine Daten"}
@@ -167,16 +182,23 @@ if st.button(
             Verlierer:\n{pd.DataFrame(top_losers).to_string() if top_losers else "Keine"}
             """
 
-      # Gemini Request mit aktuellem Gemini-3.6-Modell
-      model = genai.GenerativeModel(
-          model_name="gemini-3.6-flash", system_instruction=ARIS_DNA
-      )
-      response = model.generate_content(
-          "Erstelle deinen Analyse-Report basierend auf folgenden Daten:\n\n"
-          + context_data
+      # Groq Request mit Llama 3.3 70B (starkes Logik- & Code-Modell)
+      completion = groq_client.chat.completions.create(
+          model="llama-3.3-70b-versatile",
+          messages=[
+              {"role": "system", "content": ARIS_DNA},
+              {
+                  "role": "user",
+                  "content": (
+                      "Erstelle deinen Analyse-Report basierend auf folgenden Daten:\n\n"
+                      + context_data
+                  ),
+              },
+          ],
+          temperature=0.1,
       )
 
-      report_content = response.text
+      report_content = completion.choices[0].message.content
 
       # In Supabase speichern
       try:
@@ -225,18 +247,18 @@ if user_query := st.chat_input(
   with st.chat_message("assistant"):
     with st.spinner("Aris denkt nach..."):
       try:
-        gemini_history = []
+        groq_history = [{"role": "system", "content": ARIS_DNA}]
         for m in st.session_state.messages_aris[:-1]:
-          role = "user" if m["role"] == "user" else "model"
-          gemini_history.append({"role": role, "parts": [m["content"]]})
+          role = "user" if m["role"] == "user" else "assistant"
+          groq_history.append({"role": role, "content": m["content"]})
 
-        model = genai.GenerativeModel(
-            model_name="gemini-3.6-flash", system_instruction=ARIS_DNA
+        completion = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=groq_history,
+            temperature=0.1,
         )
-        chat_session = model.start_chat(history=gemini_history)
-        chat_response = chat_session.send_message(user_query)
 
-        answer = chat_response.text
+        answer = completion.choices[0].message.content
         st.markdown(answer)
 
         st.session_state.messages_aris.append(
