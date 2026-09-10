@@ -19,7 +19,6 @@ class PeterInsiderAnalyst:
     self.init_error = None
     self.groq_client = None
 
-    # Versuche den API-Key auf verschiedene Arten zu finden
     api_key = self._find_api_key()
     if api_key:
       try:
@@ -34,11 +33,9 @@ class PeterInsiderAnalyst:
         """
 
   def _find_api_key(self, provided_key: str = None):
-    """Sucht den API-Key in Parametern, Secrets oder Environment-Variablen."""
     if provided_key:
       return provided_key
     
-    # 1. Streamlit Secrets (verschiedene Schreibweisen prüfen)
     for key_name in ["GROQ_API_KEY", "groq_api_key", "Groq_API_Key"]:
       try:
         val = st.secrets.get(key_name)
@@ -47,7 +44,6 @@ class PeterInsiderAnalyst:
       except Exception:
         pass
 
-    # 2. Environment Variablen
     for key_name in ["GROQ_API_KEY", "groq_api_key"]:
       val = os.getenv(key_name)
       if val:
@@ -56,7 +52,6 @@ class PeterInsiderAnalyst:
     return None
 
   def get_latest_report(self):
-    """Holt den neuesten Peter-Bericht aus Supabase."""
     try:
       res = (
           self.supabase.table("agent_reports")
@@ -71,7 +66,6 @@ class PeterInsiderAnalyst:
       return None
 
   def run_analysis(self, api_key: str = None):
-    """Führt die Live-Analyse für Elite-Signale aus der 'signals'-Tabelle (<= 1% Bewegung) durch."""
     try:
       active_key = self._find_api_key(api_key)
       if not active_key:
@@ -79,7 +73,6 @@ class PeterInsiderAnalyst:
 
       client = Groq(api_key=active_key)
 
-      # 1. Daten direkt aus der 'signals'-Tabelle holen
       signals_res = self.supabase.table("signals").select("*").execute()
 
       if not signals_res.data:
@@ -90,7 +83,6 @@ class PeterInsiderAnalyst:
       if "signal_type" not in df_signals.columns or "ticker" not in df_signals.columns:
         return False, "Spalten 'signal_type' oder 'ticker' fehlen in der signals-Tabelle."
 
-      # 2. Nach "elite" im 'signal_type' filtern
       elite_df = df_signals[
           df_signals["signal_type"].str.contains("elite", case=False, na=False)
       ].copy()
@@ -98,7 +90,6 @@ class PeterInsiderAnalyst:
       if elite_df.empty:
         return False, "Keine Elite-Signale in der signals-Tabelle gefunden."
 
-      # 3. Live-Performance von candle_time bis aktuellem Kurs berechnen & filtern (<= 1%)
       filtered_market_data = []
 
       for _, row in elite_df.iterrows():
@@ -142,7 +133,7 @@ class PeterInsiderAnalyst:
           """
 
       completion = client.chat.completions.create(
-          model="llama-3.1-8b-instant",
+          model="llama-3.3-70b-versatile",
           messages=[
               {"role": "system", "content": self.peter_dna},
               {
@@ -201,7 +192,7 @@ class PeterInsiderAnalyst:
         use_container_width=True,
     ):
       with st.spinner(
-          "Peter ruft Live-Daten ab und analysiert mit Groq (Llama 3.1)..."
+          "Peter ruft Live-Daten ab und analysiert mit Groq..."
       ):
         success, result = self.run_analysis()
         if success:
@@ -246,7 +237,7 @@ class PeterInsiderAnalyst:
               groq_history.append({"role": role, "content": m["content"]})
 
             completion = chat_client.chat.completions.create(
-                model="model="llama-3.3-70b-versatile",",
+                model="llama-3.3-70b-versatile",
                 messages=groq_history,
                 temperature=0.1,
             )
