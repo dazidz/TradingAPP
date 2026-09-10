@@ -68,7 +68,7 @@ class PeterInsiderAnalyst:
             "role": "assistant",
             "content": (
                 "**Letzter gespeicherter Report ("
-                f"{latest_report['created_at'][:16]}}):**\n\n"
+                f"{latest_report['created_at'][:16]}):**\n\n"
                 + latest_report["report_content"]
             ),
         })
@@ -163,7 +163,8 @@ class PeterInsiderAnalyst:
         st.markdown(message["content"])
 
     if user_query := st.chat_input(
-        "Stelle Peter eine Frage zu Live-Daten oder News...", key="chat_input_peter"
+        "Stelle Peter eine Frage zu Live-Daten oder News...",
+        key="chat_input_peter",
     ):
       st.session_state.messages_peter.append(
           {"role": "user", "content": user_query}
