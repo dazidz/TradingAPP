@@ -51,7 +51,7 @@ class PeterInsiderAnalyst:
       return None
 
   def run_analysis(self, api_key: str = None):
-    """Führt die Live-Analyse über Groq durch und speichert sie in Supabase."""
+    """Führt die Live-Analyse für Elite-Signale aus der 'signals'-Tabelle (<= 1% Bewegung) durch."""
     try:
       client = self.groq_client
       if api_key:
@@ -63,38 +63,71 @@ class PeterInsiderAnalyst:
             f"Kein Groq Client verfügbar: {getattr(self, 'init_error', 'Unbekannter Fehler')}",
         )
 
-      watchlist_res = self.supabase.table("watchlist").select("ticker").execute()
-      tickers = (
-          [row["ticker"] for row in watchlist_res.data]
-          if watchlist_res.data
-          else ["AAPL", "MSFT", "NVDA"]
-      )
+      # 1. Daten direkt aus der 'signals'-Tabelle holen
+      signals_res = self.supabase.table("signals").select("*").execute()
 
-      live_market_data = []
-      for t in tickers[:10]:
+      if not signals_res.data:
+        return False, "Keine Einträge in der 'signals'-Tabelle gefunden."
+
+      df_signals = pd.DataFrame(signals_res.data)
+
+      if "signal_type" not in df_signals.columns or "ticker" not in df_signals.columns:
+        return False, "Spalten 'signal_type' oder 'ticker' fehlen in der signals-Tabelle."
+
+      # 2. Nach "elite" im 'signal_type' filtern
+      elite_df = df_signals[
+          df_signals["signal_type"].str.contains("elite", case=False, na=False)
+      ].copy()
+
+      if elite_df.empty:
+        return False, "Keine Elite-Signale in der signals-Tabelle gefunden."
+
+      # 3. Live-Performance von candle_time bis aktuellem Kurs berechnen & filtern (<= 1%)
+      filtered_market_data = []
+
+      for _, row in elite_df.iterrows():
+        ticker = row["ticker"]
+        candle_time = row.get("candle_time")
+
         try:
-          ticker_obj = yf.Ticker(t)
-          hist = ticker_obj.history(period="5d")
-          if not hist.empty:
-            last_close = float(hist["Close"].iloc[-1])
-            prev_close = (
-                float(hist["Close"].iloc[-2])
-                if len(hist) > 1
-                else last_close
-            )
-            change_pct = ((last_close - prev_close) / prev_close) * 100
-            live_market_data.append({
-                "ticker": t,
-                "last_close": round(last_close, 2),
-                "change_pct_5d": round(change_pct, 2),
+          ticker_obj = yf.Ticker(ticker)
+          
+          # Aktuellen Kurs holen
+          todays_data = ticker_obj.history(period="1d")
+          if todays_data.empty:
+            continue
+          current_price = float(todays_data["Close"].iloc[-1])
+
+          # Historischen Kurs zum Zeitpunkt der candle_time holen
+          entry_price = current_price
+          if candle_time:
+            hist_candle = ticker_obj.history(start=str(candle_time)[:10], period="2d")
+            if not hist_candle.empty:
+              entry_price = float(hist_candle["Close"].iloc[0])
+
+          # Performance-Berechnung von Kerzenzeit bis heute
+          perf_pct = ((current_price - entry_price) / entry_price) * 100
+
+          # Filter: Nur Konsolidierung <= 1%
+          if abs(perf_pct) <= 1.0:
+            filtered_market_data.append({
+                "ticker": ticker,
+                "signal_type": row["signal_type"],
+                "candle_time": str(candle_time),
+                "entry_price": round(entry_price, 2),
+                "current_price": round(current_price, 2),
+                "performance_pct": round(perf_pct, 2)
             })
         except Exception:
           continue
 
+      if not filtered_market_data:
+        return False, "Keine Elite-Ticker gefunden, deren aktuelle Performance bei <= 1% liegt."
+
       context_data = f"""
-            --- LIVE MARKT DATEN (yfinance) ---
-            {pd.DataFrame(live_market_data).to_string() if live_market_data else "Keine Live-Daten verfügbar"}
-            """
+          --- KONSOLIDIERENDE ELITE-TICKER (Performance <= 1% seit Signal) ---
+          {pd.DataFrame(filtered_market_data).to_string()}
+          """
 
       completion = client.chat.completions.create(
           model="llama-3.1-8b-instant",
@@ -103,8 +136,8 @@ class PeterInsiderAnalyst:
               {
                   "role": "user",
                   "content": (
-                      "Erstelle deinen Analyse-Report basierend auf"
-                      f" folgenden Live-Daten:\n\n{context_data}"
+                      "Analysiere diese konsolidierenden Elite-Ticker (Performance <= 1% seit Signal) "
+                      f"auf potenzielle Katalysatoren, News, Insider-Käufe oder 13F-Filings:\n\n{context_data}"
                   ),
               },
           ],
@@ -209,7 +242,7 @@ class PeterInsiderAnalyst:
             )
 
             answer = completion.choices[0].message.content
-            st.markdown(answer)
+            st.markdown(answer)  
 
             st.session_state.messages_peter.append(
                 {"role": "assistant", "content": answer}
