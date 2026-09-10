@@ -148,13 +148,14 @@ try:
     sector_counts_global = df.groupby("sector").size()
     sector_share_global = (sector_counts_global / total_count_global) * 100
 
-    # Tabs für die einzelnen Kategorien
+    # Tabs für die einzelnen Kategorien inklusive Gesamtliste
     (
         tab_favs,
         tab_ema20_elite,
         tab_ema20,
         tab_unter_elite,
         tab_unter_ema20,
+        tab_gesamt,
         tab_dip,
     ) = st.tabs([
         "⭐ Favoriten",
@@ -162,10 +163,11 @@ try:
         "🟢 EMA20",
         "🟡 unter EMA20+ELITE",
         "🔴 unter EMA20",
+        "📁 Gesamtliste",
         "📉 Dip-Scanner",
     ])
 
-    def show_table(df_subset, category_type="default"):
+    def show_table(df_subset, category_type="default", is_total_view=False):
       d = df_subset.copy()
       if d.empty:
         st.info("Keine Daten für diese Filtereinstellung vorhanden.")
@@ -179,6 +181,7 @@ try:
         dist = row.get("EMA20_Dist_%", 0)
         if pd.isna(dist):
           dist = 0
+        is_el = "elite" in sig
 
         if category_type == "favorites":
           return f"⭐ {row.get('company_name', '')}"
@@ -190,9 +193,8 @@ try:
           return f"🟡 {row.get('company_name', '')}"
         elif category_type == "unter_ema20":
           return f"🔴 {row.get('company_name', '')}"
-        else:
-          # Fallback (z.B. Gesamtansicht, falls gewünscht)
-          if "elite" in sig:
+        elif category_type == "gesamt":
+          if is_el:
             return (
                 f"🟣 {row.get('company_name', '')}"
                 if dist >= 0
@@ -204,21 +206,38 @@ try:
                 if dist >= 0
                 else f"🔴 {row.get('company_name', '')}"
             )
+        else:
+          return f"{row.get('company_name', '')}"
 
       d["company_name_formatted"] = d.apply(get_company_prefix, axis=1)
 
-      cols = [
-          "Action",
-          "company_name_formatted",
-          "Chart",
-          "Performance (%)",
-          "candle_time",
-          "sector",
-          "signal_type",
-          "gettex_ticker",
-      ]
+      if is_total_view:
+        d["⭐"] = d["is_favorite"].apply(lambda x: "⭐" if x else "")
+        cols = [
+            "⭐",
+            "Action",
+            "company_name_formatted",
+            "Chart",
+            "Performance (%)",
+            "candle_time",
+            "sector",
+            "signal_type",
+            "gettex_ticker",
+        ]
+      else:
+        cols = [
+            "Action",
+            "company_name_formatted",
+            "Chart",
+            "Performance (%)",
+            "candle_time",
+            "sector",
+            "signal_type",
+            "gettex_ticker",
+        ]
 
       conf = {
+          "⭐": st.column_config.TextColumn("⭐", width="small"),
           "company_name_formatted": st.column_config.TextColumn(
               "Firma", disabled=True
           ),
@@ -386,6 +405,10 @@ try:
           ],
           category_type="unter_ema20",
       )
+
+    # Tab 6: Gesamtliste
+    with tab_gesamt:
+      show_table(df, category_type="gesamt", is_total_view=True)
 
     # --- TAB: DIP-SCANNER ---
     with tab_dip:
