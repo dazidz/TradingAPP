@@ -16,17 +16,23 @@ class PeterInsiderAnalyst:
     self.description = (
         "Micro- & Insider-Analyst für Live-Daten und Markt-Anomalien."
     )
+    self.init_error = None
+    self.groq_client = None
 
-    # Groq Client / API Key initialisieren
+    # Versuche den Client vorab zu initialisieren, aber stürze nicht ab wenn nicht sofort da
     try:
-      groq_api_key = st.secrets.get("GROQ_API_KEY") or os.getenv(
-          "GROQ_API_KEY"
-      )
+      groq_api_key = None
+      try:
+        groq_api_key = st.secrets.get("GROQ_API_KEY")
+      except Exception:
+        pass
+
       if not groq_api_key:
-        raise ValueError("Kein Groq API-Key gefunden.")
-      self.groq_client = Groq(api_key=groq_api_key)
+        groq_api_key = os.getenv("GROQ_API_KEY")
+
+      if groq_api_key:
+        self.groq_client = Groq(api_key=groq_api_key)
     except Exception as e:
-      self.groq_client = None
       self.init_error = e
 
     self.peter_dna = """
@@ -53,14 +59,20 @@ class PeterInsiderAnalyst:
   def run_analysis(self, api_key: str = None):
     """Führt die Live-Analyse für Elite-Signale aus der 'signals'-Tabelle (<= 1% Bewegung) durch."""
     try:
+      # Dynamischer Client-Fallback falls in __init__ nicht geklappt
       client = self.groq_client
       if api_key:
         client = Groq(api_key=api_key)
+      elif not client:
+        # Letzter Versuch über globale Secrets/Env
+        fallback_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
+        if fallback_key:
+          client = Groq(api_key=fallback_key)
 
       if not client:
         return (
             False,
-            f"Kein Groq Client verfügbar: {getattr(self, 'init_error', 'Unbekannter Fehler')}",
+            "Kein Groq API-Key gefunden. Bitte in den Streamlit Secrets hinterlegen.",
         )
 
       # 1. Daten direkt aus der 'signals'-Tabelle holen
@@ -92,23 +104,19 @@ class PeterInsiderAnalyst:
         try:
           ticker_obj = yf.Ticker(ticker)
           
-          # Aktuellen Kurs holen
           todays_data = ticker_obj.history(period="1d")
           if todays_data.empty:
             continue
           current_price = float(todays_data["Close"].iloc[-1])
 
-          # Historischen Kurs zum Zeitpunkt der candle_time holen
           entry_price = current_price
           if candle_time:
             hist_candle = ticker_obj.history(start=str(candle_time)[:10], period="2d")
             if not hist_candle.empty:
               entry_price = float(hist_candle["Close"].iloc[0])
 
-          # Performance-Berechnung von Kerzenzeit bis heute
           perf_pct = ((current_price - entry_price) / entry_price) * 100
 
-          # Filter: Nur Konsolidierung <= 1%
           if abs(perf_pct) <= 1.0:
             filtered_market_data.append({
                 "ticker": ticker,
@@ -164,12 +172,6 @@ class PeterInsiderAnalyst:
         "Dein KI-Agent analysiert Live-Daten, News und Insider-Aktivitäten "
         "und steht dir im Chat für Rückfragen zur Verfügung."
     )
-
-    if self.groq_client is None:
-      st.error(
-          f"Fehler beim Initialisieren des Groq Clients: {getattr(self, 'init_error', 'Unbekannter Fehler')}"
-      )
-      return
 
     # 1. Session State für den Peter-Chat initialisieren
     if "messages_peter" not in st.session_state:
@@ -230,12 +232,23 @@ class PeterInsiderAnalyst:
       with st.chat_message("assistant"):
         with st.spinner("Peter denkt nach..."):
           try:
+            # Client für den Chat ermitteln
+            chat_client = self.groq_client
+            if not chat_client:
+              fallback_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
+              if fallback_key:
+                chat_client = Groq(api_key=fallback_key)
+
+            if not chat_client:
+              st.error("Kein Groq API-Key für den Chat verfügbar.")
+              return
+
             groq_history = [{"role": "system", "content": self.peter_dna}]
             for m in st.session_state.messages_peter[:-1]:
               role = "user" if m["role"] == "user" else "assistant"
               groq_history.append({"role": role, "content": m["content"]})
 
-            completion = self.groq_client.chat.completions.create(
+            completion = chat_client.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=groq_history,
                 temperature=0.1,
