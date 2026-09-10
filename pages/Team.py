@@ -407,7 +407,7 @@ with tab_aris:
             """
 
         completion = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": aris_dna},
                 {
@@ -459,7 +459,7 @@ with tab_aris:
             groq_history.append({"role": role, "content": m["content"]})
 
           completion = groq_client.chat.completions.create(
-              model="llama-3.1-8b-instant",
+              model="llama-3.3-70b-versatile",
               messages=groq_history,
               temperature=0.1,
           )
