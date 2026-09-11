@@ -77,13 +77,17 @@ def save_to_supabase(
 
 def get_ticker_list_with_names():
   try:
-    # strategy_type wird direkt mit aus der Watchlist geladen
+    # Sichere Abfrage, um den PostgREST Cache-Fehler zu umgehen
     response = (
         supabase.table("watchlist")
-        .select("ticker, company_name, sector, gettex_ticker, strategy_type")
+        .select("ticker, company_name, sector, gettex_ticker")
         .execute()
     )
-    return response.data
+    data = response.data or []
+    for row in data:
+      if "strategy_type" not in row or not row["strategy_type"]:
+        row["strategy_type"] = "Swing"
+    return data
   except Exception as e:
     print(f"❌ Fehler beim Laden der 'watchlist': {e}")
     return []
