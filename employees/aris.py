@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from pathlib import Path
+import os
 from groq import Groq
 import pandas as pd
 import streamlit as st
