@@ -14,7 +14,7 @@ class NinoSignalsAssistant:
         self.table_active_signals = "signals"
         self.table_favorites = "favorites"
         self.table_joris_journal = "joris_journal"
-        self.table_trading_journal = "trading_journal"
+        self.table_trading_journal = "trade_journal"
 
     def background_routine(self):
         """Ninos autonome Routine: Synct Signale, verarbeitet Metadaten (SMI, ADX, EMA20) 
@@ -279,14 +279,14 @@ class NinoSignalsAssistant:
             print(f"Fehler in joris_journal Auswertung: {e}")
 
     def process_post_exit_tracking(self):
-        """Prüft geschlossene Trades im trading_journal, zieht einmalig Indikatoren aus meta_data 
+        """Prüft geschlossene Trades im trade_journal, zieht einmalig Indikatoren aus meta_data 
         falls leer, und berechnet das 30-Tage-Post-Exit-Tracking.
         """
         try:
             today = datetime.now().date()
             
             res = (
-                self.supabase.table(self.table_trading_journal)
+                self.supabase.table(self.table_trade_journal)
                 .select("*")
                 .eq("status", "Geschlossen")
                 .eq("aris_status_30d", False) 
@@ -327,7 +327,7 @@ class NinoSignalsAssistant:
 
                 update_data = {}
 
-                # Einmaliges Ergänzen der Indikatoren im Trading Journal, falls leer
+                # Einmaliges Ergänzen der Indikatoren im Trade Journal, falls leer
                 if trade.get("smi") is None or trade.get("adx") is None:
                     smi_v, adx_v, ema_v = parse_meta_data(trade)
                     if smi_v is not None:
@@ -402,7 +402,7 @@ class NinoSignalsAssistant:
                         print(f"Fehler beim Post-Exit-Tracking für {ticker}: {e}")
 
                 if update_data:
-                    self.supabase.table(self.table_trading_journal).update(update_data).eq("id", trade_id).execute()
+                    self.supabase.table(self.table_trade_journal).update(update_data).eq("id", trade_id).execute()
 
         except Exception as e:
             print(f"Fehler in process_post_exit_tracking: {e}")
@@ -444,7 +444,7 @@ if __name__ == "__main__":
         print("Nino startet Hintergrund-Routinen (Signale & Joris Journal)...")
         nino.background_routine()
         
-        print("Nino startet Post-Exit-Tracking (30-Tage Tracking für Trading Journal)...")
+        print("Nino startet Post-Exit-Tracking (30-Tage Tracking für Trade Journal)...")
         nino.process_post_exit_tracking()
         
         print("Nino Routinen erfolgreich beendet.")
