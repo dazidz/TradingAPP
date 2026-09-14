@@ -1,0 +1,18 @@
+Joris Portfolio Manager
+
+Überwacht das das aktuelle Depot
+Schaut sich neue Signale an, bewertet diese und gibt Kauf- und Verkaufsempfehlungen
+Achtet auf die Diversifizierung des Depot
+Gibt eine Handlungsempfehlung nach den oben genannten Kriterien und nach den Berichten der anderen Teammitglieder
+
+Invest
+
+Hier zählen die Kennzahlen, der innere Wert, der Burggraben und der aktuelle Marktzyklus
+
+Swing
+
+Hier zählen die Indikatoren Elite Signal + EMA20 und die Sektorstärke
+
+Risk
+
+Hier sind wir komplett frei, die Aktien mit dem größten Ausbruchpotenzial nach oben

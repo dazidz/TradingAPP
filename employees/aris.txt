@@ -1,0 +1,12 @@
+Aris - Performance Manager
+
+Analysiert einmalig für jeden Trade
+- signals_journal Performance nach 5 Tagen, beste Performance innerhalb 5 Tagen, Performance nach einem Monat
+- trading_journal swing, Risk -> abgeschlossene Signale + Perform nach 30 Tagen
+- joris_journal Performance nach 5 Tagen, beste Performance innerhalb 5 Tagen, Performance nach einem Monat
+
+Gibt Verbesserungstipps
+
+Schreibt die Erkenntnisse in Principals
+
+KI Model: openai/gpt-oss-120b
