@@ -9,7 +9,6 @@ import yfinance as yf
 
 # Groq Client / API Key initialisieren
 try:
-    # Versuche den Key aus den Streamlit-Secrets oder den Umgebungsvariablen zu holen
     groq_api_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
 
     if not groq_api_key:
@@ -26,21 +25,19 @@ except Exception as e:
 
 ARIS_DNA = """
 Du bist Aris, der leitende Performance Manager in dieser Trading-Anwendung. Deine Aufgabe ist es, die Performance objektiv, datenbasiert und gnadenlos ehrlich zu analysieren. Du verzichtest auf leere Floskeln und Schönfärberei. 
-Analysiere die übergebenen Datenpunkte:
-1. Signals Journal (inkl. 5-Tage und 1-Monats-Meilensteine)
-2. Trading Journal (geschlossene Trades inkl. Post-Exit-Tracking)
-3. Joris Journal / Swing-Watchlist (von Joris vorgeschlagene Swing-Setups auf Qualität, Setup-Grund, Ziele und Stopps prüfen)
-4. Screener-Quellcode (auf Filterfehler, Schwachstellen und verpasste Chancen prüfen)
-5. Watchlist (nach Asset-Kategorien: Invest, Swing, High Risk)
+Analysiere die übergebenen Kennzahlen und Zusammenfassungen:
+1. Signals Journal (Performance nach 5/30 Tagen)
+2. Trading Journal (Geschlossene Trades & Post-Exit-Tracking)
+3. Joris Journal (Swing-Setups)
+4. Watchlist & Top/Flop Performance
 
-Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefere konkrete, direkt umsetzbare Handlungsempfehlungen. Wenn du Code-Verbesserungen oder eiserne Regeln findest, formuliere sie klar, damit sie in die 'principles_and_insights'-Tabelle übernommen werden können.
+Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefere konkrete, direkt umsetzbare Handlungsempfehlungen.
 Antworte strukturiert, prägnant und auf den Punkt.
 """
 
 st.subheader("🤖 Aris - Performance Manager")
 st.markdown(
-    "Dein KI-Agent analysiert das Signals-Journal, das Trading-Journal, das Joris-Journal, "
-    "den Screener-Quellcode und steht dir im Chat für Rückfragen zur Verfügung."
+    "Dein KI-Agent analysiert aggregierte Journal-Daten und liefert präzise Performance-Insights."
 )
 
 # 1. Session State für den Aris-Chat initialisieren
@@ -72,159 +69,120 @@ except Exception:
 
 # Button zum Ausführen der Hauptanalyse
 if st.button(
-    "🚀 Aris Analyse & Screener-Review starten",
+    "🚀 Aris Performance-Analyse starten",
     type="primary",
     key="run_aris_btn",
     use_container_width=True,
 ):
-    with st.spinner(
-        "Aris analysiert Datenbanken, liest Screener-Code ein und prüft"
-        " Meilensteine mit Groq (Llama 3.3 70B)..."
-    ):
+    with st.spinner("Aris verdichtet Daten und analysiert die Performance mit Groq..."):
         try:
-            # --- Datenabfrage ---
+            # --- Datenabfrage: Nur ungeprüfte (False), bei denen die 5-Tage-Performance bereits berechnet wurde ---
             signals_res = (
                 supabase.table("signals_journal")
-                .select("*")
+                .select("id, ticker, signal_typ, einstiegspreis_zum_signal, max_performance_5_tage, performance_30d_end_pct, aris_status_5d")
                 .eq("aris_status_5d", False)
+                .not_.is_("max_performance_5_tage", "null")
                 .execute()
             )
+            
             journal_res = (
                 supabase.table("trading_journal")
-                .select("*")
+                .select("id, ticker, ausstiegskurs, ausstieg_datum_zeit, max_performance_5_tage, performance_30d_end_pct, aris_status_5d")
                 .eq("aris_status_5d", False)
+                .not_.is_("max_performance_5_tage", "null")
                 .execute()
             )
-            watchlist_res = supabase.table("watchlist").select("*").execute()
+
+            watchlist_res = supabase.table("watchlist").select("ticker, performance, kategorie").execute()
             
-            # joris_journal abrufen
-            joris_journal_res = supabase.table("joris_journal").select("*").execute()
+            joris_journal_res = (
+                supabase.table("joris_journal")
+                .select("id, ticker, signal_typ, status, max_performance_5_tage, performance_30d_end_pct")
+                .not_.is_("max_performance_5_tage", "null")
+                .execute()
+            )
 
             signals_df = pd.DataFrame(signals_res.data)
             journal_df = pd.DataFrame(journal_res.data)
             watchlist_df = pd.DataFrame(watchlist_res.data)
             joris_journal_df = pd.DataFrame(joris_journal_res.data)
 
-            # Screener-Code einlesen
-            screener_code_content = ""
-            try:
-                screener_path = Path("screeners/main_screener.py")
-                if screener_path.exists():
-                    screener_code_content = screener_path.read_text(encoding="utf-8")
-                else:
-                    screener_files = list(Path(".").glob("**/*screener*.py"))
-                    if screener_files:
-                        screener_code_content = screener_files[0].read_text(encoding="utf-8")
-            except Exception as code_err:
-                screener_code_content = f"Konnte Screener-Code nicht laden: {code_err}"
+            # Prüfen ob überhaupt neue Daten zum Auswerten da sind
+            if signals_df.empty and journal_df.empty and joris_journal_df.empty:
+                st.info("ℹ️ Keine neuen, fertig getrackten Datensätze für Aris vorhanden (alle bereits geprüft oder noch in der Wartezeit).")
+            else:
+                # Kompakte Übergabe der echten Performance-Werte an Aris
+                sig_summary = signals_df[["ticker", "signal_typ", "max_performance_5_tage", "performance_30d_end_pct"]].to_string(index=False) if not signals_df.empty else "Keine neuen Signale zur Bewertung."
+                trade_summary = journal_df[["ticker", "max_performance_5_tage", "performance_30d_end_pct"]].to_string(index=False) if not journal_df.empty else "Keine neuen Trades zur Bewertung."
+                joris_summary = joris_journal_df[["ticker", "signal_typ", "status", "max_performance_5_tage"]].to_string(index=False) if not joris_journal_df.empty else "Keine Joris-Einträge mit Performance vorhanden."
 
-            # Post-Exit Tracking
-            post_exit_results = []
-            if not journal_df.empty and "ausstieg_datum_zeit" in journal_df.columns:
-                for _, row in journal_df.head(20).iterrows():
-                    ticker = row.get("ticker")
-                    exit_date_str = row.get("ausstieg_datum_zeit")
-                    exit_price = float(row.get("ausstiegskurs", 0))
-                    try:
-                        exit_date = pd.to_datetime(exit_date_str)
-                        end_date = exit_date + timedelta(days=30)
-                        df_post = yf.download(
-                            ticker,
-                            start=exit_date.strftime("%Y-%m-%d"),
-                            end=end_date.strftime("%Y-%m-%d"),
-                            progress=False,
-                            auto_adjust=True,
-                        )
-                        if not df_post.empty and "Close" in df_post:
-                            max_post_price = float(df_post["Close"].max())
-                            perf_after = (
-                                ((max_post_price - exit_price) / exit_price) * 100
-                                if exit_price > 0
-                                else 0
-                            )
-                            post_exit_results.append({
-                                "ticker": ticker,
-                                "ausstieg_preis": exit_price,
-                                "max_preis_30d_danach": max_post_price,
-                                "verpasste_bewegung_%": round(perf_after, 2),
-                            })
-                    except Exception:
-                        continue
+                # Watchlist Top/Flop Extremwerte filtern
+                top_winners, top_losers = [], []
+                if not watchlist_df.empty:
+                    watchlist_df["perf_titel"] = pd.to_numeric(watchlist_df.get("performance", 0), errors="coerce")
+                    sorted_wl = watchlist_df.sort_values(by="perf_titel", ascending=False)
+                    top_winners = sorted_wl.head(5)[["ticker", "perf_titel"]].to_dict(orient="records")
+                    top_losers = sorted_wl.tail(5)[["ticker", "perf_titel"]].to_dict(orient="records")
 
-            # Watchlist Extremwerte
-            top_winners, top_losers = [], []
-            if not watchlist_df.empty:
-                watchlist_df["perf_titel"] = pd.to_numeric(
-                    watchlist_df.get("performance", 0), errors="coerce"
+                context_data = f"""
+                --- SIGNALS JOURNAL (Bereits nach 5D/30D getrackt, ungeprüft durch Aris) ---
+                {sig_summary}
+
+                --- TRADING JOURNAL (Post-Exit Tracking, ungeprüft durch Aris) ---
+                {trade_summary}
+
+                --- JORIS JOURNAL (Swing-Setups mit Performance) ---
+                {joris_summary}
+
+                --- WATCHLIST TOP 5 GEWINNER ---
+                {top_winners}
+
+                --- WATCHLIST TOP 5 VERLIERER ---
+                {top_losers}
+                """
+
+                # Groq Request
+                completion = groq_client.chat.completions.create(
+                    model="openai/gpt-oss-120b",
+                    messages=[
+                        {"role": "system", "content": ARIS_DNA},
+                        {
+                            "role": "user",
+                            "content": (
+                                "Erstelle deinen kompakten Performance-Report basierend auf diesen komprimierten Kennzahlen:\n\n"
+                                + context_data
+                            ),
+                        },
+                    ],
+                    temperature=0.1,
                 )
-                sorted_wl = watchlist_df.sort_values(by="perf_titel", ascending=False)
-                top_winners = sorted_wl.head(10).to_dict(orient="records")
-                top_losers = sorted_wl.tail(10).to_dict(orient="records")
 
-            # Kontext bündeln
-            context_data = f"""
-            --- SIGNALS JOURNAL ---
-            {signals_df.to_string() if not signals_df.empty else "Keine neuen Signale"}
+                report_content = completion.choices[0].message.content
 
-            --- TRADING JOURNAL ---
-            {journal_df.to_string() if not journal_df.empty else "Keine offenen Journal-Einträge"}
+                # In Supabase speichern
+                try:
+                    supabase.table("agent_reports").insert({
+                        "agent_name": "Aris",
+                        "report_content": report_content,
+                    }).execute()
+                except Exception:
+                    pass
 
-            --- JORIS JOURNAL ---
-            {joris_journal_df.to_string() if not joris_journal_df.empty else "Keine Joris-Journal-Einträge"}
+                # Status in Supabase auf True aktualisieren (damit sie nicht doppelt geprüft werden)
+                if not signals_df.empty and "id" in signals_df.columns:
+                    supabase.table("signals_journal").update({"aris_status_5d": True}).in_(
+                        "id", signals_df["id"].tolist()
+                    ).execute()
+                if not journal_df.empty and "id" in journal_df.columns:
+                    supabase.table("trading_journal").update({"aris_status_5d": True}).in_(
+                        "id", journal_df["id"].tolist()
+                    ).execute()
 
-            --- POST-EXIT TRACKING ---
-            {pd.DataFrame(post_exit_results).to_string() if post_exit_results else "Keine Daten"}
-
-            --- SCREENER-QUELLCODE ---
-            {screener_code_content if screener_code_content else "Kein Code gefunden"}
-
-            --- WATCHLIST TOP GEWINNER / VERLIERER ---
-            Gewinner:\n{pd.DataFrame(top_winners).to_string() if top_winners else "Keine"}
-            Verlierer:\n{pd.DataFrame(top_losers).to_string() if top_losers else "Keine"}
-            """
-
-            # Groq Request
-            completion = groq_client.chat.completions.create(
-                model="openai/gpt-oss-120b",
-                messages=[
-                    {"role": "system", "content": ARIS_DNA},
-                    {
-                        "role": "user",
-                        "content": (
-                            "Erstelle deinen Analyse-Report basierend auf folgenden Daten:\n\n"
-                            + context_data
-                        ),
-                    },
-                ],
-                temperature=0.1,
-            )
-
-            report_content = completion.choices[0].message.content
-
-            # In Supabase speichern
-            try:
-                supabase.table("agent_reports").insert({
-                    "agent_name": "Aris",
-                    "report_content": report_content,
-                }).execute()
-            except Exception:
-                pass
-
-            # Status aktualisieren
-            if not signals_df.empty and "id" in signals_df.columns:
-                supabase.table("signals_journal").update({"aris_status_5d": True}).in_(
-                    "id", signals_df["id"].tolist()
-                ).execute()
-            if not journal_df.empty and "id" in journal_df.columns:
-                supabase.table("trading_journal").update({"aris_status_5d": True}).in_(
-                    "id", journal_df["id"].tolist()
-                ).execute()
-
-            st.session_state.messages_aris.append(
-                {"role": "assistant", "content": report_content}
-            )
-            st.success("Analyse erfolgreich abgeschlossen!")
-            st.rerun()
+                st.session_state.messages_aris.append(
+                    {"role": "assistant", "content": report_content}
+                )
+                st.success("Analyse erfolgreich abgeschlossen!")
+                st.rerun()
 
         except Exception as e:
             st.error(f"⚠️ Fehler: {e}")
@@ -237,7 +195,7 @@ for message in st.session_state.messages_aris:
         st.markdown(message["content"])
 
 if user_query := st.chat_input(
-    "Stelle Aris eine Frage zu den Trades oder dem Code..."
+    "Stelle Aris eine Frage zu den Trades..."
 ):
     st.session_state.messages_aris.append(
         {"role": "user", "content": user_query}
@@ -248,31 +206,25 @@ if user_query := st.chat_input(
     with st.chat_message("assistant"):
         with st.spinner("Aris denkt nach..."):
             try:
-                # Intelligentes History-Management (Verhindert Context-Length-Exceeded)
                 groq_history = [
                     {"role": "system", "content": ARIS_DNA},
                     {
                         "role": "system",
                         "content": (
                             "PROJEKT-KONTEXT & FOKUS: Du bist datenbasierter Performance Manager. "
-                            "Achte auf saubere Logik (z.B. dynamischer EMA20), striktes Risk-Management "
-                            "und optimiere fortlaufend die Trading-Performance basierend auf den Journals."
+                            "Achte auf saubere Logik, striktes Risk-Management und optimiere die Trading-Performance."
                         ),
                     },
                 ]
 
-                # Nur die letzten maximal 8 Nachrichten mitnehmen und übergroße Reports komprimieren
-                MAX_HISTORY = 8
+                # Nur die letzten maximal 6 Nachrichten mitnehmen
+                MAX_HISTORY = 6
                 recent_messages = st.session_state.messages_aris[-MAX_HISTORY:]
 
                 for m in recent_messages:
                     content = m["content"]
-                    # Falls der initial lange Report in der Historie hängt, kürzen wir ihn für den API-Call
-                    if "**Letzter gespeicherter Report" in content or len(content) > 1500:
-                        content = (
-                            "[System-Hinweis: Initialer Analyse-Report wurde durchgeführt. "
-                            "Fokus liegt auf den folgenden spezifischen Fragen und Antworten.]"
-                        )
+                    if "**Letzter gespeicherter Report" in content or len(content) > 1000:
+                        content = "[System-Hinweis: Vorheriger Report wurde komprimiert.]"
 
                     role = "user" if m["role"] == "user" else "assistant"
                     groq_history.append({"role": role, "content": content})
