@@ -163,56 +163,81 @@ class NinoSignalsAssistant:
                             auto_adjust=True,
                         )
 
-                        if not df_hist.empty:
-                            update_data = {}
-                            
-                            if base_preis <= 0 and "Close" in df_hist:
-                                first_close = df_hist["Close"].iloc[:, 0] if isinstance(df_hist["Close"], pd.DataFrame) else df_hist["Close"]
-                                base_preis = float(first_close.iloc[0])
+                        if df_hist.empty:
+                            print(f"[Warnung] yfinance lieferte leeres DataFrame für Ticker {ticker} ab {sig_date}")
+                            continue
 
-                            if len(df_hist) >= 5:
-                                df_5d = df_hist.head(5)
-                                high_5d = (df_5d["High"].iloc[:, 0] if isinstance(df_5d["High"], pd.DataFrame) else df_5d["High"]).max()
-                                close_5d = (df_5d["Close"].iloc[:, 0] if isinstance(df_5d["Close"], pd.DataFrame) else df_5d["Close"]).iloc[-1]
-                                
-                                update_data.update({
-                                    "max_kurs_5_tage": float(high_5d),
-                                    "max_performance_5_tage": round(((float(high_5d) - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
-                                    "end_kurs_5_tage": float(close_5d),
-                                    "end_performance_5_tage": round(((float(close_5d) - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
-                                    "status": "Ausgewertet (5D)",
-                                })
+                        update_data = {}
+                        
+                        # Helper um DataFrame Columns abzufangen (MultiIndex Fix)
+                        def get_col(df, col_name):
+                            if col_name not in df:
+                                return None
+                            c = df[col_name]
+                            if isinstance(c, pd.DataFrame):
+                                c = c.iloc[:, 0]
+                            return c
 
-                            if days_passed >= 30 and len(df_hist) >= 10:
-                                df_30d = df_hist.head(30)
-                                close_30d = (df_30d["Close"].iloc[:, 0] if isinstance(df_30d["Close"], pd.DataFrame) else df_30d["Close"])
-                                high_30d = (df_30d["High"].iloc[:, 0] if isinstance(df_30d["High"], pd.DataFrame) else df_30d["High"])
-                                low_30d = (df_30d["Low"].iloc[:, 0] if isinstance(df_30d["Low"], pd.DataFrame) else df_30d["Low"])
+                        close_s = get_col(df_hist, "Close")
+                        high_s = get_col(df_hist, "High")
+                        low_s = get_col(df_hist, "Low")
 
-                                end_price_30d = float(close_30d.iloc[-1])
-                                max_post_price = float(high_30d.max())
-                                min_post_price = float(low_30d.min())
+                        if close_s is None or close_s.empty:
+                            print(f"[Warnung] Spalte 'Close' fehlt oder ist leer für Ticker {ticker} am {sig_date}")
+                            continue
 
-                                update_data.update({
-                                    "end_preis_30d": round(end_price_30d, 2),
-                                    "max_preis_30d": round(max_post_price, 2),
-                                    "min_preis_30d": round(min_post_price, 2),
-                                    "max_performance_30d": round(((max_post_price - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
-                                    "min_performance_30d": round(((min_post_price - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
-                                    "performance_30d_end_pct": round(((end_price_30d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
-                                    "status": "Ausgewertet (30D komplett)",
-                                })
+                        if base_preis <= 0:
+                            base_preis = float(close_s.iloc[0])
 
-                            if update_data:
-                                self.supabase.table(self.table_journal).update(update_data).eq(
-                                    "id", sig_id
-                                ).execute()
+                        if len(df_hist) >= 1:
+                            # 5 Tage Metriken berechnen (nutze soviel da ist, max 5)
+                            df_5d = df_hist.head(5)
+                            high_5d_s = get_col(df_5d, "High")
+                            close_5d_s = get_col(df_5d, "Close")
+
+                            high_5d = float(high_5d_s.max()) if high_5d_s is not None and not high_5d_s.empty else base_preis
+                            close_5d = float(close_5d_s.iloc[-1]) if close_5d_s is not None and not close_5d_s.empty else base_preis
+
+                            update_data.update({
+                                "max_kurs_5_tage": high_5d,
+                                "max_performance_5_tage": round(((high_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
+                                "end_kurs_5_tage": close_5d,
+                                "end_performance_5_tage": round(((close_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
+                                "status": "Ausgewertet (5D)",
+                            })
+
+                        if days_passed >= 30 and len(df_hist) >= 5:
+                            df_30d = df_hist.head(30)
+                            close_30d_s = get_col(df_30d, "Close")
+                            high_30d_s = get_col(df_30d, "High")
+                            low_30d_s = get_col(df_30d, "Low")
+
+                            end_price_30d = float(close_30d_s.iloc[-1]) if close_30d_s is not None and not close_30d_s.empty else base_preis
+                            max_post_price = float(high_30d_s.max()) if high_30d_s is not None and not high_30d_s.empty else base_preis
+                            min_post_price = float(low_30d_s.min()) if low_30d_s is not None and not low_30d_s.empty else base_preis
+
+                            update_data.update({
+                                "end_preis_30d": round(end_price_30d, 2),
+                                "max_preis_30d": round(max_post_price, 2),
+                                "min_preis_30d": round(min_post_price, 2),
+                                "max_performance_30d": round(((max_post_price - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
+                                "min_performance_30d": round(((min_post_price - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
+                                "performance_30d_end_pct": round(((end_price_30d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
+                                "status": "Ausgewertet (30D komplett)",
+                                "aris_status_30d": True if days_passed >= 30 else False
+                            })
+
+                        if update_data:
+                            self.supabase.table(self.table_journal).update(update_data).eq(
+                                "id", sig_id
+                            ).execute()
+                            print(f"Erfolgreich ausgewertet (5D/30D): Signal ID {sig_id} ({ticker})")
                     except Exception as e:
                         print(f"Fehler bei Signal-ID {sig_id} ({ticker}): {e}")
         except Exception as e:
             print(f"Fehler in signals_journal Auswertung: {e}")
 
-        # 3. joris_journal auswerten (inkl. einmaligem Einlesen von SMI, ADX, EMA20 aus meta_data falls leer)
+        # 3. joris_journal auswerten
         try:
             joris_pending = (
                 self.supabase.table(self.table_joris_journal)
@@ -255,41 +280,53 @@ class NinoSignalsAssistant:
                         )
 
                         if not df_hist.empty:
-                            close_col = df_hist["Close"].iloc[:, 0] if isinstance(df_hist["Close"], pd.DataFrame) else df_hist["Close"]
-                            base_preis = float(close_col.iloc[0])
+                            def get_col(df, col_name):
+                                if col_name not in df:
+                                    return None
+                                c = df[col_name]
+                                if isinstance(c, pd.DataFrame):
+                                    c = c.iloc[:, 0]
+                                return c
 
-                            if len(df_hist) >= 5:
+                            close_s = get_col(df_hist, "Close")
+                            if close_s is not None and not close_s.empty:
+                                base_preis = float(close_s.iloc[0])
+
                                 df_5d = df_hist.head(5)
-                                high_5d = (df_5d["High"].iloc[:, 0] if isinstance(df_5d["High"], pd.DataFrame) else df_5d["High"]).max()
-                                close_5d = (df_5d["Close"].iloc[:, 0] if isinstance(df_5d["Close"], pd.DataFrame) else df_5d["Close"]).iloc[-1]
-                                
+                                high_5d_s = get_col(df_5d, "High")
+                                close_5d_s = get_col(df_5d, "Close")
+
+                                high_5d = float(high_5d_s.max()) if high_5d_s is not None and not high_5d_s.empty else base_preis
+                                close_5d = float(close_5d_s.iloc[-1]) if close_5d_s is not None and not close_5d_s.empty else base_preis
+
                                 update_data.update({
-                                    "max_kurs_5_tage": float(high_5d),
-                                    "max_performance_5_tage": round(((float(high_5d) - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
-                                    "end_kurs_5_tage": float(close_5d),
-                                    "end_performance_5_tage": round(((float(close_5d) - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
+                                    "max_kurs_5_tage": high_5d,
+                                    "max_performance_5_tage": round(((high_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
+                                    "end_kurs_5_tage": close_5d,
+                                    "end_performance_5_tage": round(((close_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
                                     "status": "Ausgewertet (5D)",
                                 })
 
-                            if days_passed >= 30 and len(df_hist) >= 10:
-                                df_30d = df_hist.head(30)
-                                close_30d = (df_30d["Close"].iloc[:, 0] if isinstance(df_30d["Close"], pd.DataFrame) else df_30d["Close"])
-                                high_30d = (df_30d["High"].iloc[:, 0] if isinstance(df_30d["High"], pd.DataFrame) else df_30d["High"])
-                                low_30d = (df_30d["Low"].iloc[:, 0] if isinstance(df_30d["Low"], pd.DataFrame) else df_30d["Low"])
+                                if days_passed >= 30:
+                                    df_30d = df_hist.head(30)
+                                    close_30d_s = get_col(df_30d, "Close")
+                                    high_30d_s = get_col(df_30d, "High")
+                                    low_30d_s = get_col(df_30d, "Low")
 
-                                end_price_30d = float(close_30d.iloc[-1])
-                                max_post_price = float(high_30d.max())
-                                min_post_price = float(low_30d.min())
+                                    end_price_30d = float(close_30d_s.iloc[-1]) if close_30d_s is not None and not close_30d_s.empty else base_preis
+                                    max_post_price = float(high_30d_s.max()) if high_30d_s is not None and not high_30d_s.empty else base_preis
+                                    min_post_price = float(low_30d_s.min()) if low_30d_s is not None and not low_30d_s.empty else base_preis
 
-                                update_data.update({
-                                    "end_preis_30d": round(end_price_30d, 2),
-                                    "max_preis_30d": round(max_post_price, 2),
-                                    "min_preis_30d": round(min_post_price, 2),
-                                    "max_performance_30d": round(((max_post_price - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
-                                    "min_performance_30d": round(((min_post_price - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
-                                    "performance_30d_end_pct": round(((end_price_30d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
-                                    "status": "Ausgewertet (30D komplett)",
-                                })
+                                    update_data.update({
+                                        "end_preis_30d": round(end_price_30d, 2),
+                                        "max_preis_30d": round(max_post_price, 2),
+                                        "min_preis_30d": round(min_post_price, 2),
+                                        "max_performance_30d": round(((max_post_price - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
+                                        "min_performance_30d": round(((min_post_price - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
+                                        "performance_30d_end_pct": round(((end_price_30d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
+                                        "status": "Ausgewertet (30D komplett)",
+                                        "aris_status_30d": True
+                                    })
                     except Exception as e:
                         print(f"Fehler bei Joris-ID {sig_id} ({ticker}): {e}")
 
@@ -370,43 +407,26 @@ class NinoSignalsAssistant:
                         )
 
                         if not df_post.empty and "Close" in df_post:
-                            df_30d = df_post.head(30)
-                            if not df_30d.empty:
-                                close_series = (
-                                    df_post["Close"].iloc[:, 0]
-                                    if isinstance(df_post["Close"], pd.DataFrame)
-                                    else df_post["Close"]
-                                )
-                                high_series = (
-                                    df_post["High"].iloc[:, 0]
-                                    if isinstance(df_post["High"], pd.DataFrame)
-                                    else df_post["High"]
-                                )
-                                min_series = (
-                                    df_post["Low"].iloc[:, 0]
-                                    if isinstance(df_post["Low"], pd.DataFrame)
-                                    else df_post["Low"]
-                                )
+                            def get_col(df, col_name):
+                                if col_name not in df:
+                                    return None
+                                c = df[col_name]
+                                if isinstance(c, pd.DataFrame):
+                                    c = c.iloc[:, 0]
+                                return c
 
+                            close_series = get_col(df_post, "Close")
+                            high_series = get_col(df_post, "High")
+                            min_series = get_col(df_post, "Low")
+
+                            if close_series is not None and not close_series.empty:
                                 end_price_30d = float(close_series.iloc[-1])
-                                max_post_price = float(high_series.max())
-                                min_post_price = float(min_series.min())
+                                max_post_price = float(high_series.max()) if high_series is not None and not high_series.empty else exit_price
+                                min_post_price = float(min_series.min()) if min_series is not None and not min_series.empty else exit_price
 
-                                perf_after_end = (
-                                    ((end_price_30d - exit_price) / exit_price) * 100
-                                    if exit_price > 0
-                                    else 0
-                                )
-                                perf_after_max = (
-                                    ((max_post_price - exit_price) / exit_price) * 100
-                                    if exit_price > 0
-                                    else 0
-                                )
-                                drawdown_after = (
-                                    ((min_post_price - exit_price) / exit_price) * 100
-                                    if exit_price > 0
-                                    else 0
-                                )
+                                perf_after_end = ((end_price_30d - exit_price) / exit_price) * 100 if exit_price > 0 else 0
+                                perf_after_max = ((max_post_price - exit_price) / exit_price) * 100 if exit_price > 0 else 0
+                                drawdown_after = ((min_post_price - exit_price) / exit_price) * 100 if exit_price > 0 else 0
 
                                 update_data.update({
                                     "end_preis_30d": round(end_price_30d, 2),
@@ -414,7 +434,8 @@ class NinoSignalsAssistant:
                                     "min_preis_30d": round(min_post_price, 2),
                                     "verpasste_aufwärtsbewegung_pct": round(perf_after_max, 2),
                                     "maximaler_drawdown_danach_pct": round(drawdown_after, 2),
-                                    "performance_30d_end_pct": round(perf_after_end, 2)
+                                    "performance_30d_end_pct": round(perf_after_end, 2),
+                                    "aris_status_30d": True
                                 })
                     except Exception as e:
                         print(f"Fehler beim Post-Exit-Tracking für {ticker}: {e}")
