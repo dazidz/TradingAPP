@@ -9,7 +9,7 @@ from db import get_db_client
 
 class NinoSignalsAssistant:
 
-    def __init__(self, supabase_client: Client):
+    def __init__(self, supabase_client):
         self.supabase = supabase_client
         self.table_journal = "signals_journal"
         self.table_active_signals = "signals"
