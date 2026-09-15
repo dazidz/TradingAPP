@@ -1,10 +1,10 @@
+from supabase import Client
 import os
 import json
 from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
 from db import get_db_client
-from supabase import Client
 
 
 class NinoSignalsAssistant:
