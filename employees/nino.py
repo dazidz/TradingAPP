@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
-from supabase import Client, create_client
+from db import get_db_client
 
 
 class NinoSignalsAssistant:
@@ -450,19 +450,13 @@ class NinoSignalsAssistant:
 
 
 if __name__ == "__main__":
-    url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_KEY")
+    supabase_client = get_db_client()
+    nino = NinoSignalsAssistant(supabase_client)
 
-    if url and key:
-        supabase_client = create_client(url, key)
-        nino = NinoSignalsAssistant(supabase_client)
-        
-        print("Nino startet Hintergrund-Routinen (Signale & Joris Journal)...")
-        nino.background_routine()
-        
-        print("Nino startet Post-Exit-Tracking (30-Tage Tracking für Trade Journal)...")
-        nino.process_post_exit_tracking()
-        
-        print("Nino Routinen erfolgreich beendet.")
-    else:
-        print("Fehler: SUPABASE_URL oder SUPABASE_KEY Umgebungsvariablen fehlen.")
+    print("Nino startet Hintergrund-Routinen (Signale & Joris Journal)...")
+    nino.background_routine()
+
+    print("Nino startet Post-Exit-Tracking (30-Tage Tracking für Trade Journal)...")
+    nino.process_post_exit_tracking()
+
+    print("Nino Routinen erfolgreich beendet.")
