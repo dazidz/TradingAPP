@@ -17,6 +17,19 @@ class NinoSignalsAssistant:
         self.table_joris_journal = "joris_journal"
         self.table_trade_journal = "trade_journal"
 
+    def is_valid_ticker(self, ticker):
+        """Prüft, ob ein Ticker ein gültiges Börsensymbol ist und keine Platzhalter/Systemnamen."""
+        if not ticker or not isinstance(ticker, str):
+            return False
+        t_upper = ticker.strip().upper()
+        # Ungültige Keywords oder Platzhalter ausschließen
+        invalid_keywords = ["SYNTHESIS", "AUTO_SWING", "PLACEHOLDER", "TEST"]
+        if any(kw in t_upper for kw in invalid_keywords):
+            return False
+        if len(t_upper) > 15 or " " in t_upper:
+            return False
+        return True
+
     def background_routine(self):
         """Ninos autonome Routine: Synct Signale, verarbeitet Metadaten und berechnet 5D/30D für signals_journal & joris_journal."""
         # 0. Favoriten laden
@@ -75,7 +88,7 @@ class NinoSignalsAssistant:
                 if not sig:
                     continue
                 ticker = sig.get("ticker")
-                if not ticker:
+                if not ticker or not self.is_valid_ticker(ticker):
                     continue
 
                 ticker_upper = ticker.upper()
@@ -135,7 +148,12 @@ class NinoSignalsAssistant:
                     sig_id = sig.get("id")
                     ticker = sig.get("ticker")
                     sig_datum_raw = sig.get("signal_datum") or sig.get("created_at")
+                    
                     if not sig_id or not ticker or not sig_datum_raw:
+                        continue
+                    
+                    if not self.is_valid_ticker(ticker):
+                        print(f"Überspringe ungültigen Ticker in Journal: {ticker}")
                         continue
 
                     update_data = {}
@@ -277,6 +295,10 @@ class NinoSignalsAssistant:
                 exit_price = float(trade.get("ausstiegskurs") or trade.get("exit_price", 0))
 
                 if not trade_id or not ticker or not exit_date_str:
+                    continue
+                
+                if not self.is_valid_ticker(ticker):
+                    print(f"Überspringe ungültigen Ticker in Trade Journal: {ticker}")
                     continue
 
                 update_data = {}
