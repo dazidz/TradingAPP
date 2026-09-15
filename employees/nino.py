@@ -3,7 +3,11 @@ import json
 from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
-from supabase import Client
+from supabase import Client, create_client
+from dotenv import load_dotenv
+
+# Lädt lokale .env-Datei, falls vorhanden (für Tests im Terminal)
+load_dotenv()
 
 
 class NinoSignalsAssistant:
@@ -14,7 +18,7 @@ class NinoSignalsAssistant:
         self.table_active_signals = "signals"
         self.table_favorites = "favorites"
         self.table_joris_journal = "joris_journal"
-        self.table_trading_journal = "trade_journal"
+        self.table_trade_journal = "trade_journal"
 
     def background_routine(self):
         """Ninos autonome Routine: Synct Signale, verarbeitet Metadaten (SMI, ADX, EMA20) 
@@ -55,10 +59,11 @@ class NinoSignalsAssistant:
                 above_ema,
             )
 
-        # 1. Neue Signale in signals_journal synchronisieren
+        # 1. Neue Signale in signals_journal synchronisieren (mit robustem Einzelsatz-Catch)
         try:
             active_res = self.supabase.table(self.table_active_signals).select("*").execute()
             active_signals = active_res.data or []
+            print(f"Nino hat {len(active_signals)} aktive Signale in '{self.table_active_signals}' gefunden.")
 
             journal_res = (
                 self.supabase.table(self.table_journal)
@@ -67,12 +72,15 @@ class NinoSignalsAssistant:
             )
             journal_data = journal_res.data or []
             existing_set = {
-                (j["ticker"], str(j["signal_datum"])[:10])
+                (str(j["ticker"]).upper(), str(j["signal_datum"])[:10])
                 for j in journal_data
-                if j.get("signal_datum")
+                if j and j.get("ticker") and j.get("signal_datum")
             }
 
+            new_count = 0
             for sig in active_signals:
+                if not sig:
+                    continue
                 ticker = sig.get("ticker")
                 if not ticker:
                     continue
@@ -82,29 +90,46 @@ class NinoSignalsAssistant:
                     sig.get("datum")
                     or sig.get("signal_datum")
                     or sig.get("candle_time")
+                    or sig.get("created_at")
                 )
-                sig_type = sig.get("signal_type") or sig.get("signal_typ", "Standard")
-                sig_price = float(sig.get("entry_price") or sig.get("preis", 0))
-
+                
                 if not sig_date_str:
+                    print(f"Überspringe {ticker_upper}: Kein Datum gefunden im Signal.")
                     continue
-                sig_date_iso = pd.to_datetime(sig_date_str).strftime("%Y-%m-%d")
+
+                try:
+                    sig_date_iso = pd.to_datetime(sig_date_str).strftime("%Y-%m-%d")
+                except Exception as date_err:
+                    print(f"Fehler beim Parsen des Datums '{sig_date_str}' für {ticker_upper}: {date_err}")
+                    continue
+
+                sig_type = sig.get("signal_type") or sig.get("signal_typ", "Standard")
+                sig_price = float(sig.get("entry_price") or sig.get("preis") or sig.get("kurs") or 0)
 
                 if (ticker_upper, sig_date_iso) not in existing_set:
                     smi_val, adx_val, above_ema = parse_meta_data(sig)
                     is_fav = ticker_upper in favorite_tickers
 
-                    self.supabase.table(self.table_journal).insert({
-                        "ticker": ticker_upper,
-                        "signal_datum": pd.to_datetime(sig_date_str).isoformat(),
-                        "signal_typ": sig_type,
-                        "einstiegspreis_zum_signal": sig_price,
-                        "smi": smi_val,
-                        "adx": adx_val,
-                        "is_favorite": is_fav,
-                        "above_ema20": above_ema,
-                        "status": "Offen (warte auf 5D)",
-                    }).execute()
+                    try:
+                        self.supabase.table(self.table_journal).insert({
+                            "ticker": ticker_upper,
+                            "signal_datum": pd.to_datetime(sig_date_str).isoformat(),
+                            "signal_typ": sig_type,
+                            "einstiegspreis_zum_signal": sig_price,
+                            "smi": smi_val,
+                            "adx": adx_val,
+                            "is_favorite": is_fav,
+                            "above_ema20": above_ema,
+                            "status": "Offen (warte auf 5D)",
+                        }).execute()
+                        
+                        existing_set.add((ticker_upper, sig_date_iso))
+                        new_count += 1
+                        print(f"Neues Signal erfolgreich synchronisiert: {ticker_upper} vom {sig_date_iso}")
+                    except Exception as insert_err:
+                        print(f"Fehler beim Insert ins Journal für {ticker_upper}: {insert_err}")
+                        
+            print(f"Synchronisation beendet. {new_count} neue Signale hinzugefügt.")
         except Exception as e:
             print(f"Fehler beim Synchronisieren der Signale: {e}")
 
@@ -210,7 +235,6 @@ class NinoSignalsAssistant:
 
                 update_data = {}
 
-                # Einmaliges Ergänzen der Indikatoren, falls im Joris-Journal noch nicht hinterlegt
                 if sig.get("smi") is None or sig.get("adx") is None:
                     smi_v, adx_v, ema_v = parse_meta_data(sig)
                     if smi_v is not None:
@@ -269,7 +293,6 @@ class NinoSignalsAssistant:
                                     "performance_30d_end_pct": round(((end_price_30d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
                                     "status": "Ausgewertet (30D komplett)",
                                 })
-
                     except Exception as e:
                         print(f"Fehler bei Joris-ID {sig_id} ({ticker}): {e}")
 
@@ -327,7 +350,6 @@ class NinoSignalsAssistant:
 
                 update_data = {}
 
-                # Einmaliges Ergänzen der Indikatoren im Trade Journal, falls leer
                 if trade.get("smi") is None or trade.get("adx") is None:
                     smi_v, adx_v, ema_v = parse_meta_data(trade)
                     if smi_v is not None:
@@ -397,7 +419,6 @@ class NinoSignalsAssistant:
                                     "maximaler_drawdown_danach_pct": round(drawdown_after, 2),
                                     "performance_30d_end_pct": round(perf_after_end, 2)
                                 })
-
                     except Exception as e:
                         print(f"Fehler beim Post-Exit-Tracking für {ticker}: {e}")
 
@@ -437,7 +458,6 @@ if __name__ == "__main__":
     key = os.getenv("SUPABASE_KEY")
 
     if url and key:
-        from supabase import create_client
         supabase_client = create_client(url, key)
         nino = NinoSignalsAssistant(supabase_client)
         
