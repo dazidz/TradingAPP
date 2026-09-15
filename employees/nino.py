@@ -5,13 +5,6 @@ import pandas as pd
 import yfinance as yf
 from supabase import Client, create_client
 
-# Lokales Laden der .env-Datei versuchen (optional für lokale Terminals)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
-
 
 class NinoSignalsAssistant:
 
