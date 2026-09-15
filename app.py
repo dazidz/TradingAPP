@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 from supabase import create_client
 import pandas as pd
@@ -17,6 +18,19 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
+
+def _get_supabase_client():
+    url, key = None, None
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+    except Exception:
+        pass
+    if not url:
+        url = os.environ.get("SUPABASE_URL")
+    if not key:
+        key = os.environ.get("SUPABASE_KEY")
+    return create_client(url, key)
 
 def check_password():
     if "password_correct" not in st.session_state:
@@ -101,9 +115,7 @@ def get_index_performance():
 @st.cache_data(ttl=60)
 def get_sector_performance():
     try:
-        url = st.secrets["SUPABASE_URL"]
-        key = st.secrets["SUPABASE_KEY"]
-        sup_client = create_client(url, key)
+        sup_client = _get_supabase_client()
         
         response = sup_client.table("watchlist").select("ticker, sector").execute()
         df = pd.DataFrame(response.data)
@@ -144,9 +156,7 @@ def get_sector_performance():
 @st.cache_data(ttl=60)
 def get_watchlist_performance():
     try:
-        url = st.secrets["SUPABASE_URL"]
-        key = st.secrets["SUPABASE_KEY"]
-        sup_client = create_client(url, key)
+        sup_client = _get_supabase_client()
         
         response = sup_client.table("watchlist").select("ticker, company_name, gettex_ticker, sector").execute()
         df = pd.DataFrame(response.data)
