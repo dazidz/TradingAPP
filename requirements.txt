@@ -7,4 +7,3 @@ supabase
 pytz
 plotly
 streamlit
-python-dotenv
