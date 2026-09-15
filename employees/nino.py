@@ -4,10 +4,13 @@ from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
 from supabase import Client, create_client
-from dotenv import load_dotenv
 
-# Lädt lokale .env-Datei, falls vorhanden (für Tests im Terminal)
-load_dotenv()
+# Lokales Laden der .env-Datei versuchen (optional für lokale Terminals)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 
 class NinoSignalsAssistant:
