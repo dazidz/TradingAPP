@@ -1,0 +1,11 @@
+Nino Data Engineer
+
+Holt Daten nach 5 Tagen aus signals Tabelle und berechnet 5 Tage End Performance und max Performance innerhalb 5 Tage und schreibt dies in die Tabelle signals_journal und schreibt dies in aris_arbeitsspeicher
+
+Berechnet in signals_journal nach 30 Tagen die max Performance innerhalb und die End Performance
+
+Holt nach 5 Tagen die Signale aus joris_journal Tabelle und überträgt diese in aris_arbeitsspeicher
+
+Berechnet in joris_journal nach 30 Tagen die max Performance innerhalb und die End Performance
+
+Berechnet in trade_journal nach 30 Tagen die max Performance innerhalb und die End Performance

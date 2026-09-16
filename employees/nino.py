@@ -22,6 +22,7 @@ class NinoSignalsAssistant:
         if not ticker or not isinstance(ticker, str):
             return False
         t_upper = ticker.strip().upper()
+        # Ungültige Keywords oder Platzhalter ausschließen
         invalid_keywords = ["SYNTHESIS", "AUTO_SWING", "PLACEHOLDER", "TEST"]
         if any(kw in t_upper for kw in invalid_keywords):
             return False
@@ -30,7 +31,7 @@ class NinoSignalsAssistant:
         return True
 
     def background_routine(self):
-        """Ninos autonome Routine: Synct Signale, berechnet 5D direkt beim Insert und managed 30D für das Journal."""
+        """Ninos autonome Routine: Synct Signale, verarbeitet Metadaten und berechnet 5D/30D für signals_journal & joris_journal."""
         # 0. Favoriten laden
         favorite_tickers = set()
         try:
@@ -66,54 +67,7 @@ class NinoSignalsAssistant:
                 above_ema,
             )
 
-        # Hilfsfunktion zum Abrufen und direkten Berechnen der 5-Tage-Performance ab Startdatum
-        def fetch_and_calculate_5d(ticker, sig_date_obj, base_preis):
-            results = {}
-            try:
-                end_date_fetch = sig_date_obj + timedelta(days=45)
-                df_hist = yf.download(
-                    ticker,
-                    start=sig_date_obj.strftime("%Y-%m-%d"),
-                    end=end_date_fetch.strftime("%Y-%m-%d"),
-                    progress=False,
-                    auto_adjust=True,
-                )
-
-                if df_hist.empty:
-                    return results
-
-                def get_col(df, col_name):
-                    if col_name not in df:
-                        return None
-                    c = df[col_name]
-                    if isinstance(c, pd.DataFrame):
-                        c = c.iloc[:, 0]
-                    return c
-
-                close_s = get_col(df_hist, "Close")
-                if close_s is not None and not close_s.empty:
-                    if base_preis <= 0:
-                        base_preis = float(close_s.iloc[0])
-
-                df_5d = df_hist.head(5)
-                high_5d_s = get_col(df_5d, "High")
-                close_5d_s = get_col(df_5d, "Close")
-
-                high_5d = float(high_5d_s.max()) if high_5d_s is not None and not high_5d_s.empty else base_preis
-                close_5d = float(close_5d_s.iloc[-1]) if close_5d_s is not None and not close_5d_s.empty else base_preis
-
-                results.update({
-                    "max_kurs_5_tage": high_5d,
-                    "max_performance_5_tage": round(((high_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
-                    "end_kurs_5_tage": close_5d,
-                    "end_performance_5_tage": round(((close_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
-                    "status": "Ausgewertet (5D)",
-                })
-            except Exception as ex:
-                print(f"Fehler bei 5D-Berechnung für {ticker}: {ex}")
-            return results
-
-        # 1. Neue Signale in signals_journal synchronisieren & 5D direkt berechnen
+        # 1. Neue Signale in signals_journal synchronisieren
         try:
             active_res = self.supabase.table(self.table_active_signals).select("*").execute()
             active_signals = active_res.data or []
@@ -148,8 +102,7 @@ class NinoSignalsAssistant:
                     continue
 
                 try:
-                    sig_dt = pd.to_datetime(sig_date_str)
-                    sig_date_iso = sig_dt.strftime("%Y-%m-%d")
+                    sig_date_iso = pd.to_datetime(sig_date_str).strftime("%Y-%m-%d")
                 except Exception:
                     continue
 
@@ -160,34 +113,25 @@ class NinoSignalsAssistant:
                     smi_val, adx_val, above_ema = parse_meta_data(sig)
                     is_fav = ticker_upper in favorite_tickers
 
-                    # 5D-Metriken direkt beim Insert berechnen
-                    insert_payload = {
-                        "ticker": ticker_upper,
-                        "signal_datum": sig_dt.isoformat(),
-                        "signal_typ": sig_type,
-                        "einstiegspreis_zum_signal": sig_price,
-                        "smi": smi_val,
-                        "adx": adx_val,
-                        "is_favorite": is_fav,
-                        "above_ema20": above_ema,
-                        "status": "Offen (warte auf 5D)",
-                    }
-
-                    calc_5d = fetch_and_calculate_5d(ticker_upper, sig_dt.date(), sig_price)
-                    if calc_5d:
-                        insert_payload.update(calc_5d)
-                        if sig_price <= 0 and "end_kurs_5_tage" in calc_5d:
-                            pass
-
                     try:
-                        self.supabase.table(self.table_journal).insert(insert_payload).execute()
+                        self.supabase.table(self.table_journal).insert({
+                            "ticker": ticker_upper,
+                            "signal_datum": pd.to_datetime(sig_date_str).isoformat(),
+                            "signal_typ": sig_type,
+                            "einstiegspreis_zum_signal": sig_price,
+                            "smi": smi_val,
+                            "adx": adx_val,
+                            "is_favorite": is_fav,
+                            "above_ema20": above_ema,
+                            "status": "Offen (warte auf 5D)",
+                        }).execute()
                         existing_set.add((ticker_upper, sig_date_iso))
                     except Exception as insert_err:
                         print(f"Fehler beim Insert ins Journal für {ticker_upper}: {insert_err}")
         except Exception as e:
             print(f"Fehler beim Synchronisieren der Signale: {e}")
 
-        # 2. signals_journal auswerten (nur noch für 30 Tage, da 5D jetzt direkt beim Insert passiert)
+        # 2. signals_journal auswerten (5 Tage & 30 Tage)
         try:
             pending_res = (
                 self.supabase.table(self.table_journal)
@@ -225,13 +169,7 @@ class NinoSignalsAssistant:
                     days_passed = (today - sig_date).days
                     base_preis = float(sig.get("einstiegspreis_zum_signal") or sig.get("preis") or sig.get("kurs") or 0)
 
-                    # Falls 5D-Daten beim Insert fehlen sollten (z.B. bei Altlasten), hier direkt nachziehen
-                    if sig.get("max_kurs_5_tage") is None and days_passed >= 5:
-                        calc_5d = fetch_and_calculate_5d(ticker, sig_date, base_preis)
-                        if calc_5d:
-                            update_data.update(calc_5d)
-
-                    if days_passed >= 30:
+                    if days_passed >= 5:
                         try:
                             end_date_fetch = sig_date + timedelta(days=45)
                             df_hist = yf.download(
@@ -252,30 +190,50 @@ class NinoSignalsAssistant:
                                     return c
 
                                 close_s = get_col(df_hist, "Close")
-                                if close_s is not None and not close_s.empty and base_preis <= 0:
-                                    base_preis = float(close_s.iloc[0])
+                                high_s = get_col(df_hist, "High")
+                                low_s = get_col(df_hist, "Low")
 
-                                df_30d = df_hist.head(30)
-                                close_30d_s = get_col(df_30d, "Close")
-                                high_30d_s = get_col(df_30d, "High")
-                                low_30d_s = get_col(df_30d, "Low")
+                                if close_s is not None and not close_s.empty:
+                                    if base_preis <= 0:
+                                        base_preis = float(close_s.iloc[0])
 
-                                end_price_30d = float(close_30d_s.iloc[-1]) if close_30d_s is not None and not close_30d_s.empty else base_preis
-                                max_post_price = float(high_30d_s.max()) if high_30d_s is not None and not high_30d_s.empty else base_preis
-                                min_post_price = float(low_30d_s.min()) if low_30d_s is not None and not low_30d_s.empty else base_preis
+                                    df_5d = df_hist.head(5)
+                                    high_5d_s = get_col(df_5d, "High")
+                                    close_5d_s = get_col(df_5d, "Close")
 
-                                update_data.update({
-                                    "end_preis_30d": round(end_price_30d, 2),
-                                    "max_preis_30d": round(max_post_price, 2),
-                                    "min_preis_30d": round(min_post_price, 2),
-                                    "max_performance_30d": round(((max_post_price - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
-                                    "min_performance_30d": round(((min_post_price - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
-                                    "performance_30d_end_pct": round(((end_price_30d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
-                                    "status": "Ausgewertet (30D komplett)",
-                                    "aris_status_30d": True
-                                })
+                                    high_5d = float(high_5d_s.max()) if high_5d_s is not None and not high_5d_s.empty else base_preis
+                                    close_5d = float(close_5d_s.iloc[-1]) if close_5d_s is not None and not close_5d_s.empty else base_preis
+
+                                    update_data.update({
+                                        "max_kurs_5_tage": high_5d,
+                                        "max_performance_5_tage": round(((high_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
+                                        "end_kurs_5_tage": close_5d,
+                                        "end_performance_5_tage": round(((close_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
+                                        "status": "Ausgewertet (5D)",
+                                    })
+
+                                    if days_passed >= 30:
+                                        df_30d = df_hist.head(30)
+                                        close_30d_s = get_col(df_30d, "Close")
+                                        high_30d_s = get_col(df_30d, "High")
+                                        low_30d_s = get_col(df_30d, "Low")
+
+                                        end_price_30d = float(close_30d_s.iloc[-1]) if close_30d_s is not None and not close_30d_s.empty else base_preis
+                                        max_post_price = float(high_30d_s.max()) if high_30d_s is not None and not high_30d_s.empty else base_preis
+                                        min_post_price = float(low_30d_s.min()) if low_30d_s is not None and not low_30d_s.empty else base_preis
+
+                                        update_data.update({
+                                            "end_preis_30d": round(end_price_30d, 2),
+                                            "max_preis_30d": round(max_post_price, 2),
+                                            "min_preis_30d": round(min_post_price, 2),
+                                            "max_performance_30d": round(((max_post_price - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
+                                            "min_performance_30d": round(((min_post_price - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
+                                            "performance_30d_end_pct": round(((end_price_30d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0,
+                                            "status": "Ausgewertet (30D komplett)",
+                                            "aris_status_30d": True
+                                        })
                         except Exception as ex:
-                            print(f"Fehler bei 30D-Auswertung für {ticker}: {ex}")
+                            print(f"Fehler bei Auswertung für {ticker}: {ex}")
 
                     if update_data:
                         self.supabase.table(table_name).update(update_data).eq("id", sig_id).execute()
