@@ -45,13 +45,14 @@ except Exception:
 st.title("🏢 VisionDZ - Team & Kommandozentrale")
 
 # --- DIE TABS DEFINIEREN ---
-tab_teamroom, tab_jano, tab_peter, tab_otto, tab_nino, tab_aris = st.tabs([
+tab_teamroom, tab_jano, tab_peter, tab_otto, tab_nino, tab_aris, tab_leopold = st.tabs([
     "💬 Teamroom & Joris",
     "🌍 Jano (Macro)",
     "🕵️ Peter (Micro/Insider)",
     "📊 Otto (History)",
     "⚡ Nino (Signals)",
     "🤖 Aris (Performance)",
+    "⚙️ Leopold (Arbeitsspeicher)",
 ])
 
 # ==========================================
@@ -95,7 +96,6 @@ with tab_teamroom:
         with st.spinner(
             f"Joris synthetisiert Berichte für '{current_depot_focus}'..."
         ):
-          # KORRIGIERT: Nutzt nun GEMINI_API_KEY für Joris
           success, msg = joris.run_synthesis(
               depot_focus=current_depot_focus, api_key=GEMINI_API_KEY
           )
@@ -139,7 +139,6 @@ with tab_teamroom:
 
       with st.chat_message("assistant"):
         with st.spinner("Joris prüft die Daten und antwortet..."):
-          # KORRIGIERT: Nutzt nun GEMINI_API_KEY für den Joris-Chat
           success_chat, reply_chat = joris.chat_with_joris(
               depot_focus=current_depot_focus,
               user_message=user_query_joris,
@@ -472,3 +471,44 @@ with tab_aris:
           )
         except Exception as chat_err:
           st.error(f"Fehler im Chat: {chat_err}")
+
+# ==========================================
+# TAB 7: LEOPOLD (ARBEITSSPEICHER & TRANSFER)
+# ==========================================
+with tab_leopold:
+  try:
+    from employees.leopold import LeopoldAssistant
+
+    leopold = LeopoldAssistant(supabase)
+
+    st.subheader("⚙️ Leopold - Aris Arbeitsspeicher & Transfer-Agent")
+    st.markdown(
+        "Leopold arbeitet als eigenständiger Mitarbeiter im Hintergrund. Er prüft, ob im `joris_journal` "
+        "bei `max_performance_5_tage` Daten eingetragen sind und überträgt diese in den `aris_arbeitsspeicher`, "
+        "sofern dies noch nicht erfolgt ist (`aris_übertrag = True`)."
+    )
+    st.divider()
+
+    col_l1, col_l2 = st.columns([2, 1])
+    with col_l1:
+      if st.button("🚀 Leopold: Übertragungs-Routine jetzt ausführen", type="primary"):
+        with st.spinner("Leopold führt seine Arbeitsroutine aus..."):
+          try:
+            leopold.run_transfer_routine()
+            st.success("Leopold hat die Routine erfolgreich beendet!")
+            st.rerun()
+          except Exception as e:
+            st.error(f"Fehler bei der Ausführung: {e}")
+
+    st.divider()
+    st.subheader("📊 Inhalt des Aris Arbeitsspeichers")
+    
+    aris_data = leopold.get_aris_arbeitsspeicher_data()
+    if aris_data:
+      df_aris = pd.DataFrame(aris_data)
+      st.dataframe(df_aris, use_container_width=True)
+    else:
+      st.info("Der Aris-Arbeitsspeicher ist aktuell leer.")
+
+  except Exception as e:
+    st.error(f"Leopold-Tab aktuell nicht verfügbar (Fehler: {e})")
