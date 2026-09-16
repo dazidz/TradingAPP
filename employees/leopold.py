@@ -1,95 +1,130 @@
 from datetime import datetime
 import pandas as pd
-from db import get_db_client
 
 
 class LeopoldAssistant:
 
-    def __init__(self, supabase_client):
-        self.supabase = supabase_client
-        self.table_joris_journal = "joris_journal"
-        self.table_aris_arbeitsspeicher = "aris_arbeitsspeicher"
+  def __init__(self, supabase_client):
+    self.supabase = supabase_client
 
-    def run_transfer_routine(self):
-        """
-        Leopolds eigenständige Routine:
-        1. Prüft, ob bei joris_journal in der Spalte max_performance_5_tage eine Zahl vorliegt.
-        2. Filtert Einträge heraus, bei denen aris_übertrag noch nicht True ist.
-        3. Überträgt die Daten in aris_arbeitsspeicher.
-        4. Setzt aris_übertrag bei joris_journal auf True.
-        """
-        print("Leopold startet seine Arbeitsroutine...")
-        
-        try:
-            # Relevante Einträge aus joris_journal laden
-            res = (
-                self.supabase.table(self.table_joris_journal)
-                .select("*")
-                .not_.is_("max_performance_5_tage", "null")
-                .neq("aris_übertrag", True)
-                .execute()
-            )
-            
-            entries = res.data or []
-            if not entries:
-                print("Leopold: Keine neuen Einträge im Joris Journal zur Übertragung gefunden.")
-                return
+  def run_transfer_routine(self):
+    """Führt Leopolds gesamte Hintergrund-Routine aus:
 
-            success_count = 0
-            for entry in entries:
-                entry_id = entry.get("id")
-                ticker = entry.get("ticker")
+    1. Überprüfung und Transfer von max_performance_5_tage in den Arbeitsspeicher.
+    2. Ermittlung und Speicherung der Top 5 & Flop 5 Performer der Watchlist.
+    """
+    # 1. Bisherige Logik: Performance-Daten (Joris/Signals -> Aris Arbeitsspeicher)
+    self._process_performance_transfer()
 
-                if not entry_id or not ticker:
-                    continue
+    # 2. NEU: Top 5 & Flop 5 Performer der Watchlist ermitteln und speichern
+    self.process_watchlist_performers()
 
-                # Payload für aris_arbeitsspeicher zusammenstellen
-                payload = {
-                    "created_at": datetime.utcnow().isoformat(),
-                    "quelle": "joris_journal",
-                    "ticker": ticker,
-                    "unternehmen": entry.get("unternehmen"),
-                    "signal_typ": entry.get("signal_typ") or entry.get("signal_typ"),
-                    "max_performance_5_tage": entry.get("max_performance_5_tage"),
-                    "end_performance_5_tage": entry.get("end_performance_5_tage")
-                }
+  def _process_performance_transfer(self):
+    """Interne Methode für den bisherigen Performance-Übertrag."""
+    try:
+      # Beispiel-Abfrage des Joris-Journals auf vorhandene 5-Tages-Performances
+      response = (
+          self.supabase.table("joris_journal")
+          .select("*")
+          .not_.is_("max_performance_5_tage", "null")
+          .execute()
+      )
+      records = response.data
 
-                try:
-                    # In aris_arbeitsspeicher schreiben
-                    self.supabase.table(self.table_aris_arbeitsspeicher).insert(payload).execute()
+      if not records:
+        return
 
-                    # In joris_journal das Flag aris_übertrag auf True setzen
-                    self.supabase.table(self.table_joris_journal).update({"aris_übertrag": True}).eq("id", entry_id).execute()
-                    
-                    success_count += 1
-                    print(f"Leopold: Ticker {ticker} erfolgreich verarbeitet und übertragen.")
-                
-                except Exception as inner_err:
-                    print(f"Leopold: Fehler beim Übertragen von Ticker {ticker}: {inner_err}")
+      for row in records:
+        # Prüfen, ob bereits übertragen (z.B. über ein Flag wie aris_übertrag)
+        if not row.get("aris_übertrag", False):
+          payload = {
+              "kategorie": "performance_transfer",
+              "report_content": (
+                  f"Transfer für Symbol {row.get('symbol', 'N/A')}:"
+                  f" Max-Perf 5T = {row.get('max_performance_5_tage')}"
+              ),
+              "created_at": datetime.now().isoformat(),
+          }
+          # In den Arbeitsspeicher schreiben
+          self.supabase.table("aris_arbeitsspeicher").insert(payload).execute()
 
-            print(f"Leopold: Routine beendet. {success_count} Datensätze erfolgreich übertragen.")
+          # Flag in der Quelletabelle aktualisieren
+          self.supabase.table("joris_journal").update(
+              {"aris_übertrag": True}
+          ).eq("id", row["id"]).execute()
 
-        except Exception as e:
-            print(f"Leopold: Schwerwiegender Fehler in der Routine: {e}")
+    except Exception as e:
+      print(f"Fehler beim Performance-Transfer durch Leopold: {e}")
 
-    def get_aris_arbeitsspeicher_data(self):
-        """Liefert die Daten für die Benutzeroberfläche (Leopold-Tab auf der Team-Seite)."""
-        try:
-            res = (
-                self.supabase.table(self.table_aris_arbeitsspeicher)
-                .select("*")
-                .order("created_at", desc=True)
-                .execute()
-            )
-            return res.data if res.data else []
-        except Exception as e:
-            print(f"Leopold: Fehler beim Laden des Aris-Arbeitsspeichers: {e}")
-            return []
+  def process_watchlist_performers(self):
+    """Ermittelt aus der Supabase-Tabelle 'watchlist' die Top 5 und Flop 5
 
+    Performer des Tages und speichert diese im Arbeitsspeicher ab.
+    """
+    try:
+      # Watchlist aus Supabase laden
+      response = self.supabase.table("watchlist").select("*").execute()
+      data = response.data
 
-if __name__ == "__main__":
-    # Eigenständiger Startpunkt für Leopolds Prozess (z.B. per Cronjob oder manuellem Skriptaufruf)
-    supabase_client = get_db_client()
-    leopold = LeopoldAssistant(supabase_client)
-    
-    leopold.run_transfer_routine()
+      if not data:
+        return
+
+      df = pd.DataFrame(data)
+
+      # Automatische Erkennung der Performance-Spalte (flexibel gehalten)
+      perf_column = None
+      for col in ["change_percent", "daily_change", "performance", "perf_1d"]:
+        if col in df.columns:
+          perf_column = col
+          break
+
+      if perf_column and not df.empty:
+        # Numerisch konvertieren für sauberes Sortieren
+        df[perf_column] = pd.to_numeric(df[perf_column], errors="coerce")
+        df = df.dropna(subset=[perf_column])
+
+        # Nach Performance sortieren (absteigend)
+        df_sorted = df.sort_values(by=perf_column, ascending=False)
+
+        top_5 = df_sorted.head(5)
+        flop_5 = df_sorted.tail(5)
+
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+        # Symbol-Spalte dynamisch erkennen
+        symbol_col = "symbol" if "symbol" in df.columns else df.columns[0]
+
+        payload = {
+            "datum": today_str,
+            "top_5": top_5[[symbol_col, perf_column]].to_dict(orient="records"),
+            "flop_5": flop_5[[symbol_col, perf_column]].to_dict(
+                orient="records"
+            ),
+        }
+
+        # In den Aris Arbeitsspeicher schreiben
+        self.supabase.table("aris_arbeitsspeicher").insert({
+            "kategorie": "watchlist_ranking",
+            "report_content": (
+                f"Watchlist Top/Flop Ranking vom {today_str}:\n{str(payload)}"
+            ),
+            "created_at": datetime.now().isoformat(),
+        }).execute()
+
+    except Exception as e:
+      print(f"Fehler bei der Watchlist-Auswertung durch Leopold: {e}")
+
+  def get_aris_arbeitsspeicher_data(self):
+    """Ruft die letzten Einträge aus dem Aris-Arbeitsspeicher ab."""
+    try:
+      res = (
+          self.supabase.table("aris_arbeitsspeicher")
+          .select("*")
+          .order("created_at", desc=True)
+          .limit(20)
+          .execute()
+      )
+      return res.data
+    except Exception as e:
+      print(f"Fehler beim Laden des Arbeitsspeichers: {e}")
+      return []
