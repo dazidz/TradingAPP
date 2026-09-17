@@ -30,15 +30,35 @@ st.markdown("Vollständige Auswertung und detaillierte Kennzahlen des `signals_j
 st.divider()
 
 # Daten aus signals_journal laden
+sj_data = []
+load_error = None
 try:
     res = supabase.table("signals_journal").select("*").execute()
-    sj_data = res.data if res and res.data else []
+    if res and res.data:
+        sj_data = res.data
 except Exception as e:
-    st.error(f"Fehler beim Laden der Tabelle `signals_journal`: {e}")
-    sj_data = []
+    load_error = str(e)
 
-if not sj_data:
-    st.warning("⚠️ Die Tabelle `signals_journal` ist aktuell leer oder konnte nicht gefunden werden.")
+# Diagnose-Hinweis, falls keine Daten da sind oder ein Fehler auftrat
+if load_error:
+    st.error(f"⚠️ Supabase-Fehler beim Zugriff auf `signals_journal`: {load_error}")
+elif not sj_data:
+    st.warning(
+        "⚠️ Die Tabelle `signals_journal` ist aktuell **leer** oder wurde in Supabase noch nicht befüllt. "
+        "Bitte stelle sicher, dass Signale generiert wurden und die Tabelle existiert."
+    )
+    
+    # Debug-Info anzeigen, welche Spalten minimal benötigt werden
+    with st.expander("🛠️ Leopold Diagnose & Erwartete Struktur"):
+        st.markdown("""
+        Leopold erwartet in Supabase eine Tabelle namens `signals_journal` mit folgenden Spalten:
+        - `signal_typ` (Text: z.B. 'Elite', 'Kauf')
+        - `source` (Text: z.B. Screener-Name)
+        - `end_performance_5_tage` (Numerisch)
+        - `max_performance_5_tage` (Numerisch)
+        - `tage_bis_max_perf` (Numerisch)
+        - Weitere Felder wie `ticker`, `signal_datum`, `einstiegspreis_zum_signal` etc. werden dynamisch mit angezeigt.
+        """)
 else:
     df_sj = pd.DataFrame(sj_data)
 
@@ -54,6 +74,8 @@ else:
             sel_type = st.selectbox("Nach Signal-Typ filtern", unique_types, key="leopold_type_filter")
         else:
             sel_type = "Alle"
+            st.info("ℹ️ Keine Signal-Typ-Spalte gefunden ('signal_typ' oder ähnlich). Filter wird übersprungen.")
+            
     with col_f2:
         if "source" in df_sj.columns:
             sources_sj = ["Alle"] + list(df_sj["source"].dropna().unique())
@@ -133,7 +155,7 @@ else:
     st.divider()
 
     # --- KOMPLETTES JOURNAL ALS TABELLE ---
-    st.subheader("📋 Komplettes Signals Journal (Tabelle)")
+    st.subheader(f"📋 Komplettes Signals Journal ({len(df_filtered)} Einträge)")
     st.dataframe(df_filtered, use_container_width=True, hide_index=True)
 
     # Download-Button als CSV
