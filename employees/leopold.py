@@ -488,7 +488,7 @@ with tab_aris:
 with tab_leopold:
   try:
     st.subheader("⚙️ Leopold - Signals Journal & Deep Analytics")
-    st.markdown("Umfassende Auswertung und Komplett-Ansicht des `signals_journal`.")
+    st.markdown("Vollständige Auswertung und detaillierte Kennzahlen des `signals_journal`.")
     st.divider()
 
     # Daten aus signals_journal laden
@@ -496,19 +496,19 @@ with tab_leopold:
         res = supabase.table("signals_journal").select("*").execute()
         sj_data = res.data if res and res.data else []
     except Exception as e:
-        st.error(f"Fehler beim Laden des `signals_journal`: {e}")
+        st.error(f"Fehler beim Laden der Tabelle `signals_journal`: {e}")
         sj_data = []
 
     if not sj_data:
-        st.info("Keine Daten im `signals_journal` gefunden.")
+        st.warning("⚠️ Die Tabelle `signals_journal` ist aktuell leer oder konnte nicht gefunden werden.")
     else:
         df_sj = pd.DataFrame(sj_data)
 
-        # Spalten-Check & Normalisierung (falls Feldnamen leicht abweichen)
-        # Wir suchen nach Typ-Spalten (z.B. 'signal_typ' oder 'typ')
-        type_col = next((c for c in ["signal_typ", "typ", "signal_type"] if c in df_sj.columns), None)
-        
-        # --- FILTERS ---
+        # Spalten-Erkennung für Typ und Performance absichern
+        possible_type_cols = ["signal_typ", "typ", "signal_type", "type"]
+        type_col = next((c for c in possible_type_cols if c in df_sj.columns), None)
+
+        # Filter-Optionen in der UI
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             if type_col:
@@ -523,15 +523,14 @@ with tab_leopold:
             else:
                 sel_source_sj = "Alle"
 
-        # Filter anwenden für KPI-Berechnung
+        # DataFrame nach Filtern verfeinern
         df_filtered = df_sj.copy()
         if type_col and sel_type != "Alle":
             df_filtered = df_filtered[df_filtered[type_col] == sel_type]
         if "source" in df_filtered.columns and sel_source_sj != "Alle":
             df_filtered = df_filtered[df_filtered["source"] == sel_source_sj]
 
-        # --- KPI BERECHNUNGEN ---
-        # 1. Split für Elite vs. Kauf (falls type_col existiert)
+        # Teilmengen für Elite vs. Kauf bestimmen (falls Spalte existiert)
         if type_col:
             df_elite = df_sj[df_sj[type_col].astype(str).str.lower().str.contains("elite", na=False)]
             df_kauf = df_sj[df_sj[type_col].astype(str).str.lower().str.contains("kauf|buy", na=False)]
@@ -539,71 +538,74 @@ with tab_leopold:
             df_elite = pd.DataFrame()
             df_kauf = pd.DataFrame()
 
-        # Hilfsfunktion für Mittelwerte von Performance-Spalten
-        def get_mean_perf(dataframe, col_name):
-            if col_name in dataframe.columns and not dataframe.empty:
-                val = dataframe[col_name].mean()
+        # Hilfsfunktion für sichere Mittelwert-Berechnung
+        def safe_mean(dataframe, column_name):
+            if not dataframe.empty and column_name in dataframe.columns:
+                val = pd.to_numeric(dataframe[column_name], errors='coerce').mean()
                 return val if pd.notnull(val) else 0.0
             return 0.0
 
-        # Gewinntrades Quote berechnen (über gefilterte Ansicht oder gesamt)
+        # KPI 1: Performance Elite & Kaufsignale (Standardmäßig über End- oder allgemeine Performance)
+        perf_target_col = next((c for c in ["end_performance_5_tage", "performance", "end_performance"] if c in df_sj.columns), None)
+        perf_elite = safe_mean(df_elite, perf_target_col)
+        perf_kauf = safe_mean(df_kauf, perf_target_col)
+
+        # KPI 2: Gewinntrades Quote (%)
         win_rate = 0.0
-        perf_col_check = next((c for c in ["end_performance_5_tage", "performance", "end_performance"] if c in df_filtered.columns), None)
-        if perf_col_check and not df_filtered.empty:
-            winning_trades = len(df_filtered[df_filtered[perf_col_check] > 0])
-            total_trades = len(df_filtered.dropna(subset=[perf_col_check]))
-            win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0.0
+        if not df_filtered.empty and perf_target_col:
+            numeric_perf = pd.to_numeric(df_filtered[perf_target_col], errors='coerce')
+            winning_trades = (numeric_perf > 0).sum()
+            total_valid_trades = numeric_perf.dropna().count()
+            if total_valid_trades > 0:
+                win_rate = (winning_trades / total_valid_trades) * 100
 
-        # Durchschnittliche Tage bis max Performance
-        avg_days_to_max = 0.0
-        days_col = next((c for c in ["tage_bis_max_perf", "days_to_max", "max_perf_tage"] if c in df_filtered.columns), None)
-        if days_col and not df_filtered.empty:
-            val_days = df_filtered[days_col].mean()
-            avg_days_to_max = val_days if pd.notnull(val_days) else 0.0
+        # KPI 3: Durchschnittliche Tage bis Max Performance
+        days_col = next((c for c in ["tage_bis_max_perf", "days_to_max", "max_perf_tage", "tage_bis_max"] if c in df_filtered.columns), None)
+        avg_days_to_max = safe_mean(df_filtered, days_col)
 
-        # --- KPI DASHBOARD ANZEIGE ---
-        st.markdown("### 📈 Performance & Kennzahlen-Übersicht")
+        # KPI 4: 5 Tage End & Max Werte für Elite & Kauf
+        elite_5d_end = safe_mean(df_elite, "end_performance_5_tage")
+        elite_5d_max = safe_mean(df_elite, "max_performance_5_tage")
+        kauf_5d_end = safe_mean(df_kauf, "end_performance_5_tage")
+        kauf_5d_max = safe_mean(df_kauf, "max_performance_5_tage")
+
+        # --- ANZEIGE DER KPI METRIKEN ---
+        st.markdown("### 📊 Performance-Kennzahlen")
         
-        row1_c1, row1_c2, row1_c3, row1_c4 = st.columns(4)
-        with row1_c1:
-            elite_perf = get_mean_perf(df_elite, perf_col_check)
-            st.metric("Performance Elite-Signale", f"{elite_perf:+.2f}%")
-        with row1_c2:
-            kauf_perf = get_mean_perf(df_kauf, perf_col_check)
-            st.metric("Performance Kaufsignale", f"{kauf_perf:+.2f}%")
-        with row1_c3:
+        r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
+        with r1_c1:
+            st.metric("Performance Elite-Signale", f"{perf_elite:+.2f}%")
+        with r1_c2:
+            st.metric("Performance Kaufsignale", f"{perf_kauf:+.2f}%")
+        with r1_c3:
             st.metric("Gewinntrades (Quote)", f"{win_rate:.1f}%")
-        with row1_c4:
+        with r1_c4:
             st.metric("Ø Tage bis Max-Perf.", f"{avg_days_to_max:.1f} Tage")
 
-        row2_c1, row2_c2, row2_c3, row2_c4 = st.columns(4)
-        with row2_c1:
-            elite_5d_end = get_mean_perf(df_elite, "end_performance_5_tage")
+        r2_c1, r2_c2, r2_c3, r2_c4 = st.columns(4)
+        with r2_c1:
             st.metric("5T End (Elite)", f"{elite_5d_end:+.2f}%")
-        with row2_c2:
-            elite_5d_max = get_mean_perf(df_elite, "max_performance_5_tage")
+        with r2_c2:
             st.metric("5T Max (Elite)", f"{elite_5d_max:+.2f}%")
-        with row2_c3:
-            kauf_5d_end = get_mean_perf(df_kauf, "end_performance_5_tage")
+        with r2_c3:
             st.metric("5T End (Kauf)", f"{kauf_5d_end:+.2f}%")
-        with row2_c4:
-            kauf_5d_max = get_mean_perf(df_kauf, "max_performance_5_tage")
+        with r2_c4:
             st.metric("5T Max (Kauf)", f"{kauf_5d_max:+.2f}%")
 
         st.divider()
 
         # --- KOMPLETTES JOURNAL ALS TABELLE ---
-        st.subheader("📋 Signals Journal (Vollständige Datentabelle)")
+        st.subheader("📋 Komplettes Signals Journal (Tabelle)")
         st.dataframe(df_filtered, use_container_width=True, hide_index=True)
 
-        # CSV Export
-        csv_sj = df_filtered.to_csv(index=False).encode('utf-8')
+        # Download-Button als CSV
+        csv_data = df_filtered.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 Komplettes Signals Journal als CSV exportieren",
-            data=csv_sj,
-            file_name="signals_journal_export.csv",
+            label="📥 Signals Journal als CSV herunterladen",
+            data=csv_data,
+            file_name="signals_journal_complete_export.csv",
             mime="text/csv",
         )
 
   except Exception as e:
-    st.error(f"Leopold-Tab aktuell nicht verfügbar (Fehler: {e})")
+    st.error(f"Fehler im Leopold-Tab: {e}")
