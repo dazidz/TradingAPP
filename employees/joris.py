@@ -36,7 +36,6 @@ class JorisPortfolioManager:
         return
 
       for row in records:
-        # Prüfen, ob bereits übertragen (über das Flag aris_übertrag)
         if not row.get("aris_übertrag", False):
           symbol = row.get("symbol", "N/A")
           max_perf = row.get("max_performance_5_tage")
@@ -51,10 +50,7 @@ class JorisPortfolioManager:
               ),
               "created_at": datetime.now().isoformat(),
           }
-          # In den Arbeitsspeicher schreiben
           self.supabase.table("aris_arbeitsspeicher").insert(payload).execute()
-
-          # Flag in der Quelletabelle aktualisieren, damit es nicht doppelt läuft
           self.supabase.table("joris_journal").update(
               {"aris_übertrag": True}
           ).eq("id", row["id"]).execute()
@@ -65,7 +61,7 @@ class JorisPortfolioManager:
   def process_watchlist_performers(self):
     """Ermittelt aus der Supabase-Tabelle 'watchlist' die Top 5 und Flop 5
 
-    Performer des Tages und speichert diese im Arbeitsspeicher ab.
+    Performer und speichert diese im Arbeitsspeicher ab.
     """
     try:
       response = self.supabase.table("watchlist").select("*").execute()
@@ -75,8 +71,6 @@ class JorisPortfolioManager:
         return
 
       df = pd.DataFrame(data)
-
-      # Automatische Erkennung der Performance-Spalte
       perf_column = None
       for col in ["change_percent", "daily_change", "performance", "perf_1d"]:
         if col in df.columns:
@@ -88,7 +82,6 @@ class JorisPortfolioManager:
         df = df.dropna(subset=[perf_column])
 
         df_sorted = df.sort_values(by=perf_column, ascending=False)
-
         top_5 = df_sorted.head(5)
         flop_5 = df_sorted.tail(5)
 
@@ -131,16 +124,18 @@ class JorisPortfolioManager:
       print(f"Fehler beim Laden des Arbeitsspeichers: {e}")
       return []
 
-  def get_latest_report(self):
-    """Ruft den neuesten Bericht oder Eintrag aus dem Arbeitsspeicher ab."""
+  def get_latest_report(self, depot_focus=None):
+    """Ruft den neuesten Bericht aus dem Arbeitsspeicher ab
+
+    (unterstützt optionalen depot_focus-Parameter).
+    """
     try:
-      res = (
-          self.supabase.table("aris_arbeitsspeicher")
-          .select("*")
-          .order("created_at", desc=True)
-          .limit(1)
-          .execute()
-      )
+      query = self.supabase.table("aris_arbeitsspeicher").select("*")
+      # Falls deine Tabelle eine Spalte für das Depot hat, hier optional filtern:
+      # if depot_focus:
+      #     query = query.eq("depot_focus", depot_focus)
+
+      res = query.order("created_at", desc=True).limit(1).execute()
       if res.data:
         return res.data[0]
       return None
