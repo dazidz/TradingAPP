@@ -2,19 +2,23 @@ from datetime import datetime
 import pandas as pd
 
 
-class LeopoldAssistant:
+class JorisPortfolioManager:
 
   def __init__(self, supabase_client):
     self.supabase = supabase_client
+    self.name = "Joris"
+    self.description = (
+        "Watchlist-Performance, Setup-Transfer & Watchlist Performer"
+    )
 
   def run_transfer_routine(self):
-    """Führt Leopolds gesamte Hintergrund-Routine aus:
+    """Führt Joris gesamte Hintergrund-Routine aus:
 
     1. Übertragung von max_performance_5_tage und setup_reason in den
     Arbeitsspeicher.
     2. Ermittlung und Speicherung der Top 5 & Flop 5 Performer der Watchlist.
     """
-    # 1. Performance- und Setup-Daten-Übertrag (Joris -> Aris Arbeitsspeicher)
+    # 1. Performance- und Setup-Daten-Übertrag
     self._process_performance_transfer()
 
     # 2. Top 5 & Flop 5 Performer der Watchlist ermitteln und speichern
@@ -23,7 +27,6 @@ class LeopoldAssistant:
   def _process_performance_transfer(self):
     """Interne Methode für den Transfer von Performance und setup_reason."""
     try:
-      # Joris-Journal auf relevante Einträge prüfen
       response = (
           self.supabase.table("joris_journal")
           .select("*")
@@ -60,7 +63,7 @@ class LeopoldAssistant:
           ).eq("id", row["id"]).execute()
 
     except Exception as e:
-      print(f"Fehler beim Performance- und Setup-Transfer durch Leopold: {e}")
+      print(f"Fehler beim Performance- und Setup-Transfer durch Joris: {e}")
 
   def process_watchlist_performers(self):
     """Ermittelt aus der Supabase-Tabelle 'watchlist' die Top 5 und Flop 5
@@ -97,7 +100,9 @@ class LeopoldAssistant:
 
         payload = {
             "datum": today_str,
-            "top_5": top_5[[symbol_col, perf_column]].to_dict(orient="records"),
+            "top_5": top_5[[symbol_col, perf_column]].to_dict(
+                orient="records"
+            ),
             "flop_5": flop_5[[symbol_col, perf_column]].to_dict(
                 orient="records"
             ),
@@ -112,7 +117,7 @@ class LeopoldAssistant:
         }).execute()
 
     except Exception as e:
-      print(f"Fehler bei der Watchlist-Auswertung durch Leopold: {e}")
+      print(f"Fehler bei der Watchlist-Auswertung durch Joris: {e}")
 
   def get_aris_arbeitsspeicher_data(self):
     """Ruft die letzten Einträge aus dem Aris-Arbeitsspeicher ab."""
