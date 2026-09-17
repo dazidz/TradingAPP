@@ -305,7 +305,7 @@ with tab_nino:
     else:
         df = pd.DataFrame(data)
 
-        # --- Filter-Bereich in der Sidebar oder direkt über der Tabelle ---
+        # --- Filter-Bereich ---
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             sources = ["Alle"] + list(df["source"].dropna().unique()) if "source" in df.columns else ["Alle"]
@@ -494,21 +494,18 @@ with tab_aris:
           st.error(f"Fehler im Chat: {chat_err}")
 
 # ==========================================
-# TAB 7: LEOPOLD (ARBEITSSPEICHER & TRANSFER)
+# TAB 7: LEOPOLD (SYSTEM SUPPORT)
 # ==========================================
 with tab_leopold:
   try:
-    from employees.leopold import LeopoldAssistant
-
-    leopold = LeopoldAssistant(supabase)
-
     st.subheader("⚙️ Leopold - System Support & Überwachung")
     st.markdown(
-        "Leopold überwacht den Systemstatus und sekundäre Hintergrundprozesse."
+        "Leopold überwacht den Systemstatus und sekundäre Hintergrundprozesse. "
+        "Die zentrale Datenverwaltung wurde vollständig an Nino übertragen."
     )
     st.divider()
 
-    st.info("Die zentrale Datenverwaltung läuft nun vollständig autonom über Nino. Dieser Tab steht für zukünftige System-Erweiterungen bereit.")
+    st.info("Alle Systeme laufen stabil. Keine manuellen Eingriffe über diesen Tab erforderlich.")
 
   except Exception as e:
     st.error(f"Leopold-Tab aktuell nicht verfügbar (Fehler: {e})")
