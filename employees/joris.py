@@ -1,4 +1,5 @@
 from datetime import datetime
+import google.generativeai as genai
 import pandas as pd
 
 
@@ -8,7 +9,7 @@ class JorisPortfolioManager:
     self.supabase = supabase_client
     self.name = "Joris"
     self.description = (
-        "Watchlist-Performance, Setup-Transfer & Watchlist Performer"
+        "Watchlist-Performance, Portfolio-Synthese & Teamroom-Schnittstelle"
     )
 
   def run_transfer_routine(self):
@@ -109,6 +110,108 @@ class JorisPortfolioManager:
     except Exception as e:
       print(f"Fehler bei der Watchlist-Auswertung durch Joris: {e}")
 
+  def run_synthesis(self, depot_focus, api_key):
+    """Erstellt eine Portfolio-Synthese für das gewählte Mandat/Depot
+
+    und speichert sie im Arbeitsspeicher.
+    """
+    if not api_key:
+      return False, "Kein Gemini API-Key gefunden."
+
+    try:
+      genai.configure(api_key=api_key)
+      model = genai.GenerativeModel("gemini-1.5-flash")
+
+      # Daten laden (z.B. Watchlist oder Journal als Basis für die Synthese)
+      response = self.supabase.table("watchlist").select("*").execute()
+      data_context = str(response.data) if response.data else "Keine Daten"
+
+      prompt = f"""
+            Du bist Joris, der leitende Portfolio Manager. 
+            Führe nach Ray Dalios Prinzipien ('Radical Truth & Radical Open-Mindedness') 
+            eine Portfolio-Synthese für das Depot-Mandat '{depot_focus}' durch.
+            
+            Analysiere folgende Datenbasis und liefere eine präzise Empfehlung:
+            {data_context}
+            """
+
+      result = model.generate_content(prompt)
+      report_text = result.text
+
+      # In den Arbeitsspeicher sichern
+      payload = {
+          "kategorie": f"synthesis_{depot_focus}",
+          "report_content": report_text,
+          "created_at": datetime.now().isoformat(),
+      }
+      self.supabase.table("aris_arbeitsspeicher").insert(payload).execute()
+
+      return True, f"Synthese für '{depot_focus}' erfolgreich erstellt."
+    except Exception as e:
+      return False, f"Fehler bei der Synthese: {e}"
+
+  def get_latest_report(self, depot_focus=None):
+    """Ruft den neuesten Bericht für den gegebenen Depot-Fokus aus dem
+
+    Arbeitsspeicher ab.
+    """
+    try:
+      query = self.supabase.table("aris_arbeitsspeicher").select("*")
+      if depot_focus:
+        query = query.eq("kategorie", f"synthesis_{depot_focus}")
+
+      res = query.order("created_at", desc=True).limit(1).execute()
+      if res.data:
+        return res.data[0]
+
+      # Falls kein spezifischer gefunden wurde, den allerneuesten holen
+      res_fallback = (
+          self.supabase.table("aris_arbeitsspeicher")
+          .select("*")
+          .order("created_at", desc=True)
+          .limit(1)
+          .execute()
+      )
+      if res_fallback.data:
+        return res_fallback.data[0]
+
+      return None
+    except Exception as e:
+      print(f"Fehler beim Laden des neuesten Reports durch Joris: {e}")
+      return None
+
+  def chat_with_joris(
+      self, depot_focus, user_message, chat_history, api_key
+  ):
+    """Führt einen interaktiven Chat mit Joris bezüglich des gewählten Depots."""
+    if not api_key:
+      return False, "Kein Gemini API-Key gefunden."
+
+    try:
+      genai.configure(api_key=api_key)
+      model = genai.GenerativeModel("gemini-1.5-flash")
+
+      system_instruction = (
+          f"Du bist Joris, Portfolio Manager. Mandat: '{depot_focus}'. Handle"
+          " nach Ray Dalios Prinzipien (Radical Truth & Radical"
+          " Open-Mindedness)."
+      )
+
+      # Verlauf formatieren für Gemini
+      formatted_history = []
+      for msg in chat_history:
+        role = "user" if msg["role"] == "user" else "model"
+        formatted_history.append({"role": role, "parts": [msg["content"]]})
+
+      chat = model.start_chat(history=formatted_history)
+      response = chat.send_message(
+          f"[{system_instruction}]\n\nFrage des Nutzers: {user_message}"
+      )
+
+      return True, response.text
+    except Exception as e:
+      return False, f"Fehler im Chat mit Joris: {e}"
+
   def get_aris_arbeitsspeicher_data(self):
     """Ruft die letzten Einträge aus dem Aris-Arbeitsspeicher ab."""
     try:
@@ -123,22 +226,3 @@ class JorisPortfolioManager:
     except Exception as e:
       print(f"Fehler beim Laden des Arbeitsspeichers: {e}")
       return []
-
-  def get_latest_report(self, depot_focus=None):
-    """Ruft den neuesten Bericht aus dem Arbeitsspeicher ab
-
-    (unterstützt optionalen depot_focus-Parameter).
-    """
-    try:
-      query = self.supabase.table("aris_arbeitsspeicher").select("*")
-      # Falls deine Tabelle eine Spalte für das Depot hat, hier optional filtern:
-      # if depot_focus:
-      #     query = query.eq("depot_focus", depot_focus)
-
-      res = query.order("created_at", desc=True).limit(1).execute()
-      if res.data:
-        return res.data[0]
-      return None
-    except Exception as e:
-      print(f"Fehler beim Laden des neuesten Reports durch Joris: {e}")
-      return None
