@@ -1,4 +1,7 @@
 from datetime import datetime
+import json
+import os
+import re
 import google.generativeai as genai
 import pandas as pd
 
@@ -9,220 +12,247 @@ class JorisPortfolioManager:
     self.supabase = supabase_client
     self.name = "Joris"
     self.description = (
-        "Watchlist-Performance, Portfolio-Synthese & Teamroom-Schnittstelle"
+        "Portfolio Manager & Synthese-Agent nach Ray Dalios Prinzipien."
     )
 
-  def run_transfer_routine(self):
-    """Führt Joris gesamte Hintergrund-Routine aus:
+  def _get_table_name(self, depot_focus: str) -> str:
+    """Mappt den Depot-Fokus auf den echten Tabellennamen in Supabase."""
+    mapping = {
+        "invest": "invest_depot",
+        "swing": "swing_depot",
+        "high_risk": "risk_depot",
+    }
+    return mapping.get(depot_focus, "invest_depot")
 
-    1. Übertragung von max_performance_5_tage und setup_reason in den
-    Arbeitsspeicher.
-    2. Ermittlung und Speicherung der Top 5 & Flop 5 Performer der Watchlist.
-    """
-    self._process_performance_transfer()
-    self.process_watchlist_performers()
+  def run_synthesis(self, depot_focus: str, api_key: str):
+    """Führt die tägliche Portfoliosynthese durch via Google Gemini:
 
-  def _process_performance_transfer(self):
-    """Interne Methode für den Transfer von Performance und setup_reason."""
-    try:
-      response = (
-          self.supabase.table("joris_journal")
-          .select("*")
-          .not_.is_("max_performance_5_tage", "null")
-          .execute()
-      )
-      records = response.data
-
-      if not records:
-        return
-
-      for row in records:
-        if not row.get("aris_übertrag", False):
-          symbol = row.get("symbol", "N/A")
-          max_perf = row.get("max_performance_5_tage")
-          setup_reason = row.get("setup_reason", "Kein Grund angegeben")
-
-          payload = {
-              "kategorie": "performance_and_setup_transfer",
-              "report_content": (
-                  f"Transfer für Symbol {symbol}:\n"
-                  f"- Max-Perf 5T: {max_perf}\n"
-                  f"- Setup Reason: {setup_reason}"
-              ),
-              "created_at": datetime.now().isoformat(),
-          }
-          self.supabase.table("aris_arbeitsspeicher").insert(payload).execute()
-          self.supabase.table("joris_journal").update(
-              {"aris_übertrag": True}
-          ).eq("id", row["id"]).execute()
-
-    except Exception as e:
-      print(f"Fehler beim Performance- und Setup-Transfer durch Joris: {e}")
-
-  def process_watchlist_performers(self):
-    """Ermittelt aus der Supabase-Tabelle 'watchlist' die Top 5 und Flop 5
-
-    Performer und speichert diese im Arbeitsspeicher ab.
+    - Führt Berichte der anderen Agenten zusammen
+    - Prüft das gewählte Depot (invest_depot, swing_depot, risk_depot)
+    - Lädt die aktuellen Signale aus der 'signals'-Tabelle
+    - Lädt die favorisierten Werte aus der 'favorites'-Tabelle
+    - Wendet die mandatspezifische Brille an (Fundamental vs. Technische
+    Indikatoren)
+    - Gibt konkrete Empfehlungen mit direkten TradingView-Links ab.
     """
     try:
-      response = self.supabase.table("watchlist").select("*").execute()
-      data = response.data
+      active_key = api_key if api_key else os.getenv("GEMINI_API_KEY")
+      if not active_key:
+        return False, "Kein Gemini API-Key für Joris gefunden."
 
-      if not data:
-        return
-
-      df = pd.DataFrame(data)
-      perf_column = None
-      for col in ["change_percent", "daily_change", "performance", "perf_1d"]:
-        if col in df.columns:
-          perf_column = col
-          break
-
-      if perf_column and not df.empty:
-        df[perf_column] = pd.to_numeric(df[perf_column], errors="coerce")
-        df = df.dropna(subset=[perf_column])
-
-        df_sorted = df.sort_values(by=perf_column, ascending=False)
-        top_5 = df_sorted.head(5)
-        flop_5 = df_sorted.tail(5)
-
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        symbol_col = "symbol" if "symbol" in df.columns else df.columns[0]
-
-        payload = {
-            "datum": today_str,
-            "top_5": top_5[[symbol_col, perf_column]].to_dict(
-                orient="records"
-            ),
-            "flop_5": flop_5[[symbol_col, perf_column]].to_dict(
-                orient="records"
-            ),
-        }
-
-        self.supabase.table("aris_arbeitsspeicher").insert({
-            "kategorie": "watchlist_ranking",
-            "report_content": (
-                f"Watchlist Top/Flop Ranking vom {today_str}:\n{str(payload)}"
-            ),
-            "created_at": datetime.now().isoformat(),
-        }).execute()
-
-    except Exception as e:
-      print(f"Fehler bei der Watchlist-Auswertung durch Joris: {e}")
-
-  def run_synthesis(self, depot_focus, api_key):
-    """Erstellt eine Portfolio-Synthese für das gewählte Mandat/Depot
-
-    und speichert sie im Arbeitsspeicher.
-    """
-    if not api_key:
-      return False, "Kein Gemini API-Key gefunden."
-
-    try:
-      genai.configure(api_key=api_key)
+      genai.configure(api_key=active_key)
       model = genai.GenerativeModel("gemini-1.5-flash")
 
-      # Daten laden (z.B. Watchlist oder Journal als Basis für die Synthese)
-      response = self.supabase.table("watchlist").select("*").execute()
-      data_context = str(response.data) if response.data else "Keine Daten"
+      # 1. Berichte der anderen Agenten abrufen
+      reports_res = (
+          self.supabase.table("agent_reports")
+          .select("*")
+          .order("created_at", desc=True)
+          .limit(10)
+          .execute()
+      )
+      reports_text = (
+          str(reports_res.data) if reports_res.data else "Keine Berichte."
+      )
 
-      prompt = f"""
+      # 2. Das passende Depot dynamisch abrufen
+      table_name = self._get_table_name(depot_focus)
+      try:
+        depot_res = self.supabase.table(table_name).select("*").execute()
+        depot_data_text = (
+            str(depot_res.data)
+            if depot_res.data
+            else f"Keine Einträge in Tabelle '{table_name}' gefunden."
+        )
+      except Exception as db_err:
+        depot_data_text = (
+            f"Konnte Tabelle '{table_name}' nicht abrufen: {db_err}"
+        )
+
+      # 3. SIGNALE AUS DER 'signals'-TABELLE ABRUFEN
+      screener_table_name = "signals"
+      try:
+        screener_res = (
+            self.supabase.table(screener_table_name)
+            .select("*")
+            .limit(20)
+            .execute()
+        )
+        screener_data_text = (
+            str(screener_res.data)
+            if screener_res.data
+            else f"Keine Einträge in Screener-Tabelle '{screener_table_name}'"
+            " gefunden."
+        )
+      except Exception as screener_err:
+        screener_data_text = (
+            f"Konnte Screener-Tabelle '{screener_table_name}' nicht abrufen:"
+            f" {screener_err}"
+        )
+
+      # 4. FAVORITEN AUS DER 'favorites'-TABELLE ABRUFEN
+      favorites_table_name = "favorites"
+      try:
+        favorites_res = (
+            self.supabase.table(favorites_table_name).select("*").execute()
+        )
+        favorites_data_text = (
+            str(favorites_res.data)
+            if favorites_res.data
+            else f"Keine Einträge in Favoriten-Tabelle '{favorites_table_name}'"
+            " gefunden."
+        )
+      except Exception as favorites_err:
+        favorites_data_text = (
+            f"Konnte Favoriten-Tabelle '{favorites_table_name}' nicht"
+            f" abrufen: {favorites_err}"
+        )
+
+      # System-Instruktion für Joris inklusive TradingView-Regel
+      prompt_content = f"""
             Du bist Joris, der leitende Portfolio Manager. 
-            Führe nach Ray Dalios Prinzipien ('Radical Truth & Radical Open-Mindedness') 
-            eine Portfolio-Synthese für das Depot-Mandat '{depot_focus}' durch.
+            Deine Arbeitsweise folgt Ray Dalios Prinzipien: **Radical Truth & Radical Open-Mindedness**.
+            Fokus-Mandat: {depot_focus.upper()} (Zugehörige Depot-Tabelle: {table_name})
             
-            Analysiere folgende Datenbasis und liefere eine präzise Empfehlung:
-            {data_context}
+            WICHTIG - MANDATSSPEZIFISCHE ANALYSE-BRILLE:
+            - Wenn Fokus 'SWING' ist: Ignoriere fundamentale Bewertungen (KGV, KBV etc.). Konzentriere dich voll auf **technische Indikatoren, Trendstärke, Momentum, Volumen und Chart-Setups** aus dem Screener, den Favoriten und den Kollegen-Berichten.
+            - Wenn Fokus 'INVEST' ist: Konzentriere dich auf Fundamentaldaten, Substanz, Bilanzen und langfristiges Core-Holding-Potenzial.
+            - Wenn Fokus 'HIGH_RISK' ist: Konzentriere dich auf hochspekulative Setups, explosive Vola und kurzfristige Katalysatoren.
+            
+            WICHTIG - TRADINGVIEW LINKS:
+            Füge bei **jeder** erwähnten Aktie oder Empfehlung (sowohl im Text als auch in Tabellen/Listen) im Markdown-Format einen direkten Link zu TradingView ein. 
+            Das Format lautet exakt: `[Ticker](https://www.tradingview.com/chart/?symbol=NASDAQ:TICKER)` (bzw. die entsprechende Börse wie NYSE: oder XETR: falls bekannt, ansonsten Standard-Ticker einsetzen).
+
+            DIR LIEGEN FOLGENDE DATEN VOR:
+            
+            A) AKTUELLER BESTAND DES GEWÄHLTEN DEPOTS ({table_name}):
+            {depot_data_text}
+            
+            B) AKTUELLE SIGNALE AUS DEM SCREENER ({screener_table_name}):
+            {screener_data_text}
+            
+            C) AKTUELLE FAVORITEN ({favorites_table_name}):
+            {favorites_data_text}
+            
+            D) LETZTE BERICHTE DER TEAM-KOLLEGEN (Makro, Insider, History, Performance):
+            {reports_text}
+            
+            DEINE AUFGABE:
+            Erstelle eine kompromisslose, datenbasierte Portfolio-Synthese für das Mandat '{depot_focus.upper()}'. Gehe dabei strikt auf folgende Punkte ein:
+            1. **Zusammenfassung & Synthese:** Führe die Erkenntnisse der anderen Kollegen im Kontext des aktuellen Marktumfelds zusammen.
+            2. **Depot-Prüfung & Diversifikation:** Analysiere das aktuelle Depot ({table_name}) passend zum Mandat.
+            3. **Verkaufsempfehlungen:** Benenne glasklar, welche Positionen im Depot reduziert oder komplett abgestoßen werden sollten.
+            4. **Top-Empfehlungen des Tages:** Gleiche die Depot-Ziele, die Favoriten und die aktuellen Signale aus dem Screener ab und präsentiere die besten High-Conviction-Kandidaten.
+            
+            ZUSATZ-FORMAT FÜR DAS JOURNAL (WICHTIG BEI SWING):
+            Falls der Fokus 'SWING' ist, liste am Ende deines Reports zwingend einen Block im folgenden exakten JSON-Format auf:
+            
+            ===JOURNAL_DATA_START===
+            [
+              {{"ticker": "AAPL", "setup_reason": "Starker Ausbruch über Widerstand mit hohem Volumen", "target": 220.0, "stop_loss": 175.0}},
+              {{"ticker": "NVDA", "setup_reason": "Pullback an gleitenden Durchschnitt erfolgreich beendet", "target": 140.0, "stop_loss": 115.0}}
+            ]
+            ===JOURNAL_DATA_END===
+            (Ersetze AAPL/NVDA durch deine echten Top-Picks des Tages aus der Analyse, gib realistische Fließkommazahlen für target und stop_loss an. Falls keine Picks da sind, gib eine leere Liste `[]` aus).
             """
 
-      result = model.generate_content(prompt)
-      report_text = result.text
+      response = model.generate_content(prompt_content)
+      report_content = response.text
 
-      # In den Arbeitsspeicher sichern
-      payload = {
-          "kategorie": f"synthesis_{depot_focus}",
-          "report_content": report_text,
+      # 6. In Datenbank speichern (Agenten-Bericht)
+      self.supabase.table("agent_reports").insert({
+          "agent_name": f"Joris_{depot_focus}",
+          "report_content": report_content,
           "created_at": datetime.now().isoformat(),
-      }
-      self.supabase.table("aris_arbeitsspeicher").insert(payload).execute()
+      }).execute()
 
-      return True, f"Synthese für '{depot_focus}' erfolgreich erstellt."
+      # 7. Automatisches, sauberes Schreiben in die joris_journal, falls Fokus SWING ist
+      if depot_focus.lower() == "swing":
+        try:
+          match = re.search(
+              r"===JOURNAL_DATA_START===\s*(.*?)\s*===JOURNAL_DATA_END===",
+              report_content,
+              re.DOTALL,
+          )
+          if match:
+            json_str = match.group(1)
+            picks = json.loads(json_str)
+
+            for pick in picks:
+              self.supabase.table("joris_journal").insert({
+                  "ticker": pick.get("ticker", "UNKNOWN"),
+                  "setup_reason": pick.get("setup_reason", "Keine Begründung"),
+                  "target": float(pick.get("target", 0.0)),
+                  "stop_loss": float(pick.get("stop_loss", 0.0)),
+                  "status": "active",
+                  "created_at": datetime.now().isoformat(),
+              }).execute()
+          else:
+            print(
+                "Konnte keinen strukturierten Journal-Block im Bericht finden."
+            )
+        except Exception as watch_err:
+          print(f"Konnte joris_journal nicht befüllen: {watch_err}")
+
+      return (
+          True,
+          f"Synthese inklusive strukturierter Journal-Einträge für"
+          f" '{table_name}' erfolgreich erstellt via Gemini!",
+      )
     except Exception as e:
-      return False, f"Fehler bei der Synthese: {e}"
+      return False, f"Fehler bei der Synthese (Gemini): {e}"
 
-  def get_latest_report(self, depot_focus=None):
-    """Ruft den neuesten Bericht für den gegebenen Depot-Fokus aus dem
-
-    Arbeitsspeicher ab.
-    """
+  def get_latest_report(self, depot_focus: str):
+    """Holt den neuesten Joris-Bericht für das Depot."""
     try:
-      query = self.supabase.table("aris_arbeitsspeicher").select("*")
-      if depot_focus:
-        query = query.eq("kategorie", f"synthesis_{depot_focus}")
-
-      res = query.order("created_at", desc=True).limit(1).execute()
-      if res.data:
-        return res.data[0]
-
-      # Falls kein spezifischer gefunden wurde, den allerneuesten holen
-      res_fallback = (
-          self.supabase.table("aris_arbeitsspeicher")
+      res = (
+          self.supabase.table("agent_reports")
           .select("*")
+          .eq("agent_name", f"Joris_{depot_focus}")
           .order("created_at", desc=True)
           .limit(1)
           .execute()
       )
-      if res_fallback.data:
-        return res_fallback.data[0]
-
-      return None
-    except Exception as e:
-      print(f"Fehler beim Laden des neuesten Reports durch Joris: {e}")
+      return res.data[0] if res.data else None
+    except Exception:
       return None
 
   def chat_with_joris(
-      self, depot_focus, user_message, chat_history, api_key
+      self,
+      depot_focus: str,
+      user_message: str,
+      chat_history: list,
+      api_key: str,
   ):
-    """Führt einen interaktiven Chat mit Joris bezüglich des gewählten Depots."""
-    if not api_key:
-      return False, "Kein Gemini API-Key gefunden."
-
+    """Ermöglicht den Chat mit Joris im Teamroom über Gemini."""
     try:
-      genai.configure(api_key=api_key)
+      active_key = api_key if api_key else os.getenv("GEMINI_API_KEY")
+      if not active_key:
+        return False, "Kein Gemini API-Key für den Chat verfügbar."
+
+      genai.configure(api_key=active_key)
       model = genai.GenerativeModel("gemini-1.5-flash")
 
-      system_instruction = (
-          f"Du bist Joris, Portfolio Manager. Mandat: '{depot_focus}'. Handle"
-          " nach Ray Dalios Prinzipien (Radical Truth & Radical"
-          " Open-Mindedness)."
+      system_msg = (
+          f"Du bist Joris, Portfolio Manager für das Depot-Mandat"
+          f" '{depot_focus}'. Du hast Zugriff auf das Depot, den Screener, die"
+          " Favoriten und die Team-Berichte. Passe deine Analyse an das Mandat"
+          " an (Beim Swing-Mandat Fokus auf Technik/Momentum, bei Invest auf"
+          " Fundamentaldaten). Antworte direkt, ehrlich und datenbasiert nach"
+          " Ray Dalio. Füge bei genannten Aktien immer einen"
+          " TradingView-Markdown-Link ein:"
+          " [Ticker](https://www.tradingview.com/chart/?symbol=TICKER)."
       )
 
-      # Verlauf formatieren für Gemini
-      formatted_history = []
-      for msg in chat_history:
-        role = "user" if msg["role"] == "user" else "model"
-        formatted_history.append({"role": role, "parts": [msg["content"]]})
+      gemini_history = []
+      for m in chat_history:
+        role = "user" if m["role"] == "user" else "model"
+        gemini_history.append({"role": role, "parts": [m["content"]]})
 
-      chat = model.start_chat(history=formatted_history)
-      response = chat.send_message(
-          f"[{system_instruction}]\n\nFrage des Nutzers: {user_message}"
-      )
+      chat = model.start_chat(history=gemini_history)
+      full_prompt = f"[{system_msg}]\n\nFrage des Nutzers: {user_message}"
 
+      response = chat.send_message(full_prompt)
       return True, response.text
     except Exception as e:
-      return False, f"Fehler im Chat mit Joris: {e}"
-
-  def get_aris_arbeitsspeicher_data(self):
-    """Ruft die letzten Einträge aus dem Aris-Arbeitsspeicher ab."""
-    try:
-      res = (
-          self.supabase.table("aris_arbeitsspeicher")
-          .select("*")
-          .order("created_at", desc=True)
-          .limit(20)
-          .execute()
-      )
-      return res.data
-    except Exception as e:
-      print(f"Fehler beim Laden des Arbeitsspeichers: {e}")
-      return []
+      return False, f"Chat-Fehler (Gemini): {e}"
