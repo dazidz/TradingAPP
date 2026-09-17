@@ -1,0 +1,20 @@
+leopold bekommt neue aufgaben, er soll sich die signals_journal vornehmen und auf seiner seite ein dashboard bauen. hier will ich das komplette journal als tabelle. zudem folgende auswertungen/berechnungen:
+
+
+
+performance elite signale
+
+performance kaufsignale
+
+gewinntrades
+
+performance 5 tage end elite
+
+performance 5 tage max elite
+
+performance 5 tage end kauf
+
+performance 5 tage max kauf
+
+durschnittliche tage bis max perf 
+

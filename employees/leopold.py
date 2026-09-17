@@ -1,254 +1,609 @@
-from datetime import datetime
-import json
-import numpy as np
+from datetime import datetime, timedelta
+import os
+from pathlib import Path
+import sys
+from groq import Groq
+import google.generativeai as genai
 import pandas as pd
 import streamlit as st
+from supabase import create_client
 import yfinance as yf
 
+# Setzt das Hauptverzeichnis fest in den Suchpfad von Python
+root_dir = Path(__file__).resolve().parent.parent
+if str(root_dir) not in sys.path:
+  sys.path.append(str(root_dir))
 
-def render_leopold_signals_dashboard(supabase_client):
-  """Rendert das neue Leopold-Dashboard für das gesamte signals_journal
+st.set_page_config(
+    layout="wide",
+    page_title="VisionDZ - Team & Kommandozentrale",
+    page_icon="🏢",
+)
 
-  inklusive Tabellenansicht und detaillierter Performance-Auswertungen.
-  """
-  st.subheader("📊 Leopold Signals Dashboard & Analytics")
+if not st.session_state.get("password_correct", False):
+  st.warning("Bitte melde dich zuerst auf der Hauptseite an.")
+  st.stop()
 
-  # 1. Daten aus signals_journal laden
+URL = st.secrets["SUPABASE_URL"]
+KEY = st.secrets["SUPABASE_KEY"]
+supabase = create_client(URL, KEY)
+
+# Sicheres Laden der API-Keys (mit import os)
+GROQ_API_KEY = None
+GEMINI_API_KEY = None
+
+try:
+  GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
+except Exception:
+  pass
+
+try:
+  GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+except Exception:
+  pass
+
+st.title("🏢 VisionDZ - Team & Kommandozentrale")
+
+# --- DIE TABS DEFINIEREN ---
+tab_teamroom, tab_jano, tab_peter, tab_otto, tab_nino, tab_aris, tab_leopold = st.tabs([
+    "💬 Teamroom & Joris",
+    "🌍 Jano (Macro)",
+    "🕵️ Peter (Micro/Insider)",
+    "📊 Otto (History)",
+    "⚡ Nino (Signals)",
+    "🤖 Aris (Performance)",
+    "⚙️ Leopold (Journal & Analytics)",
+])
+
+# ==========================================
+# TAB 1: DER TEAMROOM & JORIS (GEMINI)
+# ==========================================
+with tab_teamroom:
   try:
-    response = (
-        supabase_client.table("signals_journal").select("*").execute()
+    from employees.joris import JorisPortfolioManager
+
+    joris = JorisPortfolioManager(supabase)
+
+    st.subheader("Tägliches Standup & Portfolio-Synthese")
+    st.markdown(
+        "Nach Ray Dalios Prinzipien: **Radical Truth & Radical"
+        " Open-Mindedness**."
     )
-    data = response.data
-    if not data:
-      st.info(
-          "Keine Einträge im `signals_journal` gefunden. Das Journal wird von"
-          " Nino befüllt."
+
+    selected_depot_label = st.selectbox(
+        "Fokus-Depot für dieses Meeting:",
+        [
+            "Invest (Langfristiges Fundament / Core)",
+            "Swing (Mittelfristige Trendfolge)",
+            "High Risk (Aggressive / Spekulative Plays)",
+        ],
+        key="teamroom_depot_select",
+    )
+
+    depot_mapping = {
+        "Invest (Langfristiges Fundament / Core)": "invest",
+        "Swing (Mittelfristige Trendfolge)": "swing",
+        "High Risk (Aggressive / Spekulative Plays)": "high_risk",
+    }
+    current_depot_focus = depot_mapping[selected_depot_label]
+
+    col_j1, col_j2 = st.columns([2, 1])
+    with col_j1:
+      if st.button(
+          "🚀 Joris: Portfolio-Synthese für dieses Mandat starten",
+          type="primary",
+      ):
+        with st.spinner(
+            f"Joris synthetisiert Berichte für '{current_depot_focus}'..."
+        ):
+          success, msg = joris.run_synthesis(
+              depot_focus=current_depot_focus, api_key=GEMINI_API_KEY
+          )
+          if success:
+            st.success(msg)
+            st.rerun()
+          else:
+            st.error(msg)
+
+    st.divider()
+
+    latest_joris = joris.get_latest_report(depot_focus=current_depot_focus)
+    if latest_joris:
+      st.markdown(f"### 🎯 Joris Mandats-Empfehlung ({selected_depot_label})")
+      st.info(latest_joris["report_content"])
+    else:
+      st.warning(
+          "Joris hat für dieses Depot noch keine Synthese durchgeführt."
       )
-      return
-    df = pd.DataFrame(data)
+
+    # INTERAKTIVER CHAT MIT JORIS
+    st.divider()
+    st.markdown(f"### 🤖 Diskussion mit Joris ({selected_depot_label})")
+
+    chat_session_key = f"joris_chat_history_{current_depot_focus}"
+    if chat_session_key not in st.session_state:
+      st.session_state[chat_session_key] = []
+
+    for message in st.session_state[chat_session_key]:
+      with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+    if user_query_joris := st.chat_input(
+        f"Diskutiere mit Joris über das Mandat '{selected_depot_label}'..."
+    ):
+      st.session_state[chat_session_key].append(
+          {"role": "user", "content": user_query_joris}
+      )
+      with st.chat_message("user"):
+        st.markdown(user_query_joris)
+
+      with st.chat_message("assistant"):
+        with st.spinner("Joris prüft die Daten und antwortet..."):
+          success_chat, reply_chat = joris.chat_with_joris(
+              depot_focus=current_depot_focus,
+              user_message=user_query_joris,
+              chat_history=st.session_state[chat_session_key][:-1],
+              api_key=GEMINI_API_KEY,
+          )
+          if success_chat:
+            st.markdown(reply_chat)
+            st.session_state[chat_session_key].append(
+                {"role": "assistant", "content": reply_chat}
+            )
+          else:
+            st.error(reply_chat)
+
+    st.divider()
+    st.markdown("### 📊 Letzte Einzelberichte im Team")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    def get_last_agent_report(agent_name):
+      try:
+        res = (
+            supabase.table("agent_reports")
+            .select("*")
+            .eq("agent_name", agent_name)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        return res.data[0]["report_content"] if res.data else "Kein Bericht."
+      except Exception:
+        return "Fehler beim Laden."
+
+    with col1:
+      st.markdown("#### 🌍 Jano (Macro)")
+      st.write(get_last_agent_report("Jano")[:300] + "...")
+
+    with col2:
+      st.markdown("#### 🕵️ Peter (Micro)")
+      st.write(get_last_agent_report("Peter")[:300] + "...")
+
+    with col3:
+      st.markdown("#### 📊 Otto (History)")
+      st.write(get_last_agent_report("Otto")[:300] + "...")
+
+    with col4:
+      st.markdown("#### 🤖 Aris (Performance)")
+      st.write(get_last_agent_report("Aris")[:300] + "...")
+
   except Exception as e:
-    st.error(f"Fehler beim Laden des `signals_journal`: {e}")
-    return
+    st.error(f"Fehler im Teamroom: {e}")
 
-  # Hilfsspalten / Formatierungen sicherstellen
-  if "signal_datum" in df.columns:
-    df["signal_datum"] = pd.to_datetime(
-        df["signal_datum"], errors="coerce"
-    ).dt.date
+# ==========================================
+# TAB 2: JANO (MACRO ANALYST - GEMINI)
+# ==========================================
+with tab_jano:
+  try:
+    from employees.jano import JanoMacroAnalyst
 
-  # -------------------------------------------------------------------------
-  # METRIKEN & BERECHNUNGEN (KPI-Bereich)
-  # -------------------------------------------------------------------------
+    jano = JanoMacroAnalyst(supabase)
+    st.subheader(f"🌍 {jano.name}")
+    st.caption(jano.description)
 
-  # Erkennung von Elite- vs. Kaufsignalen über signal_typ (Fallback auf 'Standard')
-  df["signal_typ_clean"] = (
-      df["signal_typ"].fillna("Standard").astype(str).str.lower()
-  )
-  is_elite = df["signal_typ_clean"].str.contains("elite", na=False)
-  is_kauf = df["signal_typ_clean"].str.contains(
-      "kauf|buy|standard", na=False
-  ) & ~is_elite
+    if st.button("🚀 Jano: Makro-Analyse starten", key="btn_run_jano"):
+      with st.spinner("Jano analysiert die Makrolage..."):
+        success, msg = jano.run_analysis(api_key=GEMINI_API_KEY)
+        if success:
+          st.success(msg)
+          st.rerun()
+        else:
+          st.error(msg)
 
-  # Datensätze filtern für spezielle Analysen
-  df_elite = df[is_elite]
-  df_kauf = df[is_kauf]
+    st.divider()
+    latest_jano = jano.get_latest_report()
+    if latest_jano:
+      st.markdown(f"### Bericht vom {latest_jano['created_at'][:16]}")
+      st.write(latest_jano["report_content"])
+    else:
+      st.info("Noch kein Makro-Bericht vorhanden.")
+  except Exception as e:
+    st.error(f"Jano-Tab aktuell nicht verfügbar (Fehler: {e})")
 
-  # Gewinntrades (anhand der 30D-Performance oder 5D-Performance, falls 30D fehlt)
-  perf_col_30d = (
-      "performance_30d_end_pct"
-      if "performance_30d_end_pct" in df.columns
-      else "end_performance_5_tage"
-  )
-  if perf_col_30d in df.columns:
-    total_wins = df[df[perf_col_30d] > 0].shape[0]
-    total_evaluated = df[df[perf_col_30d].notnull()].shape[0]
-    win_rate = (
-        round((total_wins / total_evaluated) * 100, 1)
-        if total_evaluated > 0
-        else 0.0
-    )
-  else:
-    win_rate, total_wins = 0.0, 0
+# ==========================================
+# TAB 3: PETER (MARKET INTEL & INSIDER - GROQ)
+# ==========================================
+with tab_peter:
+  try:
+    from employees.peter import PeterInsiderAnalyst
 
-  # Performance-Berechnungen (Mittelwerte)
-  def safe_mean(series):
-    if series.empty or series.dropna().empty:
-        return 0.0
-    return round(float(series.dropna().mean()), 2)
+    peter = PeterInsiderAnalyst(supabase)
 
-  # 1. Performance Elite Signale (Gesamt / 30D End oder bestverfügbar)
-  perf_elite = safe_mean(df_elite[perf_col_30d]) if not df_elite.empty else 0.0
+    st.subheader(f"🕵️ {peter.name}")
+    st.caption(peter.description)
 
-  # 2. Performance Kaufsignale
-  perf_kauf = safe_mean(df_kauf[perf_col_30d]) if not df_kauf.empty else 0.0
+    if st.button("🔄 Peter: Fundamentaldaten & Insider analysieren"):
+      with st.spinner("Peter holt Watchlist & Insider-Daten..."):
+        success, msg = peter.run_analysis(api_key=GROQ_API_KEY)
+        if success:
+          st.success(msg)
+          st.rerun()
+        else:
+          st.error(msg)
 
-  # 3. 5 Tage Metriken
-  perf_5d_end_elite = (
-      safe_mean(df_elite["end_performance_5_tage"])
-      if "end_performance_5_tage" in df_elite.columns
-      else 0.0
-  )
-  perf_5d_max_elite = (
-      safe_mean(df_elite["max_performance_5_tage"])
-      if "max_performance_5_tage" in df_elite.columns
-      else 0.0
-  )
+    st.divider()
+    latest_peter = peter.get_latest_report()
+    if latest_peter:
+      st.markdown(f"### Bericht vom {latest_peter['created_at'][:16]}")
+      st.write(latest_peter["report_content"])
+    else:
+      st.info("Noch keine Peter-Berichte vorhanden.")
+  except Exception as e:
+    st.error(f"Peter-Tab aktuell nicht verfügbar (Fehler: {e})")
 
-  perf_5d_end_kauf = (
-      safe_mean(df_kauf["end_performance_5_tage"])
-      if "end_performance_5_tage" in df_kauf.columns
-      else 0.0
-  )
-  perf_5d_max_kauf = (
-      safe_mean(df_kauf["max_performance_5_tage"])
-      if "max_performance_5_tage" in df_kauf.columns
-      else 0.0
-  )
+# ==========================================
+# TAB 4: OTTO (HISTORY & PATTERNS - GEMINI)
+# ==========================================
+with tab_otto:
+  try:
+    from employees.otto import OttoAnalyst
 
-  # 4. Durchschnittliche Tage bis Max-Perf (falls candle_time_max_5_tage & signal_datum vorhanden)
-  avg_days_to_max = 0.0
-  if (
-      "candle_time_max_5_tage" in df.columns
-      and "signal_datum" in df.columns
-  ):
-    valid_time_df = df.dropna(
-        subset=["candle_time_max_5_tage", "signal_datum"]
-    ).copy()
-    if not valid_time_df.empty:
-      valid_time_df["max_date"] = pd.to_datetime(
-          valid_time_df["candle_time_max_5_tage"], errors="coerce"
-      ).dt.date
-      valid_time_df["sig_dt"] = pd.to_datetime(
-          valid_time_df["signal_datum"], errors="coerce"
-      ).dt.date
-      valid_time_df["days_diff"] = (
-          valid_time_df["max_date"] - valid_time_df["sig_dt"]
-      ).dt.days
-      days_filtered = valid_time_df["days_diff"].dropna()
-      days_filtered = days_filtered[days_filtered >= 0]
-      if not days_filtered.empty:
-        avg_days_to_max = round(float(days_filtered.mean()), 1)
+    otto = OttoAnalyst(supabase)
 
-  # -------------------------------------------------------------------------
-  # UI: METRIKEN ANZEIGEN
-  # -------------------------------------------------------------------------
-  st.markdown("### 📈 Performance & Kennzahlen Übersicht")
+    st.subheader(f"📊 {otto.name}")
+    st.caption(otto.description)
 
-  col1, col2, col3, col4 = st.columns(4)
-  with col1:
-    st.metric(
-        "Performance Elite Signale",
-        f"{perf_elite}%",
-        help="Durchschnittliche Performance der Elite-Signale",
-    )
-    st.metric(
-        "Perf. 5T End (Elite)",
-        f"{perf_5d_end_elite}%",
-        help="Durchschnittlicher End-Kurs nach 5 Tagen (Elite)",
-    )
-  with col2:
-    st.metric(
-        "Performance Kaufsignale",
-        f"{perf_kauf}%",
-        help="Durchschnittliche Performance der regulären Kaufsignale",
-    )
-    st.metric(
-        "Perf. 5T End (Kauf)",
-        f"{perf_5d_end_kauf}%",
-        help="Durchschnittlicher End-Kurs nach 5 Tagen (Kauf)",
-    )
-  with col3:
-    st.metric(
-        "Gewinntrades (Quote)",
-        f"{win_rate}%",
-        f"{total_wins} Wins gesamt",
-        help="Anteil positiver Trades im Journal",
-    )
-    st.metric(
-        "Perf. 5T Max (Elite)",
-        f"{perf_5d_max_elite}%",
-        help="Durchschnittliches Maximum nach 5 Tagen (Elite)",
-    )
-  with col4:
-    st.metric(
-        "Ø Tage bis Max-Perf",
-        f"{avg_days_to_max} Tage",
-        help="Durchschnittliche Anzahl Tage vom Signal bis zum 5T-Hoch",
-    )
-    st.metric(
-        "Perf. 5T Max (Kauf)",
-        f"{perf_5d_max_kauf}%",
-        help="Durchschnittliches Maximum nach 5 Tagen (Kauf)",
-    )
+    if st.button("🚀 Otto: Historisches Muster-Matching starten"):
+      with st.spinner("Otto gleicht mit der Börsenhistorie ab..."):
+        success, msg = otto.run_analysis(api_key=GEMINI_API_KEY)
+        if success:
+          st.success(msg)
+          st.rerun()
+        else:
+          st.error(msg)
 
-  st.divider()
+    st.divider()
+    latest_otto = otto.get_latest_report()
+    if latest_otto:
+      st.markdown(f"### Bericht vom {latest_otto['created_at'][:16]}")
+      st.write(latest_otto["report_content"])
+    else:
+      st.info("Noch keine Otto-Berichte vorhanden.")
+  except Exception as e:
+    st.error(f"Otto-Tab aktuell nicht verfügbar (Fehler: {e})")
 
-  # -------------------------------------------------------------------------
-  # UI: FILTER & KOMPLETTES JOURNAL ALS TABELLE
-  # -------------------------------------------------------------------------
-  st.markdown("### 🗂️ Komplettes Signals Journal (Tabelle)")
+# ==========================================
+# TAB 5: NINO (SIGNALS & ARIS ARBEITSSPEICHER)
+# ==========================================
+with tab_nino:
+  try:
+    st.subheader("⚡ Nino - Signal Agent & Arbeitsspeicher")
+    st.markdown("Zentrale Visualisierung des `aris_arbeitsspeicher` (befüllt durch Nino).")
+    st.divider()
 
-  # Filteroptionen für die Tabelle
-  col_f1, col_f2, col_f3 = st.columns(3)
-  with col_f1:
-    selected_type = st.selectbox(
-        "Nach Signal-Typ filtern",
-        ["Alle"] + list(df["signal_typ"].dropna().unique()),
-    )
-  with col_f2:
-    only_favorites = st.checkbox("Nur Favoriten anzeigen")
-  with col_f3:
-    search_ticker = st.text_input("Ticker Suchen", "").strip().upper()
+    try:
+        res = supabase.table("aris_arbeitsspeicher").select("*").order("signal_datum", desc=True).execute()
+        data = res.data if res and res.data else []
+    except Exception as e:
+        st.error(f"Fehler beim Laden des Arbeitsspeichers: {e}")
+        data = []
 
-  # DataFrame filtern
-  df_display = df.copy()
-  if selected_type != "Alle":
-    df_display = df_display[df_display["signal_typ"] == selected_type]
-  if only_favorites and "is_favorite" in df_display.columns:
-    df_display = df_display[df_display["is_favorite"] == True]
-  if search_ticker:
-    df_display = df_display[
-        df_display["ticker"].str.upper().str.contains(search_ticker, na=False)
-    ]
+    if not data:
+        st.info("Keine Daten im `aris_arbeitsspeicher` gefunden.")
+    else:
+        df = pd.DataFrame(data)
 
-  # Relevante Spalten für die übersichtliche Ansicht auswählen (falls vorhanden)
-  preferred_columns = [
-      "ticker",
-      "signal_datum",
-      "signal_typ",
-      "einstiegspreis_zum_signal",
-      "smi",
-      "adx",
-      "above_ema20",
-      "is_favorite",
-      "max_performance_5_tage",
-      "end_performance_5_tage",
-      "performance_30d_end_pct",
-      "status",
-  ]
-  existing_cols = [c for c in preferred_columns if c in df_display.columns]
-  # Restliche Spalten anhängen, die nicht in der Liste sind
-  other_cols = [c for c in df_display.columns if c not in existing_cols]
-  final_col_order = existing_cols + other_cols
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            sources = ["Alle"] + list(df["source"].dropna().unique()) if "source" in df.columns else ["Alle"]
+            selected_source = st.selectbox("Nach Quelle filtern", sources, key="nino_source_filter")
+        with col_f2:
+            only_favorites = st.checkbox("Nur Favoriten anzeigen", value=False, key="nino_fav_filter")
 
-  st.dataframe(
-      df_display[final_col_order],
-      use_container_width=True,
-      hide_index=True,
+        filtered_df = df.copy()
+        if selected_source != "Alle":
+            filtered_df = filtered_df[filtered_df["source"] == selected_source]
+        if only_favorites and "is_favorite" in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df["is_favorite"] == True]
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Gesamt Einträge", len(filtered_df))
+        with col2:
+            avg_end_perf = filtered_df["end_performance_5_tage"].mean() if "end_performance_5_tage" in filtered_df.columns else 0
+            st.metric("Ø 5D End-Performance", f"{avg_end_perf:+.2f}%" if pd.notnull(avg_end_perf) else "0.0%")
+        with col3:
+            avg_max_perf = filtered_df["max_performance_5_tage"].mean() if "max_performance_5_tage" in filtered_df.columns else 0
+            st.metric("Ø 5D Max-Performance", f"{avg_max_perf:+.2f}%" if pd.notnull(avg_max_perf) else "0.0%")
+        with col4:
+            fav_count = filtered_df["is_favorite"].sum() if "is_favorite" in filtered_df.columns else 0
+            st.metric("Favoriten in Ansicht", int(fav_count))
+
+        st.divider()
+        st.subheader("📊 Arbeitsspeicher-Daten")
+        display_columns = [
+            "ticker", "source", "signal_datum", "signal_typ", 
+            "einstiegspreis_zum_signal", "max_kurs_5_tage", "max_performance_5_tage", 
+            "end_kurs_5_tage", "end_performance_5_tage", "is_favorite", "status"
+        ]
+        existing_cols = [col for col in display_columns if col in filtered_df.columns]
+        
+        st.dataframe(filtered_df[existing_cols], use_container_width=True, hide_index=True)
+
+        csv = filtered_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Gefilterte Daten als CSV herunterladen",
+            data=csv,
+            file_name="aris_arbeitsspeicher_export.csv",
+            mime="text/csv",
+        )
+
+  except Exception as e:
+    st.error(f"Nino-Tab aktuell nicht verfügbar (Fehler: {e})")
+
+# ==========================================
+# TAB 6: ARIS (PERFORMANCE MANAGER & CHAT - GROQ)
+# ==========================================
+with tab_aris:
+  st.subheader("🤖 Aris - Performance Manager")
+  st.markdown(
+      "Dein KI-Agent analysiert das Signals-Journal, das Trading-Journal, "
+      "den Screener-Quellcode und steht dir im Chat für Rückfragen zur Verfügung."
   )
 
-  st.caption(
-      f"Gesamtanzahl Datensätze in Ansicht: {len(df_display)} von"
-      f" {len(df)} Einträgen."
-  )
+  if "messages_aris" not in st.session_state:
+    st.session_state.messages_aris = []
 
+  aris_dna = """
+    Du bist Aris, der leitende Performance Manager in dieser Trading-Anwendung. Deine Aufgabe ist es, die Performance objektiv, datenbasiert und gnadenlos ehrlich zu analysieren. Du verzichtest auf leere Floskeln und Schönfärberei. 
+    Analysiere die übergebenen Datenpunkte:
+    1. Signals Journal (inkl. 5-Tage und 1-Monats-Meilensteine)
+    2. Trading Journal (geschlossene Trades inkl. Post-Exit-Tracking)
+    3. Screener-Quellcode (auf Filterfehler, Schwachstellen und verpasste Chancen prüfen)
+    4. Watchlist (nach Asset-Kategorien: Invest, Swing, High Risk)
 
-# Beispiel für den Aufruf im Hauptskript von Leopold:
-if __name__ == "__main__":
-  st.set_page_config(
-      page_title="Leopold Signals Dashboard", layout="wide"
-  )
-  from db import get_db_client
+    Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefer konkrete, direkt umsetzbare Handlungsempfehlungen.
+    """
 
-  db_client = get_db_client()
-  render_leopold_signals_dashboard(db_client)
+  if not st.session_state.messages_aris:
+    try:
+      saved_report_res = (
+          supabase.table("agent_reports")
+          .select("*")
+          .eq("agent_name", "Aris")
+          .order("created_at", desc=True)
+          .limit(1)
+          .execute()
+      )
+      if saved_report_res.data:
+        latest_report = saved_report_res.data[0]
+        st.session_state.messages_aris.append({
+            "role": "assistant",
+            "content": (
+                "**Letzter gespeicherter Report ("
+                f"{latest_report['created_at'][:16]}):**\n\n"
+                + latest_report["report_content"]
+            ),
+        })
+    except Exception:
+      pass
+
+  if st.button("🚀 Aris Analyse & Screener-Review starten", type="primary"):
+    with st.spinner("Aris analysiert Datenbanken und Code..."):
+      try:
+        groq_client = Groq(api_key=GROQ_API_KEY)
+
+        signals_res = supabase.table("signals_journal").select("*").execute()
+        journal_res = supabase.table("trade_journal").select("*").execute()
+        signals_df = pd.DataFrame(signals_res.data)
+        journal_df = pd.DataFrame(journal_res.data)
+
+        context_data = f"""
+            --- SIGNALS JOURNAL ---
+            {signals_df.to_string() if not signals_df.empty else "Keine Signale"}
+            --- TRADING JOURNAL ---
+            {journal_df.to_string() if not journal_df.empty else "Keine Trades"}
+            """
+
+        completion = groq_client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=[
+                {"role": "system", "content": aris_dna},
+                {
+                    "role": "user",
+                    "content": (
+                        "Erstelle deinen Analyse-Report:\n\n" + context_data
+                    ),
+                },
+            ],
+            temperature=0.1,
+        )
+        report_content = completion.choices[0].message.content
+
+        supabase.table("agent_reports").insert({
+            "agent_name": "Aris",
+            "report_content": report_content,
+        }).execute()
+
+        st.session_state.messages_aris.append(
+            {"role": "assistant", "content": report_content}
+        )
+        st.success("Analyse erfolgreich abgeschlossen!")
+        st.rerun()
+      except Exception as e:
+        st.error(f"⚠️ Fehler: {e}")
+
+  st.markdown("---")
+  st.markdown("### 💬 Diskussion mit Aris")
+
+  for message in st.session_state.messages_aris:
+    with st.chat_message(message["role"]):
+      st.markdown(message["content"])
+
+  if user_query := st.chat_input("Stelle Aris eine Frage...", key="aris_chat_input"):
+    st.session_state.messages_aris.append(
+        {"role": "user", "content": user_query}
+    )
+    with st.chat_message("user"):
+      st.markdown(user_query)
+
+    with st.chat_message("assistant"):
+      with st.spinner("Aris denkt nach..."):
+        try:
+          groq_client = Groq(api_key=GROQ_API_KEY)
+
+          groq_history = [{"role": "system", "content": aris_dna}]
+          for m in st.session_state.messages_aris[:-1]:
+            role = "user" if m["role"] == "user" else "assistant"
+            groq_history.append({"role": role, "content": m["content"]})
+
+          completion = groq_client.chat.completions.create(
+              model="openai/gpt-oss-120b",
+              messages=groq_history,
+              temperature=0.1,
+          )
+
+          answer = completion.choices[0].message.content
+          st.markdown(answer)
+          st.session_state.messages_aris.append(
+              {"role": "assistant", "content": answer}
+          )
+        except Exception as chat_err:
+          st.error(f"Fehler im Chat: {chat_err}")
+
+# ==========================================
+# TAB 7: LEOPOLD (SIGNALS JOURNAL & ANALYTICS)
+# ==========================================
+with tab_leopold:
+  try:
+    st.subheader("⚙️ Leopold - Signals Journal & Deep Analytics")
+    st.markdown("Umfassende Auswertung und Komplett-Ansicht des `signals_journal`.")
+    st.divider()
+
+    # Daten aus signals_journal laden
+    try:
+        res = supabase.table("signals_journal").select("*").execute()
+        sj_data = res.data if res and res.data else []
+    except Exception as e:
+        st.error(f"Fehler beim Laden des `signals_journal`: {e}")
+        sj_data = []
+
+    if not sj_data:
+        st.info("Keine Daten im `signals_journal` gefunden.")
+    else:
+        df_sj = pd.DataFrame(sj_data)
+
+        # Spalten-Check & Normalisierung (falls Feldnamen leicht abweichen)
+        # Wir suchen nach Typ-Spalten (z.B. 'signal_typ' oder 'typ')
+        type_col = next((c for c in ["signal_typ", "typ", "signal_type"] if c in df_sj.columns), None)
+        
+        # --- FILTERS ---
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            if type_col:
+                unique_types = ["Alle"] + list(df_sj[type_col].dropna().unique())
+                sel_type = st.selectbox("Nach Signal-Typ filtern", unique_types, key="leopold_type_filter")
+            else:
+                sel_type = "Alle"
+        with col_f2:
+            if "source" in df_sj.columns:
+                sources_sj = ["Alle"] + list(df_sj["source"].dropna().unique())
+                sel_source_sj = st.selectbox("Nach Quelle filtern", sources_sj, key="leopold_source_filter")
+            else:
+                sel_source_sj = "Alle"
+
+        # Filter anwenden für KPI-Berechnung
+        df_filtered = df_sj.copy()
+        if type_col and sel_type != "Alle":
+            df_filtered = df_filtered[df_filtered[type_col] == sel_type]
+        if "source" in df_filtered.columns and sel_source_sj != "Alle":
+            df_filtered = df_filtered[df_filtered["source"] == sel_source_sj]
+
+        # --- KPI BERECHNUNGEN ---
+        # 1. Split für Elite vs. Kauf (falls type_col existiert)
+        if type_col:
+            df_elite = df_sj[df_sj[type_col].astype(str).str.lower().str.contains("elite", na=False)]
+            df_kauf = df_sj[df_sj[type_col].astype(str).str.lower().str.contains("kauf|buy", na=False)]
+        else:
+            df_elite = pd.DataFrame()
+            df_kauf = pd.DataFrame()
+
+        # Hilfsfunktion für Mittelwerte von Performance-Spalten
+        def get_mean_perf(dataframe, col_name):
+            if col_name in dataframe.columns and not dataframe.empty:
+                val = dataframe[col_name].mean()
+                return val if pd.notnull(val) else 0.0
+            return 0.0
+
+        # Gewinntrades Quote berechnen (über gefilterte Ansicht oder gesamt)
+        win_rate = 0.0
+        perf_col_check = next((c for c in ["end_performance_5_tage", "performance", "end_performance"] if c in df_filtered.columns), None)
+        if perf_col_check and not df_filtered.empty:
+            winning_trades = len(df_filtered[df_filtered[perf_col_check] > 0])
+            total_trades = len(df_filtered.dropna(subset=[perf_col_check]))
+            win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0.0
+
+        # Durchschnittliche Tage bis max Performance
+        avg_days_to_max = 0.0
+        days_col = next((c for c in ["tage_bis_max_perf", "days_to_max", "max_perf_tage"] if c in df_filtered.columns), None)
+        if days_col and not df_filtered.empty:
+            val_days = df_filtered[days_col].mean()
+            avg_days_to_max = val_days if pd.notnull(val_days) else 0.0
+
+        # --- KPI DASHBOARD ANZEIGE ---
+        st.markdown("### 📈 Performance & Kennzahlen-Übersicht")
+        
+        row1_c1, row1_c2, row1_c3, row1_c4 = st.columns(4)
+        with row1_c1:
+            elite_perf = get_mean_perf(df_elite, perf_col_check)
+            st.metric("Performance Elite-Signale", f"{elite_perf:+.2f}%")
+        with row1_c2:
+            kauf_perf = get_mean_perf(df_kauf, perf_col_check)
+            st.metric("Performance Kaufsignale", f"{kauf_perf:+.2f}%")
+        with row1_c3:
+            st.metric("Gewinntrades (Quote)", f"{win_rate:.1f}%")
+        with row1_c4:
+            st.metric("Ø Tage bis Max-Perf.", f"{avg_days_to_max:.1f} Tage")
+
+        row2_c1, row2_c2, row2_c3, row2_c4 = st.columns(4)
+        with row2_c1:
+            elite_5d_end = get_mean_perf(df_elite, "end_performance_5_tage")
+            st.metric("5T End (Elite)", f"{elite_5d_end:+.2f}%")
+        with row2_c2:
+            elite_5d_max = get_mean_perf(df_elite, "max_performance_5_tage")
+            st.metric("5T Max (Elite)", f"{elite_5d_max:+.2f}%")
+        with row2_c3:
+            kauf_5d_end = get_mean_perf(df_kauf, "end_performance_5_tage")
+            st.metric("5T End (Kauf)", f"{kauf_5d_end:+.2f}%")
+        with row2_c4:
+            kauf_5d_max = get_mean_perf(df_kauf, "max_performance_5_tage")
+            st.metric("5T Max (Kauf)", f"{kauf_5d_max:+.2f}%")
+
+        st.divider()
+
+        # --- KOMPLETTES JOURNAL ALS TABELLE ---
+        st.subheader("📋 Signals Journal (Vollständige Datentabelle)")
+        st.dataframe(df_filtered, use_container_width=True, hide_index=True)
+
+        # CSV Export
+        csv_sj = df_filtered.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Komplettes Signals Journal als CSV exportieren",
+            data=csv_sj,
+            file_name="signals_journal_export.csv",
+            mime="text/csv",
+        )
+
+  except Exception as e:
+    st.error(f"Leopold-Tab aktuell nicht verfügbar (Fehler: {e})")
