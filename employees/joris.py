@@ -18,10 +18,7 @@ class JorisPortfolioManager:
     Arbeitsspeicher.
     2. Ermittlung und Speicherung der Top 5 & Flop 5 Performer der Watchlist.
     """
-    # 1. Performance- und Setup-Daten-Übertrag
     self._process_performance_transfer()
-
-    # 2. Top 5 & Flop 5 Performer der Watchlist ermitteln und speichern
     self.process_watchlist_performers()
 
   def _process_performance_transfer(self):
@@ -133,3 +130,20 @@ class JorisPortfolioManager:
     except Exception as e:
       print(f"Fehler beim Laden des Arbeitsspeichers: {e}")
       return []
+
+  def get_latest_report(self):
+    """Ruft den neuesten Bericht oder Eintrag aus dem Arbeitsspeicher ab."""
+    try:
+      res = (
+          self.supabase.table("aris_arbeitsspeicher")
+          .select("*")
+          .order("created_at", desc=True)
+          .limit(1)
+          .execute()
+      )
+      if res.data:
+        return res.data[0]
+      return None
+    except Exception as e:
+      print(f"Fehler beim Laden des neuesten Reports durch Joris: {e}")
+      return None
