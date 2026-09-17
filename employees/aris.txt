@@ -1,9 +1,12 @@
 Aris - Performance Manager
 
-Analysiert einmalig für jeden Trade
-- signals_journal Performance nach 5 Tagen, beste Performance innerhalb 5 Tagen, Performance nach einem Monat
-- trading_journal swing, Risk -> abgeschlossene Signale + Perform nach 30 Tagen
-- joris_journal Performance nach 5 Tagen, beste Performance innerhalb 5 Tagen, Performance nach einem Monat
+Analysiert einmalig für jeden Trade bei signals_journal und joris_journal:
+
+- Performance nach 5 Tagen
+- beste Performance innerhalb 5 Tagen
+- adx, smi Mustererkennung
+- laufen 5 tage end oder max trades besser
+- welche Signale laufen besser oder gibt es eine Signal adx, smi Kombi die gut läuft
 
 Gibt Verbesserungstipps
 
