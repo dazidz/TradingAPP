@@ -1,143 +1,254 @@
 from datetime import datetime
+import json
+import numpy as np
 import pandas as pd
+import streamlit as st
 import yfinance as yf
 
 
-class LeopoldAssistant:
+def render_leopold_signals_dashboard(supabase_client):
+  """Rendert das neue Leopold-Dashboard für das gesamte signals_journal
 
-  def __init__(self, supabase_client):
-    self.supabase = supabase_client
+  inklusive Tabellenansicht und detaillierter Performance-Auswertungen.
+  """
+  st.subheader("📊 Leopold Signals Dashboard & Analytics")
 
-  def run_transfer_routine(self):
-    """Führt Leopolds gesamte Hintergrund-Routine aus:
-
-    1. Übertragung von max_performance_5_tage und setup_reason in den
-    Arbeitsspeicher.
-    2. Ermittlung und Speicherung der Top 5 & Flop 5 Performer der Watchlist via
-    yfinance.
-    """
-    self._process_performance_transfer()
-    self.process_watchlist_performers()
-
-  def _process_performance_transfer(self):
-    """Interne Methode für den Transfer von Performance und setup_reason."""
-    try:
-      response = (
-          self.supabase.table("joris_journal")
-          .select("*")
-          .not_.is_("max_performance_5_tage", "null")
-          .execute()
+  # 1. Daten aus signals_journal laden
+  try:
+    response = (
+        supabase_client.table("signals_journal").select("*").execute()
+    )
+    data = response.data
+    if not data:
+      st.info(
+          "Keine Einträge im `signals_journal` gefunden. Das Journal wird von"
+          " Nino befüllt."
       )
-      records = response.data
+      return
+    df = pd.DataFrame(data)
+  except Exception as e:
+    st.error(f"Fehler beim Laden des `signals_journal`: {e}")
+    return
 
-      if not records:
-        return
+  # Hilfsspalten / Formatierungen sicherstellen
+  if "signal_datum" in df.columns:
+    df["signal_datum"] = pd.to_datetime(
+        df["signal_datum"], errors="coerce"
+    ).dt.date
 
-      for row in records:
-        if not row.get("aris_übertrag", False):
-          symbol = row.get("symbol", "N/A")
-          max_perf = row.get("max_performance_5_tage")
-          setup_reason = row.get("setup_reason", "Kein Grund angegeben")
+  # -------------------------------------------------------------------------
+  # METRIKEN & BERECHNUNGEN (KPI-Bereich)
+  # -------------------------------------------------------------------------
 
-          payload = {
-              "kategorie": "performance_and_setup_transfer",
-              "report_content": (
-                  f"Transfer für Symbol {symbol}:\n"
-                  f"- Max-Perf 5T: {max_perf}\n"
-                  f"- Setup Reason: {setup_reason}"
-              ),
-              "created_at": datetime.now().isoformat(),
-          }
-          self.supabase.table("aris_arbeitsspeicher").insert(payload).execute()
+  # Erkennung von Elite- vs. Kaufsignalen über signal_typ (Fallback auf 'Standard')
+  df["signal_typ_clean"] = (
+      df["signal_typ"].fillna("Standard").astype(str).str.lower()
+  )
+  is_elite = df["signal_typ_clean"].str.contains("elite", na=False)
+  is_kauf = df["signal_typ_clean"].str.contains(
+      "kauf|buy|standard", na=False
+  ) & ~is_elite
 
-          self.supabase.table("joris_journal").update(
-              {"aris_übertrag": True}
-          ).eq("id", row["id"]).execute()
+  # Datensätze filtern für spezielle Analysen
+  df_elite = df[is_elite]
+  df_kauf = df[is_kauf]
 
-    except Exception as e:
-      print(f"Fehler beim Performance- und Setup-Transfer durch Leopold: {e}")
+  # Gewinntrades (anhand der 30D-Performance oder 5D-Performance, falls 30D fehlt)
+  perf_col_30d = (
+      "performance_30d_end_pct"
+      if "performance_30d_end_pct" in df.columns
+      else "end_performance_5_tage"
+  )
+  if perf_col_30d in df.columns:
+    total_wins = df[df[perf_col_30d] > 0].shape[0]
+    total_evaluated = df[df[perf_col_30d].notnull()].shape[0]
+    win_rate = (
+        round((total_wins / total_evaluated) * 100, 1)
+        if total_evaluated > 0
+        else 0.0
+    )
+  else:
+    win_rate, total_wins = 0.0, 0
 
-  def process_watchlist_performers(self):
-    """Lädt die Watchlist aus Supabase, holt die Live-Kurse via yfinance,
+  # Performance-Berechnungen (Mittelwerte)
+  def safe_mean(series):
+    if series.empty or series.dropna().empty:
+        return 0.0
+    return round(float(series.dropna().mean()), 2)
 
-    berechnet die Tagesperformance und speichert Top 5 & Flop 5 im Arbeitsspeicher.
-    """
-    try:
-      response = (
-          self.supabase.table("watchlist")
-          .select("ticker, company_name, gettex_ticker, sector")
-          .execute()
-      )
-      data = response.data
+  # 1. Performance Elite Signale (Gesamt / 30D End oder bestverfügbar)
+  perf_elite = safe_mean(df_elite[perf_col_30d]) if not df_elite.empty else 0.0
 
-      if not data:
-        return
+  # 2. Performance Kaufsignale
+  perf_kauf = safe_mean(df_kauf[perf_col_30d]) if not df_kauf.empty else 0.0
 
-      df = pd.DataFrame(data)
-      if df.empty:
-        return
+  # 3. 5 Tage Metriken
+  perf_5d_end_elite = (
+      safe_mean(df_elite["end_performance_5_tage"])
+      if "end_performance_5_tage" in df_elite.columns
+      else 0.0
+  )
+  perf_5d_max_elite = (
+      safe_mean(df_elite["max_performance_5_tage"])
+      if "max_performance_5_tage" in df_elite.columns
+      else 0.0
+  )
 
-      performances = []
-      for _, row in df.iterrows():
-        try:
-          ticker_obj = yf.Ticker(row["ticker"])
-          info = ticker_obj.info
-          curr = info.get("currentPrice") or info.get("regularMarketPrice")
-          prev = info.get("previousClose")
+  perf_5d_end_kauf = (
+      safe_mean(df_kauf["end_performance_5_tage"])
+      if "end_performance_5_tage" in df_kauf.columns
+      else 0.0
+  )
+  perf_5d_max_kauf = (
+      safe_mean(df_kauf["max_performance_5_tage"])
+      if "max_performance_5_tage" in df_kauf.columns
+      else 0.0
+  )
 
-          if curr and prev:
-            change_pct = round(((curr - prev) / prev) * 100, 2)
-            performances.append({
-                "Firma": row["company_name"],
-                "Ticker": row["ticker"],
-                "Sektor": row.get("sector", "N/A"),
-                "Aktuell": round(float(curr), 2),
-                "Tageschange (%)": change_pct,
-            })
-        except Exception:
-          continue
+  # 4. Durchschnittliche Tage bis Max-Perf (falls candle_time_max_5_tage & signal_datum vorhanden)
+  avg_days_to_max = 0.0
+  if (
+      "candle_time_max_5_tage" in df.columns
+      and "signal_datum" in df.columns
+  ):
+    valid_time_df = df.dropna(
+        subset=["candle_time_max_5_tage", "signal_datum"]
+    ).copy()
+    if not valid_time_df.empty:
+      valid_time_df["max_date"] = pd.to_datetime(
+          valid_time_df["candle_time_max_5_tage"], errors="coerce"
+      ).dt.date
+      valid_time_df["sig_dt"] = pd.to_datetime(
+          valid_time_df["signal_datum"], errors="coerce"
+      ).dt.date
+      valid_time_df["days_diff"] = (
+          valid_time_df["max_date"] - valid_time_df["sig_dt"]
+      ).dt.days
+      days_filtered = valid_time_df["days_diff"].dropna()
+      days_filtered = days_filtered[days_filtered >= 0]
+      if not days_filtered.empty:
+        avg_days_to_max = round(float(days_filtered.mean()), 1)
 
-      if not performances:
-        return
+  # -------------------------------------------------------------------------
+  # UI: METRIKEN ANZEIGEN
+  # -------------------------------------------------------------------------
+  st.markdown("### 📈 Performance & Kennzahlen Übersicht")
 
-      df_perf = pd.DataFrame(performances)
+  col1, col2, col3, col4 = st.columns(4)
+  with col1:
+    st.metric(
+        "Performance Elite Signale",
+        f"{perf_elite}%",
+        help="Durchschnittliche Performance der Elite-Signale",
+    )
+    st.metric(
+        "Perf. 5T End (Elite)",
+        f"{perf_5d_end_elite}%",
+        help="Durchschnittlicher End-Kurs nach 5 Tagen (Elite)",
+    )
+  with col2:
+    st.metric(
+        "Performance Kaufsignale",
+        f"{perf_kauf}%",
+        help="Durchschnittliche Performance der regulären Kaufsignale",
+    )
+    st.metric(
+        "Perf. 5T End (Kauf)",
+        f"{perf_5d_end_kauf}%",
+        help="Durchschnittlicher End-Kurs nach 5 Tagen (Kauf)",
+    )
+  with col3:
+    st.metric(
+        "Gewinntrades (Quote)",
+        f"{win_rate}%",
+        f"{total_wins} Wins gesamt",
+        help="Anteil positiver Trades im Journal",
+    )
+    st.metric(
+        "Perf. 5T Max (Elite)",
+        f"{perf_5d_max_elite}%",
+        help="Durchschnittliches Maximum nach 5 Tagen (Elite)",
+    )
+  with col4:
+    st.metric(
+        "Ø Tage bis Max-Perf",
+        f"{avg_days_to_max} Tage",
+        help="Durchschnittliche Anzahl Tage vom Signal bis zum 5T-Hoch",
+    )
+    st.metric(
+        "Perf. 5T Max (Kauf)",
+        f"{perf_5d_max_kauf}%",
+        help="Durchschnittliches Maximum nach 5 Tagen (Kauf)",
+    )
 
-      # Nach Tageschange sortieren
-      df_sorted = df_perf.sort_values(by="Tageschange (%)", ascending=False)
+  st.divider()
 
-      top_5 = df_sorted.head(5)
-      flop_5 = df_sorted.tail(5)
+  # -------------------------------------------------------------------------
+  # UI: FILTER & KOMPLETTES JOURNAL ALS TABELLE
+  # -------------------------------------------------------------------------
+  st.markdown("### 🗂️ Komplettes Signals Journal (Tabelle)")
 
-      today_str = datetime.now().strftime("%Y-%m-%d")
+  # Filteroptionen für die Tabelle
+  col_f1, col_f2, col_f3 = st.columns(3)
+  with col_f1:
+    selected_type = st.selectbox(
+        "Nach Signal-Typ filtern",
+        ["Alle"] + list(df["signal_typ"].dropna().unique()),
+    )
+  with col_f2:
+    only_favorites = st.checkbox("Nur Favoriten anzeigen")
+  with col_f3:
+    search_ticker = st.text_input("Ticker Suchen", "").strip().upper()
 
-      payload = {
-          "datum": today_str,
-          "top_5": top_5.to_dict(orient="records"),
-          "flop_5": flop_5.to_dict(orient="records"),
-      }
+  # DataFrame filtern
+  df_display = df.copy()
+  if selected_type != "Alle":
+    df_display = df_display[df_display["signal_typ"] == selected_type]
+  if only_favorites and "is_favorite" in df_display.columns:
+    df_display = df_display[df_display["is_favorite"] == True]
+  if search_ticker:
+    df_display = df_display[
+        df_display["ticker"].str.upper().str.contains(search_ticker, na=False)
+    ]
 
-      self.supabase.table("aris_arbeitsspeicher").insert({
-          "kategorie": "watchlist_ranking",
-          "report_content": (
-              f"Watchlist Top/Flop Ranking vom {today_str}:\n{str(payload)}"
-          ),
-          "created_at": datetime.now().isoformat(),
-      }).execute()
+  # Relevante Spalten für die übersichtliche Ansicht auswählen (falls vorhanden)
+  preferred_columns = [
+      "ticker",
+      "signal_datum",
+      "signal_typ",
+      "einstiegspreis_zum_signal",
+      "smi",
+      "adx",
+      "above_ema20",
+      "is_favorite",
+      "max_performance_5_tage",
+      "end_performance_5_tage",
+      "performance_30d_end_pct",
+      "status",
+  ]
+  existing_cols = [c for c in preferred_columns if c in df_display.columns]
+  # Restliche Spalten anhängen, die nicht in der Liste sind
+  other_cols = [c for c in df_display.columns if c not in existing_cols]
+  final_col_order = existing_cols + other_cols
 
-    except Exception as e:
-      print(f"Fehler bei der Watchlist-Auswertung durch Leopold: {e}")
+  st.dataframe(
+      df_display[final_col_order],
+      use_container_width=True,
+      hide_index=True,
+  )
 
-  def get_aris_arbeitsspeicher_data(self):
-    """Ruft die letzten Einträge aus dem Aris-Arbeitsspeicher ab."""
-    try:
-      res = (
-          self.supabase.table("aris_arbeitsspeicher")
-          .select("*")
-          .order("created_at", desc=True)
-          .limit(20)
-          .execute()
-      )
-      return res.data
-    except Exception as e:
-      print(f"Fehler beim Laden des Arbeitsspeichers: {e}")
-      return []
+  st.caption(
+      f"Gesamtanzahl Datensätze in Ansicht: {len(df_display)} von"
+      f" {len(df)} Einträgen."
+  )
+
+
+# Beispiel für den Aufruf im Hauptskript von Leopold:
+if __name__ == "__main__":
+  st.set_page_config(
+      page_title="Leopold Signals Dashboard", layout="wide"
+  )
+  from db import get_db_client
+
+  db_client = get_db_client()
+  render_leopold_signals_dashboard(db_client)
