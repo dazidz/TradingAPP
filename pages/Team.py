@@ -284,61 +284,82 @@ with tab_otto:
     st.error(f"Otto-Tab aktuell nicht verfügbar (Fehler: {e})")
 
 # ==========================================
-# TAB 5: NINO (SIGNAL AGENT)
+# TAB 5: NINO (SIGNALS & ARIS ARBEITSSPEICHER)
 # ==========================================
 with tab_nino:
   try:
-    from employees.nino import NinoSignalsAssistant
-
-    nino = NinoSignalsAssistant(supabase)
-
-    st.subheader("⚡ Nino - Signal Agent")
-    st.markdown("Visuelle Auswertung der autonomen 5-Tages-Signal-Analysen.")
+    st.subheader("⚡ Nino - Signal Agent & Arbeitsspeicher")
+    st.markdown("Zentrale Visualisierung des `aris_arbeitsspeicher` (befüllt durch Nino).")
     st.divider()
 
-    history_data = nino.get_signals_history()
-    if history_data:
-      df_journal = pd.DataFrame(history_data)
-      df_eval = (
-          df_journal[df_journal["status"].str.contains("Ausgewertet", na=False)]
-          .copy()
-      )
+    # Daten direkt aus der aris_arbeitsspeicher Tabelle laden
+    try:
+        res = supabase.table("aris_arbeitsspeicher").select("*").order("signal_datum", desc=True).execute()
+        data = res.data if res and res.data else []
+    except Exception as e:
+        st.error(f"Fehler beim Laden des Arbeitsspeichers: {e}")
+        data = []
 
-      if not df_eval.empty:
-        total_eval = len(df_eval)
-        wins = len(df_eval[df_eval["end_performance_5_tage"] > 0])
-        losses = len(df_eval[df_eval["end_performance_5_tage"] <= 0])
-        win_rate = (wins / total_eval) * 100 if total_eval > 0 else 0
-
-        avg_perf_total = df_eval["end_performance_5_tage"].mean()
-        max_perf_all = (
-            df_eval["max_performance_5_tage"].max()
-            if "max_performance_5_tage" in df_eval.columns
-            else 0
-        )
-        fav_count = (
-            len(df_journal[df_journal["is_favorite"] == True])
-            if "is_favorite" in df_journal.columns
-            else 0
-        )
-
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        with col1:
-          st.metric("Ausgewertet", f"{total_eval}")
-        with col2:
-          st.metric("Win-Rate", f"{win_rate:.1f}%", f"{wins}W/{losses}L")
-        with col3:
-          st.metric("Ø End-Perf.", f"{avg_perf_total:+.2f}%")
-        with col4:
-          st.metric("Bester Peak", f"{max_perf_all:+.2f}%")
-        with col5:
-          st.metric("Favoriten", f"{fav_count}")
-        with col6:
-          st.metric("Offen", f"{len(df_journal) - total_eval}")
-      else:
-        st.warning("⚠️ Noch keine 5-Tages-Auswertungen vorhanden.")
+    if not data:
+        st.info("Keine Daten im `aris_arbeitsspeicher` gefunden. Nino verarbeitet die Daten im Hintergrund oder per GitHub Action.")
     else:
-      st.info("Das Journal ist komplett leer.")
+        df = pd.DataFrame(data)
+
+        # --- Filter-Bereich in der Sidebar oder direkt über der Tabelle ---
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            sources = ["Alle"] + list(df["source"].dropna().unique()) if "source" in df.columns else ["Alle"]
+            selected_source = st.selectbox("Nach Quelle filtern", sources, key="nino_source_filter")
+        with col_f2:
+            only_favorites = st.checkbox("Nur Favoriten anzeigen", value=False, key="nino_fav_filter")
+
+        # Filter anwenden
+        filtered_df = df.copy()
+        if selected_source != "Alle":
+            filtered_df = filtered_df[filtered_df["source"] == selected_source]
+        if only_favorites and "is_favorite" in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df["is_favorite"] == True]
+
+        # --- KPIs / Kennzahlen oben ---
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Gesamt Einträge", len(filtered_df))
+        with col2:
+            avg_end_perf = filtered_df["end_performance_5_tage"].mean() if "end_performance_5_tage" in filtered_df.columns else 0
+            st.metric("Ø 5D End-Performance", f"{avg_end_perf:+.2f}%" if pd.notnull(avg_end_perf) else "0.0%")
+        with col3:
+            avg_max_perf = filtered_df["max_performance_5_tage"].mean() if "max_performance_5_tage" in filtered_df.columns else 0
+            st.metric("Ø 5D Max-Performance", f"{avg_max_perf:+.2f}%" if pd.notnull(avg_max_perf) else "0.0%")
+        with col4:
+            fav_count = filtered_df["is_favorite"].sum() if "is_favorite" in filtered_df.columns else 0
+            st.metric("Favoriten in Ansicht", int(fav_count))
+
+        st.divider()
+
+        # --- Datentabelle anzeigen ---
+        st.subheader("📊 Arbeitsspeicher-Daten")
+        display_columns = [
+            "ticker", "source", "signal_datum", "signal_typ", 
+            "einstiegspreis_zum_signal", "max_kurs_5_tage", "max_performance_5_tage", 
+            "end_kurs_5_tage", "end_performance_5_tage", "is_favorite", "status"
+        ]
+        existing_cols = [col for col in display_columns if col in filtered_df.columns]
+        
+        st.dataframe(
+            filtered_df[existing_cols],
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # CSV Export Button
+        csv = filtered_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Gefilterte Daten als CSV herunterladen",
+            data=csv,
+            file_name="aris_arbeitsspeicher_export.csv",
+            mime="text/csv",
+        )
+
   except Exception as e:
     st.error(f"Nino-Tab aktuell nicht verfügbar (Fehler: {e})")
 
@@ -363,7 +384,7 @@ with tab_aris:
     3. Screener-Quellcode (auf Filterfehler, Schwachstellen und verpasste Chancen prüfen)
     4. Watchlist (nach Asset-Kategorien: Invest, Swing, High Risk)
 
-    Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefere konkrete, direkt umsetzbare Handlungsempfehlungen.
+    Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefer konkrete, direkt umsetzbare Handlungsempfehlungen.
     """
 
   if not st.session_state.messages_aris:
@@ -481,34 +502,13 @@ with tab_leopold:
 
     leopold = LeopoldAssistant(supabase)
 
-    st.subheader("⚙️ Leopold - Aris Arbeitsspeicher & Transfer-Agent")
+    st.subheader("⚙️ Leopold - System Support & Überwachung")
     st.markdown(
-        "Leopold arbeitet als eigenständiger Mitarbeiter im Hintergrund. Er prüft, ob im `joris_journal` "
-        "bei `max_performance_5_tage` Daten eingetragen sind und überträgt diese in den `aris_arbeitsspeicher`, "
-        "sofern dies noch nicht erfolgt ist (`aris_übertrag = True`)."
+        "Leopold überwacht den Systemstatus und sekundäre Hintergrundprozesse."
     )
     st.divider()
 
-    col_l1, col_l2 = st.columns([2, 1])
-    with col_l1:
-      if st.button("🚀 Leopold: Übertragungs-Routine jetzt ausführen", type="primary"):
-        with st.spinner("Leopold führt seine Arbeitsroutine aus..."):
-          try:
-            leopold.run_transfer_routine()
-            st.success("Leopold hat die Routine erfolgreich beendet!")
-            st.rerun()
-          except Exception as e:
-            st.error(f"Fehler bei der Ausführung: {e}")
-
-    st.divider()
-    st.subheader("📊 Inhalt des Aris Arbeitsspeichers")
-    
-    aris_data = leopold.get_aris_arbeitsspeicher_data()
-    if aris_data:
-      df_aris = pd.DataFrame(aris_data)
-      st.dataframe(df_aris, use_container_width=True)
-    else:
-      st.info("Der Aris-Arbeitsspeicher ist aktuell leer.")
+    st.info("Die zentrale Datenverwaltung läuft nun vollständig autonom über Nino. Dieser Tab steht für zukünftige System-Erweiterungen bereit.")
 
   except Exception as e:
     st.error(f"Leopold-Tab aktuell nicht verfügbar (Fehler: {e})")
