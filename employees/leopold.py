@@ -34,40 +34,27 @@ sj_data = []
 load_error = None
 try:
     res = supabase.table("signals_journal").select("*").execute()
-    if res and res.data:
-        sj_data = res.data
+    sj_data = res.data if res and res.data else []
 except Exception as e:
     load_error = str(e)
 
-# Diagnose-Hinweis, falls keine Daten da sind oder ein Fehler auftrat
+# Diagnose-Hinweis, falls ein Fehler auftrat oder keine Daten da sind
 if load_error:
     st.error(f"⚠️ Supabase-Fehler beim Zugriff auf `signals_journal`: {load_error}")
 elif not sj_data:
     st.warning(
-        "⚠️ Die Tabelle `signals_journal` ist aktuell **leer** oder wurde in Supabase noch nicht befüllt. "
-        "Bitte stelle sicher, dass Signale generiert wurden und die Tabelle existiert."
+        "⚠️ Die Tabelle `signals_journal` ist aktuell **leer**. "
+        "Es konnten keine Datensätze geladen werden."
     )
-    
-    # Debug-Info anzeigen, welche Spalten minimal benötigt werden
-    with st.expander("🛠️ Leopold Diagnose & Erwartete Struktur"):
-        st.markdown("""
-        Leopold erwartet in Supabase eine Tabelle namens `signals_journal` mit folgenden Spalten:
-        - `signal_typ` (Text: z.B. 'Elite', 'Kauf')
-        - `source` (Text: z.B. Screener-Name)
-        - `end_performance_5_tage` (Numerisch)
-        - `max_performance_5_tage` (Numerisch)
-        - `tage_bis_max_perf` (Numerisch)
-        - Weitere Felder wie `ticker`, `signal_datum`, `einstiegspreis_zum_signal` etc. werden dynamisch mit angezeigt.
-        """)
 else:
     df_sj = pd.DataFrame(sj_data)
 
-    # Spalten-Erkennung für Typ und Performance absichern
+    # Spalten-Erkennung für den Typ absichern
     possible_type_cols = ["signal_typ", "typ", "signal_type", "type"]
     type_col = next((c for c in possible_type_cols if c in df_sj.columns), None)
 
-    # Filter-Optionen in der UI
-    col_f1, col_f2 = st.columns(2)
+    # Filter-Optionen in der UI (Nur nach Signal-Typ)
+    col_f1 = st.columns(1)[0]
     with col_f1:
         if type_col:
             unique_types = ["Alle"] + list(df_sj[type_col].dropna().unique())
@@ -75,20 +62,11 @@ else:
         else:
             sel_type = "Alle"
             st.info("ℹ️ Keine Signal-Typ-Spalte gefunden ('signal_typ' oder ähnlich). Filter wird übersprungen.")
-            
-    with col_f2:
-        if "source" in df_sj.columns:
-            sources_sj = ["Alle"] + list(df_sj["source"].dropna().unique())
-            sel_source_sj = st.selectbox("Nach Quelle filtern", sources_sj, key="leopold_source_filter")
-        else:
-            sel_source_sj = "Alle"
 
-    # DataFrame nach Filtern verfeinern
+    # DataFrame nach Filter verfeinern
     df_filtered = df_sj.copy()
     if type_col and sel_type != "Alle":
         df_filtered = df_filtered[df_filtered[type_col] == sel_type]
-    if "source" in df_filtered.columns and sel_source_sj != "Alle":
-        df_filtered = df_filtered[df_filtered["source"] == sel_source_sj]
 
     # Teilmengen für Elite vs. Kauf bestimmen (falls Spalte existiert)
     if type_col:
