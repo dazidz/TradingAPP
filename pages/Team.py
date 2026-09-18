@@ -292,7 +292,6 @@ with tab_nino:
     st.markdown("Zentrale Visualisierung des `aris_arbeitsspeicher` (befüllt durch Nino).")
     st.divider()
 
-    # Daten direkt aus der aris_arbeitsspeicher Tabelle laden (nach candle_time sortiert)
     try:
         res = supabase.table("aris_arbeitsspeicher").select("*").order("candle_time", desc=True).execute()
         data = res.data if res and res.data else []
@@ -301,11 +300,10 @@ with tab_nino:
         data = []
 
     if not data:
-        st.info("Keine Daten im `aris_arbeitsspeicher` gefunden. Nino verarbeitet die Daten im Hintergrund oder per GitHub Action.")
+        st.info("Keine Daten im `aris_arbeitsspeicher` gefunden.")
     else:
         df = pd.DataFrame(data)
 
-        # --- Filter-Bereich ---
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             sources = ["Alle"] + list(df["source"].dropna().unique()) if "source" in df.columns else ["Alle"]
@@ -313,14 +311,12 @@ with tab_nino:
         with col_f2:
             only_favorites = st.checkbox("Nur Favoriten anzeigen", value=False, key="nino_fav_filter")
 
-        # Filter anwenden
         filtered_df = df.copy()
         if selected_source != "Alle":
             filtered_df = filtered_df[filtered_df["source"] == selected_source]
         if only_favorites and "is_favorite" in filtered_df.columns:
             filtered_df = filtered_df[filtered_df["is_favorite"] == True]
 
-        # --- KPIs / Kennzahlen oben ---
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Gesamt Einträge", len(filtered_df))
@@ -336,12 +332,12 @@ with tab_nino:
 
         st.divider()
 
-        # --- Datentabelle anzeigen ---
         st.subheader("📊 Arbeitsspeicher-Daten")
         display_columns = [
             "ticker", "source", "candle_time", "signal_typ", 
             "einstiegspreis_zum_signal", "max_kurs_5_tage", "max_performance_5_tage", 
-            "end_kurs_5_tage", "end_performance_5_tage", "is_favorite", "status"
+            "candle_time_max_5_tage", "end_kurs_5_tage", "end_performance_5_tage", 
+            "is_favorite", "status"
         ]
         existing_cols = [col for col in display_columns if col in filtered_df.columns]
         
@@ -351,7 +347,6 @@ with tab_nino:
             hide_index=True
         )
 
-        # CSV Export Button
         csv = filtered_df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Gefilterte Daten als CSV herunterladen",
@@ -502,7 +497,6 @@ with tab_leopold:
     st.markdown("Vollständige Auswertung und detaillierte Kennzahlen des `signals_journal`.")
     st.divider()
 
-    # Daten aus signals_journal laden
     sj_data = []
     load_error = None
     try:
@@ -521,11 +515,9 @@ with tab_leopold:
     else:
         df_sj = pd.DataFrame(sj_data)
 
-        # Spalten-Erkennung für den Typ absichern
         possible_type_cols = ["signal_typ", "typ", "signal_type", "type"]
         type_col = next((c for c in possible_type_cols if c in df_sj.columns), None)
 
-        # Filter-Optionen in der UI (Nur nach Signal-Typ)
         col_f1 = st.columns(1)[0]
         with col_f1:
             if type_col:
@@ -535,12 +527,10 @@ with tab_leopold:
                 sel_type = "Alle"
                 st.info("ℹ️ Keine Signal-Typ-Spalte gefunden ('signal_typ' oder ähnlich). Filter wird übersprungen.")
 
-        # DataFrame nach Filter verfeinern
         df_filtered = df_sj.copy()
         if type_col and sel_type != "Alle":
             df_filtered = df_filtered[df_filtered[type_col] == sel_type]
 
-        # Teilmengen für Elite vs. Kauf bestimmen (falls Spalte existiert)
         if type_col:
             df_elite = df_sj[df_sj[type_col].astype(str).str.lower().str.contains("elite", na=False)]
             df_kauf = df_sj[df_sj[type_col].astype(str).str.lower().str.contains("kauf|buy", na=False)]
@@ -548,19 +538,16 @@ with tab_leopold:
             df_elite = pd.DataFrame()
             df_kauf = pd.DataFrame()
 
-        # Hilfsfunktion für sichere Mittelwert-Berechnung
         def safe_mean(dataframe, column_name):
             if not dataframe.empty and column_name in dataframe.columns:
                 val = pd.to_numeric(dataframe[column_name], errors='coerce').mean()
                 return val if pd.notnull(val) else 0.0
             return 0.0
 
-        # KPI 1: Performance Elite & Kaufsignale
         perf_target_col = next((c for c in ["end_performance_5_tage", "performance", "end_performance"] if c in df_sj.columns), None)
         perf_elite = safe_mean(df_elite, perf_target_col)
         perf_kauf = safe_mean(df_kauf, perf_target_col)
 
-        # KPI 2: Gewinntrades Quote (%)
         win_rate = 0.0
         if not df_filtered.empty and perf_target_col:
             numeric_perf = pd.to_numeric(df_filtered[perf_target_col], errors='coerce')
@@ -569,17 +556,14 @@ with tab_leopold:
             if total_valid_trades > 0:
                 win_rate = (winning_trades / total_valid_trades) * 100
 
-        # KPI 3: Durchschnittliche Tage bis Max Performance
         days_col = next((c for c in ["tage_bis_max_perf", "days_to_max", "max_perf_tage", "tage_bis_max"] if c in df_filtered.columns), None)
         avg_days_to_max = safe_mean(df_filtered, days_col)
 
-        # KPI 4: 5 Tage End & Max Werte für Elite & Kauf
         elite_5d_end = safe_mean(df_elite, "end_performance_5_tage")
         elite_5d_max = safe_mean(df_elite, "max_performance_5_tage")
         kauf_5d_end = safe_mean(df_kauf, "end_performance_5_tage")
         kauf_5d_max = safe_mean(df_kauf, "max_performance_5_tage")
 
-        # --- ANZEIGE DER KPI METRIKEN ---
         st.markdown("### 📊 Performance-Kennzahlen")
         
         r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
@@ -604,11 +588,9 @@ with tab_leopold:
 
         st.divider()
 
-        # --- KOMPLETTES JOURNAL ALS TABELLE ---
         st.subheader(f"📋 Komplettes Signals Journal ({len(df_filtered)} Einträge)")
         st.dataframe(df_filtered, use_container_width=True, hide_index=True)
 
-        # Download-Button als CSV
         csv_data = df_filtered.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Signals Journal als CSV herunterladen",
