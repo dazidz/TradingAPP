@@ -242,7 +242,7 @@ class NinoSignalsAssistant:
 
           # 2. An aris_arbeitsspeicher übergeben
           arbeitsspeicher_entry = journal_entry.copy()
-          arbeitsspeicher_entry["source"] = "signals_journal"
+          arbeitsspeicher_entry["quelle"] = "signals_journal"
           self.supabase.table(self.table_aris_arbeitsspeicher).insert(
               arbeitsspeicher_entry
           ).execute()
@@ -278,7 +278,7 @@ class NinoSignalsAssistant:
       arb_res = (
           self.supabase.table(self.table_aris_arbeitsspeicher)
           .select("ticker, candle_time")
-          .eq("source", "joris_journal")
+          .eq("quelle", "joris_journal")
           .execute()
       )
       arb_data = arb_res.data or []
@@ -357,7 +357,7 @@ class NinoSignalsAssistant:
             "candle_time_max_5_tage": perf_data["candle_time_max_5_tage"],
             "end_kurs_5_tage": perf_data["end_kurs_5_tage"],
             "end_performance_5_tage": perf_data["end_performance_5_tage"],
-            "source": "joris_journal",
+            "quelle": "joris_journal",
             "status": "5D Ausgewertet",
         }
 
