@@ -292,9 +292,9 @@ with tab_nino:
     st.markdown("Zentrale Visualisierung des `aris_arbeitsspeicher` (befüllt durch Nino).")
     st.divider()
 
-    # Daten direkt aus der aris_arbeitsspeicher Tabelle laden
+    # Daten direkt aus der aris_arbeitsspeicher Tabelle laden (nach candle_time sortiert)
     try:
-        res = supabase.table("aris_arbeitsspeicher").select("*").order("signal_datum", desc=True).execute()
+        res = supabase.table("aris_arbeitsspeicher").select("*").order("candle_time", desc=True).execute()
         data = res.data if res and res.data else []
     except Exception as e:
         st.error(f"Fehler beim Laden des Arbeitsspeichers: {e}")
@@ -339,7 +339,7 @@ with tab_nino:
         # --- Datentabelle anzeigen ---
         st.subheader("📊 Arbeitsspeicher-Daten")
         display_columns = [
-            "ticker", "source", "signal_datum", "signal_typ", 
+            "ticker", "source", "candle_time", "signal_typ", 
             "einstiegspreis_zum_signal", "max_kurs_5_tage", "max_performance_5_tage", 
             "end_kurs_5_tage", "end_performance_5_tage", "is_favorite", "status"
         ]

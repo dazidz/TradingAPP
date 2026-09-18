@@ -120,11 +120,6 @@ class NinoSignalsAssistant:
             return None
 
     def process_signals_to_journal(self):
-        """
-        1. Prüft Rohsignale in 'signals'.
-        2. Nach 5 Tagen: Archivierung in 'signals_journal'.
-        3. Berechnet 5D-Performance und schreibt ins Journal + übergibt an 'aris_arbeitsspeicher'.
-        """
         print("Nino verarbeitet aktive Signale (signals -> signals_journal -> aris_arbeitsspeicher)...")
         try:
             today = datetime.now().date()
@@ -133,11 +128,11 @@ class NinoSignalsAssistant:
             active_res = self.supabase.table(self.table_active_signals).select("*").execute()
             active_signals = active_res.data or []
 
-            journal_res = self.supabase.table(self.table_signals_journal).select("ticker, signal_datum").execute()
+            journal_res = self.supabase.table(self.table_signals_journal).select("ticker, candle_time").execute()
             journal_data = journal_res.data or []
             existing_journal_set = {
-                (str(j["ticker"]).upper(), str(j["signal_datum"])[:10])
-                for j in journal_data if j and j.get("ticker") and j.get("signal_datum")
+                (str(j["ticker"]).upper(), str(j["candle_time"])[:10])
+                for j in journal_data if j and j.get("ticker") and j.get("candle_time")
             }
 
             for sig in active_signals:
@@ -148,7 +143,7 @@ class NinoSignalsAssistant:
                     continue
 
                 ticker_upper = ticker.upper()
-                sig_date_str = sig.get("datum") or sig.get("signal_datum") or sig.get("candle_time") or sig.get("created_at")
+                sig_date_str = sig.get("candle_time") or sig.get("datum") or sig.get("signal_datum") or sig.get("created_at")
                 if not sig_date_str:
                     continue
 
@@ -158,7 +153,6 @@ class NinoSignalsAssistant:
                 except Exception:
                     continue
 
-                # Bedingung: Erst nach 5 Tagen ins Journal übertragen
                 days_passed = (today - sig_date).days
                 if days_passed < 5:
                     continue
@@ -169,14 +163,13 @@ class NinoSignalsAssistant:
                     smi_val, adx_val, above_ema = self._parse_meta_data(sig)
                     is_fav = ticker_upper in favorite_tickers
 
-                    # 5D Performance berechnen
                     perf_data = self._fetch_5d_performance(ticker_upper, sig_date, sig_price)
                     if not perf_data:
                         continue
 
                     journal_entry = {
                         "ticker": ticker_upper,
-                        "signal_datum": pd.to_datetime(sig_date_str).isoformat(),
+                        "candle_time": pd.to_datetime(sig_date_str).isoformat(),
                         "signal_typ": sig_type,
                         "einstiegspreis_zum_signal": perf_data["base_preis"],
                         "smi": smi_val,
@@ -190,11 +183,9 @@ class NinoSignalsAssistant:
                         "status": "5D Ausgewertet & Archiviert"
                     }
 
-                    # In signals_journal schreiben
-                    ins_res = self.supabase.table(self.table_signals_journal).insert(journal_entry).execute()
+                    self.supabase.table(self.table_signals_journal).insert(journal_entry).execute()
                     existing_journal_set.add((ticker_upper, sig_date_iso))
 
-                    # Zusätzlich an aris_arbeitsspeicher übergeben (mit Quelle)
                     arbeitsspeicher_entry = journal_entry.copy()
                     arbeitsspeicher_entry["source"] = "signals_journal"
                     self.supabase.table(self.table_aris_arbeitsspeicher).insert(arbeitsspeicher_entry).execute()
@@ -204,11 +195,6 @@ class NinoSignalsAssistant:
             print(f"Fehler in process_signals_to_journal: {e}")
 
     def process_joris_journal(self):
-        """
-        1. Ruft Daten aus 'joris_journal' ab.
-        2. Berechnet die 5 Tage Max- & End-Performance, sobald 5 Tage erreicht sind.
-        3. Übergibt diese an 'aris_arbeitsspeicher'.
-        """
         print("Nino verarbeitet joris_journal (Berechnung & Übergabe an aris_arbeitsspeicher)...")
         try:
             today = datetime.now().date()
@@ -216,12 +202,11 @@ class NinoSignalsAssistant:
             joris_res = self.supabase.table(self.table_joris_journal).select("*").execute()
             joris_items = joris_res.data or []
 
-            # Bereits im Arbeitsspeicher vorhandene Joris-Einträge prüfen, um doppelte Inserts zu vermeiden
-            arb_res = self.supabase.table(self.table_aris_arbeitsspeicher).select("ticker, signal_datum").eq("source", "joris_journal").execute()
+            arb_res = self.supabase.table(self.table_aris_arbeitsspeicher).select("ticker, candle_time").eq("source", "joris_journal").execute()
             arb_data = arb_res.data or []
             existing_arb_set = {
-                (str(j["ticker"]).upper(), str(j["signal_datum"])[:10])
-                for j in arb_data if j and j.get("ticker") and j.get("signal_datum")
+                (str(j["ticker"]).upper(), str(j["candle_time"])[:10])
+                for j in arb_data if j and j.get("ticker") and j.get("candle_time")
             }
 
             for item in joris_items:
@@ -230,7 +215,7 @@ class NinoSignalsAssistant:
                     continue
 
                 ticker_upper = ticker.upper()
-                date_str = item.get("signal_datum") or item.get("created_at")
+                date_str = item.get("candle_time") or item.get("signal_datum") or item.get("created_at")
                 if not date_str:
                     continue
 
@@ -242,10 +227,10 @@ class NinoSignalsAssistant:
 
                 days_passed = (today - sig_date).days
                 if days_passed < 5:
-                    continue  # Noch keine 5 Tage vergangen
+                    continue
 
                 if (ticker_upper, sig_date_iso) in existing_arb_set:
-                    continue   हाता  # Bereits verarbeitet & übergeben
+                    continue
 
                 base_price = float(item.get("preis") or item.get("kurs") or item.get("einstiegspreis_zum_signal") or 0)
                 perf_data = self._fetch_5d_performance(ticker_upper, sig_date, base_price)
@@ -262,15 +247,13 @@ class NinoSignalsAssistant:
                     "status": "5D Ausgewertet"
                 }
 
-                # Update in joris_journal
                 item_id = item.get("id")
                 if item_id:
                     self.supabase.table(self.table_joris_journal).update(updated_joris_data).eq("id", item_id).execute()
 
-                # Übergabe an aris_arbeitsspeicher mit Quellenkennzeichnung
                 arbeitsspeicher_entry = {
                     "ticker": ticker_upper,
-                    "signal_datum": pd.to_datetime(date_str).isoformat(),
+                    "candle_time": pd.to_datetime(date_str).isoformat(),
                     "signal_typ": item.get("signal_typ", "Joris"),
                     "einstiegspreis_zum_signal": perf_data["base_preis"],
                     "smi": smi_val,
@@ -292,7 +275,6 @@ class NinoSignalsAssistant:
             print(f"Fehler in process_joris_journal: {e}")
 
     def run_all(self):
-        """Hauptroutine für Nino."""
         self.process_signals_to_journal()
         self.process_joris_journal()
 
@@ -300,7 +282,4 @@ class NinoSignalsAssistant:
 if __name__ == "__main__":
     supabase_client = get_db_client()
     nino = NinoSignalsAssistant(supabase_client)
-
-    print("Nino startet zentrale Datenverwaltung...")
     nino.run_all()
-    print("Nino Routinen erfolgreich beendet.")
