@@ -194,6 +194,7 @@ class NinoSignalsAssistant:
           continue
 
         days_passed = (today - sig_date).days
+        # Nur verarbeiten, wenn das Signal mind. 5 Tage alt ist
         if days_passed < 5:
           continue
 
@@ -233,19 +234,29 @@ class NinoSignalsAssistant:
               "status": "5D Ausgewertet & Archiviert",
           }
 
+          # 1. Ins signals_journal schreiben
           self.supabase.table(self.table_signals_journal).insert(
               journal_entry
           ).execute()
           existing_journal_set.add((ticker_upper, sig_date_iso))
 
+          # 2. An aris_arbeitsspeicher übergeben
           arbeitsspeicher_entry = journal_entry.copy()
           arbeitsspeicher_entry["source"] = "signals_journal"
           self.supabase.table(self.table_aris_arbeitsspeicher).insert(
               arbeitsspeicher_entry
           ).execute()
+
+          # 3. Aus der aktiven 'signals'-Tabelle löschen, damit es aus dem Screener "wandert"
+          sig_id = sig.get("id")
+          if sig_id:
+            self.supabase.table(self.table_active_signals).delete().eq(
+                "id", sig_id
+            ).execute()
+
           print(
-              f"Signal für {ticker_upper} erfolgreich archiviert und an"
-              " aris_arbeitsspeicher übergeben."
+              f"Signal für {ticker_upper} erfolgreich ausgewertet, ins Journal"
+              " verschoben und an aris_arbeitsspeicher übergeben."
           )
 
     except Exception as e:
