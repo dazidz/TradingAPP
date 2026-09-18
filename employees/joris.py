@@ -41,7 +41,7 @@ class JorisPortfolioManager:
         return False, "Kein Gemini API-Key für Joris gefunden."
 
       genai.configure(api_key=active_key)
-      model = genai.GenerativeModel("gemini-1.5-flash")
+      model = genai.GenerativeModel("gemini-3.6-flash")
 
       # 1. Berichte der anderen Agenten abrufen
       reports_res = (
@@ -231,7 +231,7 @@ class JorisPortfolioManager:
         return False, "Kein Gemini API-Key für den Chat verfügbar."
 
       genai.configure(api_key=active_key)
-      model = genai.GenerativeModel("gemini-1.5-flash")
+      model = genai.GenerativeModel("gemini-3.6-flash")
 
       system_msg = (
           f"Du bist Joris, Portfolio Manager für das Depot-Mandat"
