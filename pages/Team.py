@@ -96,8 +96,17 @@ with tab_teamroom:
         with st.spinner(
             f"Joris synthetisiert Berichte für '{current_depot_focus}'..."
         ):
+          active_k = GEMINI_API_KEY
+          if not active_k:
+            try:
+              active_k = st.secrets.get("GEMINI_API_KEY")
+            except:
+              pass
+          if not active_k:
+            active_k = os.getenv("GEMINI_API_KEY")
+
           success, msg = joris.run_synthesis(
-              depot_focus=current_depot_focus, api_key=GEMINI_API_KEY
+              depot_focus=current_depot_focus, api_key=active_k
           )
           if success:
             st.success(msg)
@@ -139,11 +148,20 @@ with tab_teamroom:
 
       with st.chat_message("assistant"):
         with st.spinner("Joris prüft die Daten und antwortet..."):
+          active_k = GEMINI_API_KEY
+          if not active_k:
+            try:
+              active_k = st.secrets.get("GEMINI_API_KEY")
+            except:
+              pass
+          if not active_k:
+            active_k = os.getenv("GEMINI_API_KEY")
+
           success_chat, reply_chat = joris.chat_with_joris(
               depot_focus=current_depot_focus,
               user_message=user_query_joris,
               chat_history=st.session_state[chat_session_key][:-1],
-              api_key=GEMINI_API_KEY,
+              api_key=active_k,
           )
           if success_chat:
             st.markdown(reply_chat)
