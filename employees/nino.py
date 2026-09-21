@@ -374,36 +374,93 @@ class NinoSignalsAssistant:
       print(f"Fehler in process_joris_journal: {e}")
 
   def process_top_flop_list(self):
-    print("Nino berechnet und speichert die Top/Flop-Liste des Tages...")
+    print(
+        "Nino berechnet und speichert die Top/Flop-Liste direkt aus der"
+        " Watchlist..."
+    )
     try:
       today = datetime.now().date()
       today_iso = today.strftime("%Y-%m-%d")
 
-      res = (
-          self.supabase.table(self.table_signals_journal)
-          .select("*")
-          .execute()
-      )
-      items = res.data or []
+      # 1. Ticker direkt aus der Watchlist-Tabelle in Supabase abrufen
+      watchlist_table = "watchlist"
+      res = self.supabase.table(watchlist_table).select("ticker").execute()
+      watchlist_items = res.data or []
 
-      if not items:
-        print("Keine Einträge für Top/Flop-Berechnung gefunden.")
-        return
-
-      valid_items = [
-          it for it in items if it.get("end_performance_5_tage") is not None
+      tickers = [
+          item["ticker"].upper()
+          for item in watchlist_items
+          if item and item.get("ticker") and self.is_valid_ticker(item["ticker"])
       ]
+      tickers = list(set(tickers))  # Duplikate entfernen
 
-      if not valid_items:
+      if not tickers:
+        print("Keine gültigen Ticker in der Watchlist gefunden.")
         return
 
-      # Sortieren nach 5-Tage Performance absteigend (Besten zuerst)
-      valid_items.sort(
+      performance_results = []
+
+      # 2. Performance für jeden Watchlist-Ticker über yfinance für die letzten Tage ziehen
+      for ticker in tickers:
+        try:
+          start_fetch = today - timedelta(days=10)
+          df_hist = yf.download(
+              ticker,
+              start=start_fetch.strftime("%Y-%m-%d"),
+              end=today.strftime("%Y-%m-%d"),
+              progress=False,
+              auto_adjust=True,
+          )
+
+          if df_hist.empty or len(df_hist) < 2:
+            continue
+
+          def get_col(df, col_name):
+            if col_name not in df:
+              return None
+            c = df[col_name]
+            if isinstance(c, pd.DataFrame):
+              c = c.iloc[:, 0]
+            return c
+
+          close_s = get_col(df_hist, "Close")
+          if close_s is None or close_s.empty:
+            continue
+
+          base_kurs = float(close_s.iloc[0])
+          end_kurs = float(close_s.iloc[-1])
+
+          perf = (
+              round(((end_kurs - base_kurs) / base_kurs) * 100, 2)
+              if base_kurs > 0
+              else 0
+          )
+
+          performance_results.append({
+              "ticker": ticker,
+              "signal_typ": "Watchlist",
+              "end_performance_5_tage": perf,
+              "end_kurs_5_tage": end_kurs,
+              "candle_time": datetime.now().isoformat(),
+          })
+        except Exception as ticker_err:
+          print(f"Fehler beim Laden von {ticker}: {ticker_err}")
+
+      if not performance_results:
+        print("Konnte keine Performancedaten für die Watchlist ermitteln.")
+        return
+
+      # 3. Nach Performance sortieren (Höchste zuerst)
+      performance_results.sort(
           key=lambda x: float(x.get("end_performance_5_tage", 0)), reverse=True
       )
 
-      top_5 = valid_items[:5]
-      flop_5 = valid_items[-5:] if len(valid_items) >= 5 else valid_items
+      top_5 = performance_results[:5]
+      flop_5 = (
+          performance_results[-5:]
+          if len(performance_results) >= 5
+          else performance_results
+      )
 
       def save_batch(entries, kategorie):
         for entry in entries:
@@ -417,20 +474,20 @@ class NinoSignalsAssistant:
               "signal_typ": entry.get("signal_typ"),
               "performance": perf,
               "end_kurs": entry.get("end_kurs_5_tage"),
-              "quelle": "top_flop_journal",
+              "quelle": "top_flop_watchlist",
           }
 
-          # 1. In die neue Supabase-Tabelle 'top_flop_journal' schreiben
+          # In Supabase 'top_flop_journal' speichern
           self.supabase.table("top_flop_journal").insert(payload).execute()
 
-          # 2. Parallel an aris_arbeitsspeicher übergeben
+          # Parallel an aris_arbeitsspeicher übergeben
           arbeitsspeicher_entry = {
               "ticker": ticker,
               "candle_time": entry.get("candle_time"),
               "signal_typ": entry.get("signal_typ"),
               "end_performance_5_tage": perf,
-              "quelle": "top_flop_journal",
-              "status": f"Top/Flop {kategorie}",
+              "quelle": "top_flop_watchlist",
+              "status": f"Top/Flop Watchlist {kategorie}",
           }
           self.supabase.table(self.table_aris_arbeitsspeicher).insert(
               arbeitsspeicher_entry
@@ -440,12 +497,13 @@ class NinoSignalsAssistant:
       save_batch(flop_5, "FLOP")
 
       print(
-          "✅ Top 5 und Flop 5 in 'top_flop_journal' gespeichert und an"
-          " Arbeitsspeicher übergeben."
+          "✅ Top 5 und Flop 5 direkt aus der Watchlist berechnet, in"
+          " 'top_flop_journal' gespeichert und an den Arbeitsspeicher"
+          " übergeben."
       )
 
     except Exception as e:
-      print(f"❌ Fehler in process_top_flop_list: {e}")
+      print(f"❌ Fehler in process_top_flop_list (Watchlist): {e}")
 
   def run_all(self):
     self.process_signals_to_journal()
