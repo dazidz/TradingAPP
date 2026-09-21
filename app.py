@@ -44,7 +44,12 @@ def check_password():
         st.markdown("## 🔐 Login")
         input_pw = st.text_input("Passwort:", type="password", key="login_password_input")
         if st.button("Anmelden", use_container_width=True):
-            if input_pw == st.secrets["APP_PASSWORD"]:
+            try:
+                app_password = st.secrets["APP_PASSWORD"]
+            except Exception:
+                app_password = os.environ.get("APP_PASSWORD", "")
+                
+            if input_pw == app_password:
                 st.session_state.password_correct = True
                 st.rerun()
             else:
@@ -120,15 +125,15 @@ def get_sector_performance():
         response = sup_client.table("watchlist").select("ticker, sector").execute()
         df = pd.DataFrame(response.data)
         if df.empty or 'sector' not in df.columns or 'ticker' not in df.columns:
-            return pd.Series()
+            return pd.Series(dtype=float)
         
         tickers = df['ticker'].dropna().unique().tolist()
         if not tickers:
-            return pd.Series()
+            return pd.Series(dtype=float)
             
         data = yf.download(tickers, period="2d", interval="1d", progress=False, auto_adjust=True)
         if data.empty:
-            return pd.Series()
+            return pd.Series(dtype=float)
             
         if isinstance(data.columns, pd.MultiIndex):
             if 'Close' in data.columns.levels[0]:
@@ -148,9 +153,9 @@ def get_sector_performance():
             if not merged.empty and 'daily_return_pct' in merged.columns:
                 sector_perf = merged.groupby('sector')['daily_return_pct'].mean().sort_values(ascending=False)
                 return sector_perf
-        return pd.Series()
+        return pd.Series(dtype=float)
     except Exception:
-        return pd.Series()
+        return pd.Series(dtype=float)
 
 # Präzise Watchlist-Performance (Supabase intern initialisiert)
 @st.cache_data(ttl=60)
