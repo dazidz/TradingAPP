@@ -1,205 +1,121 @@
-from datetime import datetime, timedelta
-import os
-from groq import Groq
+from datetime import datetime
+from db import get_db_client
 import pandas as pd
-import streamlit as st
-from supabase import create_client
 
-# Groq Client / API Key initialisieren
-try:
-  groq_api_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
 
-  if not groq_api_key:
-    raise ValueError(
-        "Kein Groq API-Key gefunden. Bitte in den Streamlit Secrets oder als"
-        " Environment Variable hinterlegen."
+class ArisPerformanceManager:
+
+  def __init__(self, supabase_client):
+    self.supabase = supabase_client
+    self.model_name = "openai/gpt-oss-120b"  # Zugewiesenes KI-Modell
+    self.table_aris_arbeitsspeicher = "aris_arbeitsspeicher"
+    self.table_principals = "principals"
+    self.table_agent_reports = "agent_reports"
+
+  def analyze_and_optimize(self):
+    print(
+        f"Aris (Performance Manager [{self.model_name}]) analysiert den"
+        " Arbeitsspeicher..."
     )
-
-  groq_client = Groq(api_key=groq_api_key)
-except Exception as e:
-  st.error("Fehler beim Initialisieren des Groq Clients:" f" {e}")
-
-# Aris DNA geschärft auf deine spezifischen Analysepunkte
-ARIS_DNA = """
-Du bist Aris, der leitende Performance Manager in dieser Trading-Anwendung. Deine Aufgabe ist es, die Performance aus dem Arbeitsspeicher (aris_arbeitsspeicher) objektiv, datenbasiert und gnadenlos ehrlich zu analysieren. Du verzichtest auf leere Floskeln und Schönfärberei.
-
-Fokussiere dich bei jeder Analyse strikt auf folgende Punkte:
-1. **ADX & SMI Mustererkennung**: Welche Indikator-Ausprägungen liefern verlässlich gute oder schlechte Ergebnisse?
-2. **5-Tage-Vergleich (End vs. Max)**: Laufen die Trades nach 5 Tagen am Endkurs besser oder wird das Maximum (High) besser ausgespielt? (Werden Gewinne zu früh/spät abgegeben?)
-3. **Gewinner-Kombinationen**: Gibt es spezifische Signal- oder Indikator-Kombinationen (z.B. bestimmte ADX/SMI-Konstellationen), die überproportional gut performen?
-4. **Sonstige Muster & Handlungsempfehlungen**: Was funktioniert am besten, welche Setups sollten gestrichen oder optimiert werden?
-
-Antworte strukturiert, prägnant, datenbasiert und direkt auf den Punkt.
-"""
-
-st.subheader("🤖 Aris - Performance Manager")
-st.markdown(
-    "Dein KI-Agent analysiert die gesammelten Berichte und Signaldaten aus"
-    " dem `aris_arbeitsspeicher`."
-)
-
-# 1. Session State für den Aris-Chat initialisieren
-if "messages_aris" not in st.session_state:
-  st.session_state.messages_aris = []
-
-# 0. Gespeicherten Report aus Supabase laden (falls noch kein Chat da ist)
-try:
-  saved_report_res = (
-      supabase.table("agent_reports")
-      .select("*")
-      .eq("agent_name", "Aris")
-      .order("created_at", desc=True)
-      .limit(1)
-      .execute()
-  )
-  if saved_report_res.data and not st.session_state.messages_aris:
-    latest_report = saved_report_res.data[0]
-    st.session_state.messages_aris.append({
-        "role": "assistant",
-        "content": (
-            "**Letzter gespeicherter Report ("
-            f"{latest_report['created_at'][:16]}):**\n\n"
-            + latest_report["report_content"]
-        ),
-    })
-except Exception:
-  pass
-
-# Button zum Ausführen der Hauptanalyse
-if st.button(
-    "🚀 Aris Performance-Analyse starten",
-    type="primary",
-    key="run_aris_btn",
-    use_container_width=True,
-):
-  with st.spinner(
-      "Aris liest den Arbeitsspeicher aus und analysiert die Muster mit"
-      " Groq..."
-  ):
     try:
-      # --- Datenabfrage: Nur noch aus aris_arbeitsspeicher ---
-      arbeitsspeicher_res = (
-          supabase.table("aris_arbeitsspeicher")
+      # 1. Daten aus aris_arbeitsspeicher holen
+      res = (
+          self.supabase.table(self.table_aris_arbeitsspeicher)
           .select("*")
-          .order("created_at", desc=True)
-          .limit(50)  # Holt die letzten 50 Einträge zur Mustererkennung
           .execute()
       )
+      items = res.data or []
 
-      memory_data = arbeitsspeicher_res.data or []
+      if not items:
+        print("Keine Einträge im aris_arbeitsspeicher gefunden.")
+        return
 
-      if not memory_data:
-        st.info(
-            "ℹ️ Keine Einträge im `aris_arbeitsspeicher` für Aris vorhanden."
-        )
-      else:
-        # Inhalte für den Prompt aufbereiten
-        memory_summaries = []
-        for item in memory_data:
-          cat = item.get("kategorie", "Allgemein")
-          content = item.get("report_content", "")
-          created = item.get("created_at", "")[:16]
-          memory_summaries.append(f"[{created}] Kategorie: {cat}\n{content}")
+      df = pd.DataFrame(items)
 
-        context_data = "\n\n---\n\n".join(memory_summaries)
+      if "end_performance_5_tage" not in df.columns:
+        print("Nicht genügend Performance-Daten im Arbeitsspeicher vorhanden.")
+        return
 
-        # Groq Request
-        completion = groq_client.chat.completions.create(
-            model="openai/gpt-oss-120b",
-            messages=[
-                {"role": "system", "content": ARIS_DNA},
-                {
-                    "role": "user",
-                    "content": (
-                        "Analysiere die folgenden Einträge aus dem"
-                        " `aris_arbeitsspeicher`. Untersuche sie gezielt auf"
-                        " ADX/SMI-Muster, den Vergleich von 5-Tage-Endkurs"
-                        " versus Max-Performance, profitable"
-                        " Signal-Kombinationen und allgemeine"
-                        " Erfolgsmuster:\n\n"
-                        + context_data
-                    ),
-                },
-            ],
-            temperature=0.1,
-        )
+      df["end_performance_5_tage"] = pd.to_numeric(
+          df["end_performance_5_tage"], errors="coerce"
+      )
+      df["max_performance_5_tage"] = pd.to_numeric(
+          df.get("max_performance_5_tage", 0), errors="coerce"
+      )
+      df["adx"] = pd.to_numeric(df.get("adx"), errors="coerce")
 
-        report_content = completion.choices[0].message.content
+      # --- ANALYSE & KENNZAHLEN ---
+      avg_end_perf = df["end_performance_5_tage"].mean()
+      avg_max_perf = df["max_performance_5_tage"].mean()
 
-        # In Supabase agent_reports speichern
-        try:
-          supabase.table("agent_reports").insert({
-              "agent_name": "Aris",
-              "report_content": report_content,
-          }).execute()
-        except Exception:
-          pass
+      signal_groups = (
+          df.groupby("signal_typ")["end_performance_5_tage"]
+          .agg(["count", "mean"])
+          .reset_index()
+      )
 
-        st.session_state.messages_aris.append(
-            {"role": "assistant", "content": report_content}
-        )
-        st.success("Analyse erfolgreich abgeschlossen!")
-        st.rerun()
+      best_signal_type, best_signal_mean = "N/A", 0
+      if not signal_groups.empty:
+        best_row = signal_groups.loc[signal_groups["mean"].idxmax()]
+        best_signal_type = str(best_row["signal_typ"])
+        best_signal_mean = float(best_row["mean"])
+
+      df["high_adx"] = df["adx"] > 25
+      adx_groups = (
+          df.groupby("high_adx")["end_performance_5_tage"].mean().to_dict()
+      )
+
+      # --- KOMPAKTE BULLET-POINTS (Token-optimiert für Joris) ---
+      bullet_points = [
+          f"Trades ausgewertet: {len(df)}",
+          f"Ø Performance (Ende 5T): {avg_end_perf:.2f}% (Max: {avg_max_perf:.2f}%)",
+          f"Top Signal: {best_signal_type} (Ø {best_signal_mean:.2f}%)",
+          f"ADX-Trend: ADX>25 bringt Ø {adx_groups.get(True, 0):.2f}% vs. ADX<=25 mit Ø {adx_groups.get(False, 0):.2f}%",
+      ]
+
+      # Kompakter Fließtext für die bestehende report_content Spalte
+      report_text = f"Trades: {len(df)} | Ø End: {avg_end_perf:.2f}% | Top Signal: {best_signal_type} ({best_signal_mean:.2f}%)"
+
+      # 2. In die bestehende Tabelle 'agent_reports' schreiben
+      report_payload = {
+          "agent_name": "Aris",
+          "report_content": report_text,
+          "bullet_points": bullet_points,
+      }
+      self.supabase.table(self.table_agent_reports).insert(
+          report_payload
+      ).execute()
+      print("✅ Kompakter Report mit Bullet-Points in 'agent_reports' abgelegt.")
+
+      # 3. Erkenntnisse in 'principals' speichern
+      principal_entry = {
+          "datum": datetime.now().strftime("%Y-%m-%d"),
+          "manager": "Aris",
+          "ki_modell": self.model_name,
+          "erkenntnisse": f"Bester Signal-Typ: {best_signal_type} ({best_signal_mean:.2f}%). ADX-Filter optimiert.",
+          "status aktiv": True,
+      }
+      self.supabase.table(self.table_principals).insert(
+          principal_entry
+      ).execute()
+      print("✅ Erkenntnisse in 'principals' gespeichert.")
+
+      # 4. aris_arbeitsspeicher nach erfolgreicher Analyse bereinigen
+      item_ids = [item["id"] for item in items if "id" in item]
+      for item_id in item_ids:
+        self.supabase.table(self.table_aris_arbeitsspeicher).delete().eq(
+            "id", item_id
+        ).execute()
+      print("🧹 aris_arbeitsspeicher erfolgreich bereinigt.")
 
     except Exception as e:
-      st.error(f"⚠️ Fehler: {e}")
+      print(f"❌ Fehler in Aris Analyse: {e}")
 
-st.markdown("---")
-st.markdown("### 💬 Diskussion mit Aris")
+  def run_all(self):
+    self.analyze_and_optimize()
 
-for message in st.session_state.messages_aris:
-  with st.chat_message(message["role"]):
-    st.markdown(message["content"])
 
-if user_query := st.chat_input("Stelle Aris eine Frage zu den Mustern..."):
-  st.session_state.messages_aris.append(
-      {"role": "user", "content": user_query}
-  )
-  with st.chat_message("user"):
-    st.markdown(user_query)
-
-  with st.chat_message("assistant"):
-    with st.spinner("Aris denkt nach..."):
-      try:
-        groq_history = [
-            {"role": "system", "content": ARIS_DNA},
-            {
-                "role": "system",
-                "content": (
-                    "PROJEKT-KONTEXT & FOKUS: Du bist datenbasierter"
-                    " Performance Manager. Achte strikt auf ADX/SMI-Muster,"
-                    " End- vs. Max-Performance nach 5 Tagen und filtere heraus,"
-                    " was am besten funktioniert."
-                ),
-            },
-        ]
-
-        # Nur die letzten maximal 6 Nachrichten mitnehmen
-        MAX_HISTORY = 6
-        recent_messages = st.session_state.messages_aris[-MAX_HISTORY:]
-
-        for m in recent_messages:
-          content = m["content"]
-          if (
-              "**Letzter gespeicherter Report" in content
-              or len(content) > 1000
-          ):
-            content = "[System-Hinweis: Vorheriger Report wurde komprimiert.]"
-
-          role = "user" if m["role"] == "user" else "assistant"
-          groq_history.append({"role": role, "content": content})
-
-        completion = groq_client.chat.completions.create(
-            model="openai/gpt-oss-120b",
-            messages=groq_history,
-            temperature=0.1,
-        )
-
-        answer = completion.choices[0].message.content
-        st.markdown(answer)
-
-        st.session_state.messages_aris.append(
-            {"role": "assistant", "content": answer}
-        )
-      except Exception as chat_err:
-        st.error(f"Fehler im Chat: {chat_err}")
+if __name__ == "__main__":
+  supabase_client = get_db_client()
+  aris = ArisPerformanceManager(supabase_client)
+  aris.run_all()

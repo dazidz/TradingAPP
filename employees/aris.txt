@@ -1,15 +1,16 @@
 Aris - Performance Manager
 
-Analysiert einmalig für jeden Trade bei signals_journal und joris_journal:
+Holt Daten aus dem aris_arbeitsspeicher und analysiert diese wie folgt:
 
-- Performance nach 5 Tagen
-- beste Performance innerhalb 5 Tagen
 - adx, smi Mustererkennung
 - laufen 5 tage end oder max trades besser
 - welche Signale laufen besser oder gibt es eine Signal adx, smi Kombi die gut läuft
+- prüft auf sonstige Muster(was funktioniert am besten)
 
 Gibt Verbesserungstipps
 
 Schreibt die Erkenntnisse in Principals
+
+Löscht Tabelleneinträge nach seiner Analyse
 
 KI Model: openai/gpt-oss-120b
