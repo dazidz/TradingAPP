@@ -114,7 +114,6 @@ class NinoSignalsAssistant:
           else base_preis
       )
 
-      # Ermittlung des genauen Kerzen-Zeitstempels, an dem das Maximum aufgetreten ist
       candle_time_max = None
       if high_5d_s is not None and not high_5d_s.empty:
         max_idx = high_5d_s.idxmax()
@@ -194,7 +193,6 @@ class NinoSignalsAssistant:
           continue
 
         days_passed = (today - sig_date).days
-        # Nur verarbeiten, wenn das Signal mind. 5 Tage alt ist
         if days_passed < 5:
           continue
 
@@ -221,7 +219,6 @@ class NinoSignalsAssistant:
               "ticker": ticker_upper,
               "candle_time": pd.to_datetime(sig_date_str).isoformat(),
               "signal_typ": sig_type,
-              "einstiegspreis_zum_signal": perf_data["base_preis"],
               "smi": smi_val,
               "adx": adx_val,
               "is_favorite": is_fav,
@@ -234,20 +231,32 @@ class NinoSignalsAssistant:
               "status": "5D Ausgewertet & Archiviert",
           }
 
-          # 1. Ins signals_journal schreiben
           self.supabase.table(self.table_signals_journal).insert(
               journal_entry
           ).execute()
           existing_journal_set.add((ticker_upper, sig_date_iso))
 
-          # 2. An aris_arbeitsspeicher übergeben
-          arbeitsspeicher_entry = journal_entry.copy()
-          arbeitsspeicher_entry["quelle"] = "signals_journal"
+          # Arbeitsspeicher-Eintrag inkl. SMI und ADX (ohne Einstiegspreis)
+          arbeitsspeicher_entry = {
+              "ticker": ticker_upper,
+              "candle_time": pd.to_datetime(sig_date_str).isoformat(),
+              "signal_typ": sig_type,
+              "smi": smi_val,
+              "adx": adx_val,
+              "is_favorite": is_fav,
+              "above_ema20": above_ema,
+              "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
+              "max_performance_5_tage": perf_data["max_performance_5_tage"],
+              "candle_time_max_5_tage": perf_data["candle_time_max_5_tage"],
+              "end_kurs_5_tage": perf_data["end_kurs_5_tage"],
+              "end_performance_5_tage": perf_data["end_performance_5_tage"],
+              "quelle": "signals_journal",
+              "status": "5D Ausgewertet & Archiviert",
+          }
           self.supabase.table(self.table_aris_arbeitsspeicher).insert(
               arbeitsspeicher_entry
           ).execute()
 
-          # 3. Aus der aktiven 'signals'-Tabelle löschen, damit es aus dem Screener "wandert"
           sig_id = sig.get("id")
           if sig_id:
             self.supabase.table(self.table_active_signals).delete().eq(
@@ -344,11 +353,11 @@ class NinoSignalsAssistant:
               updated_joris_data
           ).eq("id", item_id).execute()
 
+        # Arbeitsspeicher-Eintrag für Joris inkl. SMI und ADX
         arbeitsspeicher_entry = {
             "ticker": ticker_upper,
             "candle_time": pd.to_datetime(date_str).isoformat(),
             "signal_typ": item.get("signal_typ", "Joris"),
-            "einstiegspreis_zum_signal": perf_data["base_preis"],
             "smi": smi_val,
             "adx": adx_val,
             "above_ema20": above_ema,
@@ -382,7 +391,6 @@ class NinoSignalsAssistant:
       today = datetime.now().date()
       today_iso = today.strftime("%Y-%m-%d")
 
-      # 1. Ticker direkt aus der Watchlist-Tabelle in Supabase abrufen
       watchlist_table = "watchlist"
       res = self.supabase.table(watchlist_table).select("ticker").execute()
       watchlist_items = res.data or []
@@ -392,7 +400,7 @@ class NinoSignalsAssistant:
           for item in watchlist_items
           if item and item.get("ticker") and self.is_valid_ticker(item["ticker"])
       ]
-      tickers = list(set(tickers))  # Duplikate entfernen
+      tickers = list(set(tickers))
 
       if not tickers:
         print("Keine gültigen Ticker in der Watchlist gefunden.")
@@ -400,7 +408,6 @@ class NinoSignalsAssistant:
 
       performance_results = []
 
-      # 2. Performance für jeden Watchlist-Ticker über yfinance für die letzten Tage ziehen
       for ticker in tickers:
         try:
           start_fetch = today - timedelta(days=10)
@@ -450,7 +457,6 @@ class NinoSignalsAssistant:
         print("Konnte keine Performancedaten für die Watchlist ermitteln.")
         return
 
-      # 3. Nach Performance sortieren (Höchste zuerst)
       performance_results.sort(
           key=lambda x: float(x.get("end_performance_5_tage", 0)), reverse=True
       )
@@ -469,7 +475,7 @@ class NinoSignalsAssistant:
 
           payload = {
               "datum": today_iso,
-              "kategorie": kategorie,  # "TOP" oder "FLOP"
+              "kategorie": kategorie,
               "ticker": ticker,
               "signal_typ": entry.get("signal_typ"),
               "performance": perf,
@@ -477,14 +483,15 @@ class NinoSignalsAssistant:
               "quelle": "top_flop_watchlist",
           }
 
-          # In Supabase 'top_flop_journal' speichern
           self.supabase.table("top_flop_journal").insert(payload).execute()
 
-          # Parallel an aris_arbeitsspeicher übergeben
+          # Arbeitsspeicher-Eintrag für Top/Flop (SMI/ADX hier None, da Watchlist ohne Signal-Metadaten)
           arbeitsspeicher_entry = {
               "ticker": ticker,
               "candle_time": entry.get("candle_time"),
               "signal_typ": entry.get("signal_typ"),
+              "smi": None,
+              "adx": None,
               "end_performance_5_tage": perf,
               "quelle": "top_flop_watchlist",
               "status": f"Top/Flop Watchlist {kategorie}",
