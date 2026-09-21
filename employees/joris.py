@@ -4,6 +4,7 @@ import os
 import re
 import google.generativeai as genai
 import pandas as pd
+import streamlit as st
 
 
 class JorisPortfolioManager:
@@ -11,7 +12,7 @@ class JorisPortfolioManager:
   def __init__(self, supabase_client):
     self.supabase = supabase_client
     self.name = "Joris"
-    self.model_name = "gemini-3.6-flash"  # Nur intern für den API-Aufruf
+    self.model_name = "gemini-2.5-flash"  # Aktualisiert auf stabiles Modell
     self.description = (
         "Portfolio Manager & Synthese-Agent nach Ray Dalios Prinzipien."
     )
@@ -24,9 +25,18 @@ class JorisPortfolioManager:
     }
     return mapping.get(depot_focus, "invest_depot")
 
-  def run_synthesis(self, depot_focus: str, api_key: str):
+  def run_synthesis(self, depot_focus: str, api_key: str = None):
     try:
-      active_key = api_key if api_key else os.getenv("GEMINI_API_KEY")
+      # Robuste API-Key-Ermittlung (Argument -> Env -> Streamlit Secrets)
+      active_key = api_key
+      if not active_key:
+        active_key = os.getenv("GEMINI_API_KEY")
+      if not active_key:
+        try:
+          active_key = st.secrets.get("GEMINI_API_KEY")
+        except Exception:
+          pass
+
       if not active_key:
         return False, "Kein Gemini API-Key für Joris gefunden."
 
@@ -76,13 +86,21 @@ class JorisPortfolioManager:
       # 2. Depot, Signale und Favoriten laden
       table_name = self._get_table_name(depot_focus)
       depot_res = self.supabase.table(table_name).select("*").execute()
-      depot_data_text = str(depot_res.data) if depot_res.data else "Keine Einträge."
+      depot_data_text = (
+          str(depot_res.data) if depot_res.data else "Keine Einträge."
+      )
 
-      screener_res = self.supabase.table("signals").select("*").limit(20).execute()
-      screener_data_text = str(screener_res.data) if screener_res.data else "Keine Signale."
+      screener_res = (
+          self.supabase.table("signals").select("*").limit(20).execute()
+      )
+      screener_data_text = (
+          str(screener_res.data) if screener_res.data else "Keine Signale."
+      )
 
       favorites_res = self.supabase.table("favorites").select("*").execute()
-      favorites_data_text = str(favorites_res.data) if favorites_res.data else "Keine Favoriten."
+      favorites_data_text = (
+          str(favorites_res.data) if favorites_res.data else "Keine Favoriten."
+      )
 
       # Prompt zusammenbauen
       prompt_content = f"""
@@ -129,7 +147,7 @@ class JorisPortfolioManager:
           "created_at": datetime.now().isoformat(),
       }).execute()
 
-      # 4. WICHTIG: Die verarbeitten Team-Berichte jetzt auf 'processed' setzen (damit sie nie wieder gelesen werden)
+      # 4. WICHTIG: Die verarbeiteten Team-Berichte jetzt auf 'processed' setzen
       for rep_id in processed_report_ids:
         self.supabase.table("agent_reports").update({"status": "processed"}).eq(
             "id", rep_id
@@ -157,3 +175,59 @@ class JorisPortfolioManager:
       return True, f"Synthese für '{table_name}' erfolgreich erstellt!"
     except Exception as e:
       return False, f"Fehler bei der Synthese: {e}"
+
+  def get_latest_report(self, depot_focus: str):
+    try:
+      agent_name = f"Joris_{depot_focus}"
+      res = (
+          self.supabase.table("agent_reports")
+          .select("*")
+          .eq("agent_name", agent_name)
+          .order("created_at", desc=True)
+          .limit(1)
+          .execute()
+      )
+      return res.data[0] if res.data else None
+    except Exception:
+      return None
+
+  def chat_with_joris(
+      self, depot_focus: str, user_message: str, chat_history: list, api_key: str = None
+  ):
+    try:
+      # Robuste API-Key-Ermittlung für den Chat
+      active_key = api_key
+      if not active_key:
+        active_key = os.getenv("GEMINI_API_KEY")
+      if not active_key:
+        try:
+          active_key = st.secrets.get("GEMINI_API_KEY")
+        except Exception:
+          pass
+
+      if not active_key:
+        return False, "Kein Gemini API-Key für den Joris-Chat gefunden."
+
+      genai.configure(api_key=active_key)
+      model = genai.GenerativeModel(self.model_name)
+
+      # Chat-Historie für Gemini aufbereiten
+      formatted_history = []
+      for msg in chat_history:
+        role = "user" if msg["role"] == "user" else "model"
+        formatted_history.append({"role": role, "parts": [msg["content"]]})
+
+      chat = model.start_chat(history=formatted_history)
+
+      system_context = f"""
+            Du bist Joris, der leitende Portfolio Manager. Du chattest mit deinem Vorgesetzten.
+            Aktuelles Fokus-Mandat: {depot_focus.upper()}.
+            Handle stets nach Ray Dalios Prinzipien: Radical Truth & Radical Open-Mindedness.
+            Antworte präzise, analytisch und direkt auf Basis der vorliegenden Mandatsdaten.
+            """
+
+      full_prompt = f"{system_context}\n\nFrage des Nutzers: {user_message}"
+      response = chat.send_message(full_prompt)
+      return True, response.text
+    except Exception as e:
+      return False, f"Fehler im Chat mit Joris: {e}"
