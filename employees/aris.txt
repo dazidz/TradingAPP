@@ -5,6 +5,7 @@ Holt Daten aus dem aris_arbeitsspeicher und analysiert diese wie folgt:
 - adx, smi Mustererkennung
 - laufen 5 tage end oder max trades besser
 - welche Signale laufen besser oder gibt es eine Signal adx, smi Kombi die gut läuft
+- was gibt es bei den top 5 des tages für indikatoren
 - prüft auf sonstige Muster(was funktioniert am besten)
 
 Gibt Verbesserungstipps
