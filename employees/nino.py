@@ -373,9 +373,84 @@ class NinoSignalsAssistant:
     except Exception as e:
       print(f"Fehler in process_joris_journal: {e}")
 
+  def process_top_flop_list(self):
+    print("Nino berechnet und speichert die Top/Flop-Liste des Tages...")
+    try:
+      today = datetime.now().date()
+      today_iso = today.strftime("%Y-%m-%d")
+
+      res = (
+          self.supabase.table(self.table_signals_journal)
+          .select("*")
+          .execute()
+      )
+      items = res.data or []
+
+      if not items:
+        print("Keine Einträge für Top/Flop-Berechnung gefunden.")
+        return
+
+      valid_items = [
+          it for it in items if it.get("end_performance_5_tage") is not None
+      ]
+
+      if not valid_items:
+        return
+
+      # Sortieren nach 5-Tage Performance absteigend (Besten zuerst)
+      valid_items.sort(
+          key=lambda x: float(x.get("end_performance_5_tage", 0)), reverse=True
+      )
+
+      top_5 = valid_items[:5]
+      flop_5 = valid_items[-5:] if len(valid_items) >= 5 else valid_items
+
+      def save_batch(entries, kategorie):
+        for entry in entries:
+          ticker = entry.get("ticker")
+          perf = entry.get("end_performance_5_tage")
+
+          payload = {
+              "datum": today_iso,
+              "kategorie": kategorie,  # "TOP" oder "FLOP"
+              "ticker": ticker,
+              "signal_typ": entry.get("signal_typ"),
+              "performance": perf,
+              "end_kurs": entry.get("end_kurs_5_tage"),
+              "quelle": "top_flop_journal",
+          }
+
+          # 1. In die neue Supabase-Tabelle 'top_flop_journal' schreiben
+          self.supabase.table("top_flop_journal").insert(payload).execute()
+
+          # 2. Parallel an aris_arbeitsspeicher übergeben
+          arbeitsspeicher_entry = {
+              "ticker": ticker,
+              "candle_time": entry.get("candle_time"),
+              "signal_typ": entry.get("signal_typ"),
+              "end_performance_5_tage": perf,
+              "quelle": "top_flop_journal",
+              "status": f"Top/Flop {kategorie}",
+          }
+          self.supabase.table(self.table_aris_arbeitsspeicher).insert(
+              arbeitsspeicher_entry
+          ).execute()
+
+      save_batch(top_5, "TOP")
+      save_batch(flop_5, "FLOP")
+
+      print(
+          "✅ Top 5 und Flop 5 in 'top_flop_journal' gespeichert und an"
+          " Arbeitsspeicher übergeben."
+      )
+
+    except Exception as e:
+      print(f"❌ Fehler in process_top_flop_list: {e}")
+
   def run_all(self):
     self.process_signals_to_journal()
     self.process_joris_journal()
+    self.process_top_flop_list()
 
 
 if __name__ == "__main__":
