@@ -394,7 +394,7 @@ with tab_nino:
 # ==========================================
 with tab_aris:
   st.subheader("🤖 Aris - Performance Manager")
-  st.caption("🤖 **Verwendetes Modell:** Google Gemini (`gemini-2.5-pro` / `gemini-1.5-pro`)")
+  st.caption("🤖 **Verwendetes Modell:** Google Gemini (`gemini-3.6-flash`)")
   st.markdown(
       "Dein KI-Agent analysiert das Signals-Journal, das Trading-Journal, "
       "den Screener-Quellcode und steht dir im Chat für Rückfragen zur Verfügung."
@@ -459,7 +459,7 @@ with tab_aris:
 
         genai.configure(api_key=active_k)
         # Verwende ein stabiles Gemini Pro Modell mit großem Context Window
-        model = genai.GenerativeModel("gemini-1.5-pro", system_instruction=aris_dna)
+        model = genai.GenerativeModel("gemini-3.6-flash", system_instruction=aris_dna)
 
         signals_res = supabase.table("signals_journal").select("*").execute()
         journal_res = supabase.table("trade_journal").select("*").execute()
@@ -523,7 +523,7 @@ with tab_aris:
             role = "user" if m["role"] == "user" else "model"
             gemini_history.append({"role": role, "parts": [m["content"]]})
 
-          model = genai.GenerativeModel("gemini-1.5-pro", system_instruction=aris_dna)
+          model = genai.GenerativeModel("gemini-3.6-flash", system_instruction=aris_dna)
           chat_session = model.start_chat(history=gemini_history)
           
           response = chat_session.send_message(user_query)
