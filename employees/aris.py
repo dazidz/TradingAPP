@@ -1,6 +1,6 @@
 from datetime import datetime
 from db import get_db_client
-import google.generativeai as genai
+from groq import Groq
 import os
 import streamlit as st
 
@@ -9,7 +9,7 @@ class ArisPerformanceManager:
 
   def __init__(self, supabase_client, api_key: str = None):
     self.supabase = supabase_client
-    self.model_name = "gemini-3.6-flash"
+    self.model_name = "openai/gpt-oss-120b"  # Oder "llama-3.3-70b-versatile"
     self.table_aris_arbeitsspeicher = "aris_arbeitsspeicher"
     self.table_principals = "principals"
     self.table_agent_reports = "agent_reports"
@@ -19,68 +19,45 @@ class ArisPerformanceManager:
     if passed_key:
       return passed_key
       
-    possible_keys = [
-        "GEMINI_API_KEY", 
-        "gemini_api_key", 
-        "GEMINI_KEY", 
-        "google_api_key", 
-        "GOOGLE_API_KEY"
-    ]
-
-    # 1. Umgebungsvariablen prüfen
+    possible_keys = ["GROQ_API_KEY", "groq_api_key", "GROQ_KEY", "groq_key"]
     for env_name in possible_keys:
       val = os.getenv(env_name)
       if val:
         return val
 
-    # 2. Streamlit Secrets prüfen
     try:
       if hasattr(st, "secrets") and st.secrets:
-        # Direkter Zugriff auf flache Keys
         for key_name in possible_keys:
           if key_name in st.secrets and st.secrets[key_name]:
             return st.secrets[key_name]
-            
-        # Durchsuche alle Sektionen (z. B. [general], [api_keys], etc.)
         for section in st.secrets:
-          try:
-            sec_val = st.secrets[section]
-            if isinstance(sec_val, dict):
-              for sub_key in possible_keys + ["api_key", "key"]:
-                if sub_key in sec_val and sec_val[sub_key]:
-                  return sec_val[sub_key]
-          except Exception:
-            continue
+          sec_val = st.secrets[section]
+          if isinstance(sec_val, dict):
+            for sub_key in possible_keys + ["api_key", "key"]:
+              if sub_key in sec_val and sec_val[sub_key]:
+                return sec_val[sub_key]
     except Exception:
       pass
-
     return None
 
   def analyze_and_optimize(self):
-    print(
-        f"Aris (Performance & Synthese [{self.model_name}]) liest den"
-        " Arbeitsspeicher..."
-    )
+    print(f"Aris (Performance & Synthese [{self.model_name}]) analysiert...")
     try:
       if not self.api_key:
-        print("❌ Kein Gemini API-Key für Aris gefunden.")
+        print("❌ Kein Groq API-Key gefunden.")
         return
 
-      genai.configure(api_key=self.api_key)
+      client = Groq(api_key=self.api_key)
 
-      # 1. Fertig berechnete Daten von Nino aus aris_arbeitsspeicher holen
-      res = (
-          self.supabase.table(self.table_aris_arbeitsspeicher)
-          .select("*")
-          .execute()
-      )
+      # 1. Alle Daten aus aris_arbeitsspeicher holen
+      res = self.supabase.table(self.table_aris_arbeitsspeicher).select("*").execute()
       items = res.data or []
 
       if not items:
         print("Keine Einträge im aris_arbeitsspeicher gefunden.")
         return
 
-      # 2. Daten kompakt als Textzeilen für das LLM aufbereiten
+      # 2. Alle Daten als Textzeilen aufbereiten (volle Transparenz)
       formatted_lines = []
       for item in items:
         row_str = " | ".join([f"{k}: {v}" for k, v in item.items() if k != "id"])
@@ -89,31 +66,41 @@ class ArisPerformanceManager:
       data_payload = "\n".join(formatted_lines)
 
       prompt = f"""
-            Du bist Aris, der Performance-Analyst. 
-            Dir liegen die von Nino vorbereiteten und berechneten Datensätze aus dem Arbeitsspeicher vor. 
-            Analysiere diese nach folgenden Kriterien:
-            - adx, smi Mustererkennung
-            - laufen 5 tage end oder max trades besser
-            - welche Signale laufen besser oder gibt es eine Signal adx, smi Kombi die gut läuft
-            - was gibt es bei den top 5 des tages für indikatoren
-            - prüft auf sonstige Muster(was funktioniert am besten)
-            
-            Fasse diese in prägnante Bullet-Points zusammen.
-            
-            VON NINO BEREITGESTELLTE DATEN:
-            {data_payload}
-            """
+Du bist Aris, der Performance-Analyst. 
+Dir liegen die von Nino vorbereiteten und berechneten Datensätze aus dem Arbeitsspeicher vor. 
+Analysiere diese nach folgenden Kriterien:
+- adx, smi Mustererkennung
+- laufen 5 tage end oder max trades besser
+- welche Signale laufen besser oder gibt es eine Signal adx, smi Kombi die gut läuft
+- was gibt es bei den top 5 des tages für indikatoren
+- prüft auf sonstige Muster (was funktioniert am besten)
 
-      # 3. LLM-Synthese mit Google Gemini (gemini-3.6-flash)
-      system_instruction = "Du bist ein präziser Analyst. Fasse dich klar, strukturiert und datenbasiert."
-      model = genai.GenerativeModel(self.model_name, system_instruction=system_instruction)
-      
-      response = model.generate_content(
-          prompt,
-          generation_config={"temperature": 0.1, "max_output_tokens": 1500}
+Fasse diese in prägnante Bullet-Points zusammen.
+
+VON NINO BEREITGESTELLTE DATEN:
+{data_payload}
+"""
+
+      # 🔍 DEBUG: Hier siehst du im Terminal exakt, was an die KI gesendet wird
+      print("=" * 60)
+      print(f"📤 ARIS DEBUG: Sende {len(items)} Datensätze an das LLM ({len(prompt)} Zeichen total)")
+      print("=" * 60)
+      # Wenn du den kompletten Prompt im Terminal sehen willst, entkommentiere die nächste Zeile:
+      # print(prompt)
+      print("=" * 60)
+
+      # 3. API-Aufruf über Groq
+      completion = client.chat.completions.create(
+          model=self.model_name,
+          messages=[
+              {"role": "system", "content": "Du bist ein präziser Analyst. Fasse dich klar, strukturiert und datenbasiert."},
+              {"role": "user", "content": prompt}
+          ],
+          max_tokens=2000,
+          temperature=0.1
       )
 
-      llm_response = response.text
+      llm_response = completion.choices[0].message.content
 
       bullet_points = [
           f"Ausgewertete Datensätze von Nino: {len(items)}",
@@ -152,12 +139,11 @@ class ArisPerformanceManager:
         ).execute()
 
       print(
-          "✅ Aris hat die Nino-Daten verarbeitet, Report abgelegt und"
-          " Arbeitsspeicher bereinigt."
+          "✅ Aris hat die Nino-Daten via Groq verarbeitet, Report abgelegt und Arbeitsspeicher bereinigt."
       )
 
     except Exception as e:
-      print(f"❌ Fehler in Aris Analyse: {e}")
+      print(f"❌ Fehler in Aris Groq-Analyse: {e}")
 
   def run_all(self):
     self.analyze_and_optimize()
