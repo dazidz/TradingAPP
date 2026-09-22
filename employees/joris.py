@@ -12,7 +12,7 @@ class JorisPortfolioManager:
   def __init__(self, supabase_client):
     self.supabase = supabase_client
     self.name = "Joris"
-    self.model_name = "gemini-2.5-flash"
+    self.model_name = "gemini-3.6-flash"
     self.description = (
         "Portfolio Manager & Synthese-Agent nach Ray Dalios Prinzipien."
     )
