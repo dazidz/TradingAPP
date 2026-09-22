@@ -49,7 +49,7 @@ class NinoSignalsAssistant:
     smi_val, adx_val = None, None
     above_ema = False
     try:
-      if isinstance(meta_raw, str):
+      if isinstance(meta_raw, str) and meta_raw.strip():
         meta_dict = json.loads(meta_raw.replace("'", '"'))
       elif isinstance(meta_raw, dict):
         meta_dict = meta_raw
@@ -68,7 +68,7 @@ class NinoSignalsAssistant:
     )
 
   def _fetch_5d_performance(self, ticker, sig_date, base_preis):
-    """Zieht über yfinance die Kursdaten ab sig_date und berechnet 5-Tage Max- & End-Performance inkl. Kerzen-Zeitstempel des Max-Werts."""
+    """Zieht über yfinance die Kursdaten ab sig_date und berechnet 5-Tage Max- & End-Performance."""
     try:
       end_date_fetch = sig_date + timedelta(days=15)
       df_hist = yf.download(
@@ -80,6 +80,7 @@ class NinoSignalsAssistant:
       )
 
       if df_hist.empty:
+        print(f"yfinance: Keine Historie für {ticker} ab {sig_date}")
         return None
 
       def get_col(df, col_name):
@@ -156,6 +157,10 @@ class NinoSignalsAssistant:
           self.supabase.table(self.table_active_signals).select("*").execute()
       )
       active_signals = active_res.data or []
+      print(f"Gefundene aktive Signale in DB: {len(active_signals)}")
+
+      if not active_signals:
+        return
 
       journal_res = (
           self.supabase.table(self.table_signals_journal)
@@ -174,6 +179,7 @@ class NinoSignalsAssistant:
           continue
         ticker = sig.get("ticker")
         if not ticker or not self.is_valid_ticker(ticker):
+          print(f"Überspringe ungültigen Ticker: {ticker}")
           continue
 
         ticker_upper = ticker.upper()
@@ -184,92 +190,109 @@ class NinoSignalsAssistant:
             or sig.get("created_at")
         )
         if not sig_date_str:
+          print(f"Kein Datum gefunden für Signal: {ticker_upper}")
           continue
 
         try:
           sig_date = pd.to_datetime(sig_date_str).date()
           sig_date_iso = sig_date.strftime("%Y-%m-%d")
-        except Exception:
+        except Exception as e:
+          print(f"Fehler beim Parsen des Datums '{sig_date_str}': {e}")
           continue
 
         days_passed = (today - sig_date).days
         if days_passed < 5:
+          print(
+              f"Signal {ticker_upper} ({sig_date_iso}) ist erst {days_passed}"
+              " Tage alt (benötigt >= 5 Tage)."
+          )
           continue
 
-        if (ticker_upper, sig_date_iso) not in existing_journal_set:
-          sig_type = sig.get("signal_type") or sig.get(
-              "signal_typ", "Standard"
-          )
-          sig_price = float(
-              sig.get("entry_price")
-              or sig.get("preis")
-              or sig.get("kurs")
-              or 0
-          )
-          smi_val, adx_val, above_ema = self._parse_meta_data(sig)
-          is_fav = ticker_upper in favorite_tickers
-
-          perf_data = self._fetch_5d_performance(
-              ticker_upper, sig_date, sig_price
-          )
-          if not perf_data:
-            continue
-
-          journal_entry = {
-              "ticker": ticker_upper,
-              "candle_time": pd.to_datetime(sig_date_str).isoformat(),
-              "signal_typ": sig_type,
-              "smi": smi_val,
-              "adx": adx_val,
-              "is_favorite": is_fav,
-              "above_ema20": above_ema,
-              "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
-              "max_performance_5_tage": perf_data["max_performance_5_tage"],
-              "candle_time_max_5_tage": perf_data["candle_time_max_5_tage"],
-              "end_kurs_5_tage": perf_data["end_kurs_5_tage"],
-              "end_performance_5_tage": perf_data["end_performance_5_tage"],
-              "status": "5D Ausgewertet & Archiviert",
-          }
-
-          self.supabase.table(self.table_signals_journal).insert(
-              journal_entry
-          ).execute()
-          existing_journal_set.add((ticker_upper, sig_date_iso))
-
-          # Arbeitsspeicher-Eintrag inkl. SMI und ADX (ohne Einstiegspreis)
-          arbeitsspeicher_entry = {
-              "ticker": ticker_upper,
-              "candle_time": pd.to_datetime(sig_date_str).isoformat(),
-              "signal_typ": sig_type,
-              "smi": smi_val,
-              "adx": adx_val,
-              "is_favorite": is_fav,
-              "above_ema20": above_ema,
-              "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
-              "max_performance_5_tage": perf_data["max_performance_5_tage"],
-              "candle_time_max_5_tage": perf_data["candle_time_max_5_tage"],
-              "end_kurs_5_tage": perf_data["end_kurs_5_tage"],
-              "end_performance_5_tage": perf_data["end_performance_5_tage"],
-              "quelle": "signals_journal",
-              "status": "5D Ausgewertet & Archiviert",
-          }
-          self.supabase.table(self.table_aris_arbeitsspeicher).insert(
-              arbeitsspeicher_entry
-          ).execute()
-
-          sig_id = sig.get("id")
-          if sig_id:
-            self.supabase.table(self.table_active_signals).delete().eq(
-                "id", sig_id
-            ).execute()
-
+        if (ticker_upper, sig_date_iso) in existing_journal_set:
           print(
-              f"Signal für {ticker_upper} erfolgreich ausgewertet, ins Journal"
-              " verschoben und an aris_arbeitsspeicher übergeben."
+              f"Signal {ticker_upper} vom {sig_date_iso} existiert bereits im"
+              " Journal."
           )
+          continue
+
+        sig_type = (
+            sig.get("signal_type")
+            or sig.get("signal_typ")
+            or sig.get("typ")
+            or "Standard"
+        )
+        sig_price = float(
+            sig.get("entry_price")
+            or sig.get("preis")
+            or sig.get("kurs")
+            or sig.get("einstiegspreis")
+            or 0
+        )
+        smi_val, adx_val, above_ema = self._parse_meta_data(sig)
+        is_fav = ticker_upper in favorite_tickers
+
+        perf_data = self._fetch_5d_performance(
+            ticker_upper, sig_date, sig_price
+        )
+        if not perf_data:
+          print(f"Konnte keine Performancedaten für {ticker_upper} ermitteln.")
+          continue
+
+        journal_entry = {
+            "ticker": ticker_upper,
+            "candle_time": pd.to_datetime(sig_date_str).isoformat(),
+            "signal_typ": sig_type,
+            "smi": smi_val,
+            "adx": adx_val,
+            "is_favorite": is_fav,
+            "above_ema20": above_ema,
+            "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
+            "max_performance_5_tage": perf_data["max_performance_5_tage"],
+            "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
+            "end_kurs_5_tage": perf_data["end_kurs_5_tage"],
+            "end_performance_5_tage": perf_data["end_performance_5_tage"],
+            "status": "5D Ausgewertet & Archiviert",
+        }
+
+        self.supabase.table(self.table_signals_journal).insert(
+            journal_entry
+        ).execute()
+        existing_journal_set.add((ticker_upper, sig_date_iso))
+
+        # Arbeitsspeicher-Eintrag für Aris
+        arbeitsspeicher_entry = {
+            "ticker": ticker_upper,
+            "candle_time": pd.to_datetime(sig_date_str).isoformat(),
+            "signal_typ": sig_type,
+            "smi": smi_val,
+            "adx": adx_val,
+            "is_favorite": is_fav,
+            "above_ema20": above_ema,
+            "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
+            "max_performance_5_tage": perf_data["max_performance_5_tage"],
+            "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
+            "end_kurs_5_tage": perf_data["end_kurs_5_tage"],
+            "end_performance_5_tage": perf_data["end_performance_5_tage"],
+            "quelle": "signals_journal",
+            "status": "5D Ausgewertet & Archiviert",
+        }
+        self.supabase.table(self.table_aris_arbeitsspeicher).insert(
+            arbeitsspeicher_entry
+        ).execute()
+
+        sig_id = sig.get("id")
+        if sig_id:
+          self.supabase.table(self.table_active_signals).delete().eq(
+              "id", sig_id
+          ).execute()
+
+        print(
+            f"✅ Signal für {ticker_upper} erfolgreich ausgewertet,"
+            " verschoben und an aris_arbeitsspeicher übergeben."
+        )
 
     except Exception as e:
-      print(f"Fehler in process_signals_to_journal: {e}")
+      print(f"❌ Fehler in process_signals_to_journal: {e}")
 
   def process_joris_journal(self):
     print(
@@ -278,7 +301,6 @@ class NinoSignalsAssistant:
     )
     try:
       today = datetime.now().date()
-
       joris_res = (
           self.supabase.table(self.table_joris_journal).select("*").execute()
       )
@@ -341,7 +363,7 @@ class NinoSignalsAssistant:
         updated_joris_data = {
             "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
             "max_performance_5_tage": perf_data["max_performance_5_tage"],
-            "candle_time_max_5_tage": perf_data["candle_time_max_5_tage"],
+            "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
             "end_kurs_5_tage": perf_data["end_kurs_5_tage"],
             "end_performance_5_tage": perf_data["end_performance_5_tage"],
             "status": "5D Ausgewertet",
@@ -353,7 +375,6 @@ class NinoSignalsAssistant:
               updated_joris_data
           ).eq("id", item_id).execute()
 
-        # Arbeitsspeicher-Eintrag für Joris inkl. SMI und ADX
         arbeitsspeicher_entry = {
             "ticker": ticker_upper,
             "candle_time": pd.to_datetime(date_str).isoformat(),
@@ -363,7 +384,7 @@ class NinoSignalsAssistant:
             "above_ema20": above_ema,
             "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
             "max_performance_5_tage": perf_data["max_performance_5_tage"],
-            "candle_time_max_5_tage": perf_data["candle_time_max_5_tage"],
+            "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
             "end_kurs_5_tage": perf_data["end_kurs_5_tage"],
             "end_performance_5_tage": perf_data["end_performance_5_tage"],
             "quelle": "joris_journal",
@@ -375,12 +396,12 @@ class NinoSignalsAssistant:
         ).execute()
         existing_arb_set.add((ticker_upper, sig_date_iso))
         print(
-            f"Joris-Journal Eintrag für {ticker_upper} ausgewertet und an"
-            " aris_arbeitsspeicher übergeben."
+            f"✅ Joris-Journal Eintrag für {ticker_upper} ausgewertet und an"
+            " Arbeitsspeicher übergeben."
         )
 
     except Exception as e:
-      print(f"Fehler in process_joris_journal: {e}")
+      print(f"❌ Fehler in process_joris_journal: {e}")
 
   def process_top_flop_list(self):
     print(
@@ -391,8 +412,7 @@ class NinoSignalsAssistant:
       today = datetime.now().date()
       today_iso = today.strftime("%Y-%m-%d")
 
-      watchlist_table = "watchlist"
-      res = self.supabase.table(watchlist_table).select("ticker").execute()
+      res = self.supabase.table("watchlist").select("ticker").execute()
       watchlist_items = res.data or []
 
       tickers = [
@@ -403,11 +423,9 @@ class NinoSignalsAssistant:
       tickers = list(set(tickers))
 
       if not tickers:
-        print("Keine gültigen Ticker in der Watchlist gefunden.")
         return
 
       performance_results = []
-
       for ticker in tickers:
         try:
           start_fetch = today - timedelta(days=10)
@@ -436,7 +454,6 @@ class NinoSignalsAssistant:
 
           base_kurs = float(close_s.iloc[0])
           end_kurs = float(close_s.iloc[-1])
-
           perf = (
               round(((end_kurs - base_kurs) / base_kurs) * 100, 2)
               if base_kurs > 0
@@ -454,13 +471,11 @@ class NinoSignalsAssistant:
           print(f"Fehler beim Laden von {ticker}: {ticker_err}")
 
       if not performance_results:
-        print("Konnte keine Performancedaten für die Watchlist ermitteln.")
         return
 
       performance_results.sort(
           key=lambda x: float(x.get("end_performance_5_tage", 0)), reverse=True
       )
-
       top_5 = performance_results[:5]
       flop_5 = (
           performance_results[-5:]
@@ -482,10 +497,8 @@ class NinoSignalsAssistant:
               "end_kurs": entry.get("end_kurs_5_tage"),
               "quelle": "top_flop_watchlist",
           }
-
           self.supabase.table("top_flop_journal").insert(payload).execute()
 
-          # Arbeitsspeicher-Eintrag für Top/Flop (SMI/ADX hier None, da Watchlist ohne Signal-Metadaten)
           arbeitsspeicher_entry = {
               "ticker": ticker,
               "candle_time": entry.get("candle_time"),
@@ -502,15 +515,10 @@ class NinoSignalsAssistant:
 
       save_batch(top_5, "TOP")
       save_batch(flop_5, "FLOP")
-
-      print(
-          "✅ Top 5 und Flop 5 direkt aus der Watchlist berechnet, in"
-          " 'top_flop_journal' gespeichert und an den Arbeitsspeicher"
-          " übergeben."
-      )
+      print("✅ Top 5 und Flop 5 Watchlist verarbeitet und gespeichert.")
 
     except Exception as e:
-      print(f"❌ Fehler in process_top_flop_list (Watchlist): {e}")
+      print(f"❌ Fehler in process_top_flop_list: {e}")
 
   def run_all(self):
     self.process_signals_to_journal()
