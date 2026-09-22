@@ -334,8 +334,13 @@ with tab_nino:
         filtered_df = df.copy()
         if selected_source != "Alle":
             filtered_df = filtered_df[filtered_df["quelle"] == selected_source]
+            
         if only_favorites and "is_favorite" in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df["is_favorite"] == True]
+            # Sichere Konvertierung der Favoriten-Spalte (fängt Leerstrings und None ab)
+            fav_series = filtered_df["is_favorite"].fillna(False)
+            if fav_series.dtype == object:
+                fav_series = fav_series.apply(lambda x: True if str(x).lower() in ["true", "1", "t", "yes"] else False)
+            filtered_df = filtered_df[fav_series == True]
 
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -347,8 +352,14 @@ with tab_nino:
             avg_max_perf = filtered_df["max_performance_5_tage"].mean() if "max_performance_5_tage" in filtered_df.columns else 0
             st.metric("Ø 5D Max-Performance", f"{avg_max_perf:+.2f}%" if pd.notnull(avg_max_perf) else "0.0%")
         with col4:
-            fav_count = filtered_df["is_favorite"].sum() if "is_favorite" in filtered_df.columns else 0
-            st.metric("Favoriten in Ansicht", int(fav_count))
+            fav_count = 0
+            if "is_favorite" in filtered_df.columns:
+                try:
+                    cleaned_fav = filtered_df["is_favorite"].replace('', False).fillna(False).astype(bool)
+                    fav_count = int(cleaned_fav.sum())
+                except Exception:
+                    fav_count = 0
+            st.metric("Favoriten in Ansicht", fav_count)
 
         st.divider()
 
