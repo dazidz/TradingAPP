@@ -26,26 +26,38 @@ class JorisPortfolioManager:
     return mapping.get(depot_focus, "invest_depot")
 
   def _resolve_api_key(self, passed_key: str = None) -> str:
-    """Hybrid-Ansatz: Holt den API-Key direkt aus Streamlit Secrets,
-
-    alternativ vom übergebenen Parameter oder der Umgebung.
-    """
-    # 1. Direkter Blick in Streamlit Secrets (Online-Umgebung)
-    try:
-      if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
-        val = st.secrets["GEMINI_API_KEY"]
-        if val:
-          return val
-    except Exception:
-      pass
-
-    # 2. Übergebener Parameter
+    """Ultimative Schlüsselsuche: Prüft Parameter, Env, alle denkbaren Secret-Namen."""
     if passed_key:
       return passed_key
 
-    # 3. Umgebungsvariable
-    if os.getenv("GEMINI_API_KEY"):
-      return os.getenv("GEMINI_API_KEY")
+    # 1. Bekannte Env-Variablen prüfen
+    for env_name in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GEMINI_KEY"]:
+      val = os.getenv(env_name)
+      if val:
+        return val
+
+    # 2. Streamlit Secrets durchkämmen
+    try:
+      if hasattr(st, "secrets") and st.secrets:
+        # Direkte Treffer
+        for key_name in [
+            "GEMINI_API_KEY",
+            "gemini_api_key",
+            "GOOGLE_API_KEY",
+            "google_api_key",
+            "GEMINI_KEY",
+        ]:
+          if key_name in st.secrets and st.secrets[key_name]:
+            return st.secrets[key_name]
+
+        # Verschachtelte Bereiche prüfen (z.B. [api_keys] gemini = "...")
+        for section in st.secrets:
+          if isinstance(st.secrets[section], dict):
+            for sub_key in ["gemini_api_key", "GEMINI_API_KEY", "api_key", "key"]:
+              if sub_key in st.secrets[section] and st.secrets[section][sub_key]:
+                return st.secrets[section][sub_key]
+    except Exception:
+      pass
 
     return None
 
@@ -56,8 +68,8 @@ class JorisPortfolioManager:
       if not active_key:
         return (
             False,
-            "Kein Gemini API-Key für Joris gefunden (weder in Streamlit"
-            " Secrets noch übergeben).",
+            "Kein Gemini API-Key für Joris gefunden (weder übergeben, noch in"
+            " Env oder Streamlit Secrets vorhanden).",
         )
 
       genai.configure(api_key=active_key)
