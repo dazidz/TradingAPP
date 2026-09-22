@@ -14,7 +14,7 @@ class ArisPerformanceManager:
 
   def analyze_and_optimize(self):
     print(
-        f"Aris (Performance Manager [{self.model_name}]) analysiert den"
+        f"Aris (Technischer Screener [{self.model_name}]) analysiert den"
         " Arbeitsspeicher..."
     )
     try:
@@ -32,55 +32,53 @@ class ArisPerformanceManager:
 
       df = pd.DataFrame(items)
 
-      if "end_performance_5_tage" not in df.columns:
-        print("Nicht genügend Performance-Daten im Arbeitsspeicher vorhanden.")
-        return
-
-      df["end_performance_5_tage"] = pd.to_numeric(
-          df["end_performance_5_tage"], errors="coerce"
-      )
-      df["max_performance_5_tage"] = pd.to_numeric(
-          df.get("max_performance_5_tage", 0), errors="coerce"
-      )
+      # Numerische Konvertierung für technische Indikatoren (z.B. ADX)
       df["adx"] = pd.to_numeric(df.get("adx"), errors="coerce")
 
-      # --- ANALYSE & KENNZAHLEN ---
-      avg_end_perf = df["end_performance_5_tage"].mean()
-      avg_max_perf = df["max_performance_5_tage"].mean()
+      # --- TECHNISCHE ANALYSE & KENNZAHLEN ---
+      total_signals = len(df)
 
-      signal_groups = (
-          df.groupby("signal_typ")["end_performance_5_tage"]
-          .agg(["count", "mean"])
-          .reset_index()
+      # Häufigkeit der Signal-Typen ermitteln
+      signal_counts = (
+          df["signal_typ"].value_counts().reset_index()
+          if "signal_typ" in df.columns
+          else pd.DataFrame()
+      )
+      top_signal_type = (
+          str(signal_counts.iloc[0]["signal_typ"])
+          if not signal_counts.empty
+          else "N/A"
+      )
+      top_signal_count = (
+          int(signal_counts.iloc[0]["count"]) if not signal_counts.empty else 0
       )
 
-      best_signal_type, best_signal_mean = "N/A", 0
-      if not signal_groups.empty:
-        best_row = signal_groups.loc[signal_groups["mean"].idxmax()]
-        best_signal_type = str(best_row["signal_typ"])
-        best_signal_mean = float(best_row["mean"])
-
-      df["high_adx"] = df["adx"] > 25
-      adx_groups = (
-          df.groupby("high_adx")["end_performance_5_tage"].mean().to_dict()
-      )
+      # ADX-Trendverteilung prüfen
+      df["high_adx"] = df["adx"] > 25 if "adx" in df.columns else False
+      high_adx_count = int(df["high_adx"].sum())
 
       # --- KOMPAKTE BULLET-POINTS (Token-optimiert für Joris) ---
       bullet_points = [
-          f"Trades ausgewertet: {len(df)}",
-          f"Ø Performance (Ende 5T): {avg_end_perf:.2f}% (Max: {avg_max_perf:.2f}%)",
-          f"Top Signal: {best_signal_type} (Ø {best_signal_mean:.2f}%)",
-          f"ADX-Trend: ADX>25 bringt Ø {adx_groups.get(True, 0):.2f}% vs. ADX<=25 mit Ø {adx_groups.get(False, 0):.2f}%",
+          f"Analysierte Signale/Setups: {total_signals}",
+          (
+              f"Häufigster Signal-Typ: {top_signal_type} ({top_signal_count}"
+              " mal)"
+          ),
+          (
+              f"ADX-Trendfilter: {high_adx_count} von {total_signals} Signalen"
+              " mit starkem Trend (ADX > 25)"
+          ),
       ]
 
       # Kompakter Fließtext für die bestehende report_content Spalte
-      report_text = f"Trades: {len(df)} | Ø End: {avg_end_perf:.2f}% | Top Signal: {best_signal_type} ({best_signal_mean:.2f}%)"
+      report_text = f"Signale analysiert: {total_signals} | Top Signal: {top_signal_type} ({top_signal_count}x) | Starker Trend (ADX>25): {high_adx_count}"
 
       # 2. In die bestehende Tabelle 'agent_reports' schreiben
       report_payload = {
           "agent_name": "Aris",
           "report_content": report_text,
           "bullet_points": bullet_points,
+          "status": "unread",
       }
       self.supabase.table(self.table_agent_reports).insert(
           report_payload
@@ -92,7 +90,10 @@ class ArisPerformanceManager:
           "datum": datetime.now().strftime("%Y-%m-%d"),
           "manager": "Aris",
           "ki_modell": self.model_name,
-          "erkenntnisse": f"Bester Signal-Typ: {best_signal_type} ({best_signal_mean:.2f}%). ADX-Filter optimiert.",
+          "erkenntnisse": (
+              f"Technische Signale ausgewertet: {total_signals} Signale."
+              f" Dominanter Typ: {top_signal_type}."
+          ),
           "status aktiv": True,
       }
       self.supabase.table(self.table_principals).insert(
@@ -112,7 +113,7 @@ class ArisPerformanceManager:
       print(f"❌ Fehler in Aris Analyse: {e}")
 
   def run_all(self):
-    self.analyze_and_optimize()
+      self.analyze_and_optimize()
 
 
 if __name__ == "__main__":
