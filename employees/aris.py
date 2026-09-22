@@ -9,7 +9,7 @@ class ArisPerformanceManager:
 
   def __init__(self, supabase_client, api_key: str = None):
     self.supabase = supabase_client
-    self.model_name = "llama-3.3-70b-versatile"
+    self.model_name = "openai/gpt-oss-120b"
     self.table_aris_arbeitsspeicher = "aris_arbeitsspeicher"
     self.table_principals = "principals"
     self.table_agent_reports = "agent_reports"
@@ -63,7 +63,6 @@ class ArisPerformanceManager:
       # 2. Daten kompakt als Textzeilen für das LLM aufbereiten (Keine Python-Berechnungen!)
       formatted_lines = []
       for item in items:
-        # Nimmt einfach alles an Werten mit, was Nino reingeschrieben hat
         row_str = " | ".join([f"{k}: {v}" for k, v in item.items() if k != "id"])
         formatted_lines.append(f"- {row_str}")
 
@@ -79,11 +78,13 @@ class ArisPerformanceManager:
             - was gibt es bei den top 5 des tages für indikatoren
             - prüft auf sonstige Muster(was funktioniert am besten)
             
+            fasse diese in prägnante Bullet-Points zusammen.
+            
             VON NINO BEREITGESTELLTE DATEN:
             {data_payload}
             """
 
-      # 3. LLM-Synthese über Groq
+      # 3. LLM-Synthese mit openai/gpt-oss-120b
       completion = client.chat.completions.create(
           model=self.model_name,
           messages=[
@@ -101,7 +102,6 @@ class ArisPerformanceManager:
 
       llm_response = completion.choices[0].message.content
 
-      # Kompakte Bullet-Points für agent_reports
       bullet_points = [
           f"Ausgewertete Datensätze von Nino: {len(items)}",
           "Qualitative KI-Synthese & Mustererkennung durchgeführt",
@@ -133,7 +133,7 @@ class ArisPerformanceManager:
           principal_entry
       ).execute()
 
-      # 6. Arbeitsspeicher bereinigen (Einträge löschen, da von Aris verarbeitet)
+      # 6. Arbeitsspeicher bereinigen
       item_ids = [item["id"] for item in items if "id" in item]
       for item_id in item_ids:
         self.supabase.table(self.table_aris_arbeitsspeicher).delete().eq(
