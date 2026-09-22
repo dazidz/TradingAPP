@@ -324,14 +324,14 @@ with tab_nino:
 
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            sources = ["Alle"] + list(df["source"].dropna().unique()) if "source" in df.columns else ["Alle"]
+            sources = ["Alle"] + list(df["quelle"].dropna().unique()) if "quelle" in df.columns else ["Alle"]
             selected_source = st.selectbox("Nach Quelle filtern", sources, key="nino_source_filter")
         with col_f2:
             only_favorites = st.checkbox("Nur Favoriten anzeigen", value=False, key="nino_fav_filter")
 
         filtered_df = df.copy()
         if selected_source != "Alle":
-            filtered_df = filtered_df[filtered_df["source"] == selected_source]
+            filtered_df = filtered_df[filtered_df["quelle"] == selected_source]
         if only_favorites and "is_favorite" in filtered_df.columns:
             filtered_df = filtered_df[filtered_df["is_favorite"] == True]
 
@@ -352,9 +352,9 @@ with tab_nino:
 
         st.subheader("📊 Arbeitsspeicher-Daten")
         display_columns = [
-            "ticker", "source", "candle_time", "signal_typ", 
-            "einstiegspreis_zum_signal", "max_kurs_5_tage", "max_performance_5_tage", 
-            "candle_time_max_5_tage", "end_kurs_5_tage", "end_performance_5_tage", 
+            "ticker", "quelle", "candle_time", "signal_typ", 
+            "smi", "adx", "max_kurs_5_tage", "max_performance_5_tage", 
+            "end_kurs_5_tage", "end_performance_5_tage", 
             "is_favorite", "status"
         ]
         existing_cols = [col for col in display_columns if col in filtered_df.columns]
