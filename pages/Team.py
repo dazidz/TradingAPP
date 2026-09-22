@@ -442,7 +442,7 @@ with tab_aris:
             "role": "assistant",
             "content": (
                 "**Letzter gespeicherter Report ("
-                f"{latest_report['created_at'][:16]}}):**\n\n"
+                f"{latest_report['created_at'][:16]}):**\n\n"
                 + latest_report["report_content"]
             ),
         })
