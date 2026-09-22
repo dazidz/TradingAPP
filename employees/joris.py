@@ -26,39 +26,26 @@ class JorisPortfolioManager:
     return mapping.get(depot_focus, "invest_depot")
 
   def _resolve_api_key(self, passed_key: str = None) -> str:
-    """Sucht den Gemini API-Key über alle möglichen Quellen und Namensvarianten."""
+    """Hybrid-Ansatz: Holt den API-Key direkt aus Streamlit Secrets,
+
+    alternativ vom übergebenen Parameter oder der Umgebung.
+    """
+    # 1. Direkter Blick in Streamlit Secrets (Online-Umgebung)
+    try:
+      if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
+        val = st.secrets["GEMINI_API_KEY"]
+        if val:
+          return val
+    except Exception:
+      pass
+
+    # 2. Übergebener Parameter
     if passed_key:
       return passed_key
 
+    # 3. Umgebungsvariable
     if os.getenv("GEMINI_API_KEY"):
       return os.getenv("GEMINI_API_KEY")
-
-    # Durchsuche Streamlit Secrets nach gängigen Varianten (auch verschachtelt)
-    try:
-      if hasattr(st, "secrets") and st.secrets:
-        # Flache Varianten
-        for key_candidate in [
-            "GEMINI_API_KEY",
-            "gemini_api_key",
-            "GOOGLE_API_KEY",
-            "google_api_key",
-            "GEMINI_KEY",
-        ]:
-          if key_candidate in st.secrets:
-            val = st.secrets[key_candidate]
-            if val:
-              return val
-
-        # Verschachtelte Varianten (z.B. [gemini] api_key = "...")
-        for section in st.secrets:
-          if isinstance(st.secrets[section], dict):
-            for sub_key in ["api_key", "GEMINI_API_KEY", "key"]:
-              if sub_key in st.secrets[section]:
-                val = st.secrets[section][sub_key]
-                if val:
-                  return val
-    except Exception:
-      pass
 
     return None
 
@@ -67,17 +54,10 @@ class JorisPortfolioManager:
       active_key = self._resolve_api_key(api_key)
 
       if not active_key:
-        # Debug-Info erzeugen, welche Keys in st.secrets existieren (ohne Werte zu leaken)
-        available_keys = []
-        try:
-          if hasattr(st, "secrets") and st.secrets:
-            available_keys = list(st.secrets.keys())
-        except Exception:
-          pass
         return (
             False,
-            f"Kein Gemini API-Key für Joris gefunden. (Vorhandene Secret-Keys"
-            f" in App: {available_keys})",
+            "Kein Gemini API-Key für Joris gefunden (weder in Streamlit"
+            " Secrets noch übergeben).",
         )
 
       genai.configure(api_key=active_key)
@@ -232,7 +212,11 @@ class JorisPortfolioManager:
       return None
 
   def chat_with_joris(
-      self, depot_focus: str, user_message: str, chat_history: list, api_key: str = None
+      self,
+      depot_focus: str,
+      user_message: str,
+      chat_history: list,
+      api_key: str = None,
   ):
     try:
       active_key = self._resolve_api_key(api_key)
