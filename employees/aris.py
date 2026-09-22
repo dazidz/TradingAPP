@@ -1,6 +1,6 @@
 from datetime import datetime
 from db import get_db_client
-from groq import Groq
+import google.generativeai as genai
 import os
 import streamlit as st
 
@@ -9,7 +9,7 @@ class ArisPerformanceManager:
 
   def __init__(self, supabase_client, api_key: str = None):
     self.supabase = supabase_client
-    self.model_name = "openai/gpt-oss-120b"
+    self.model_name = "gemini-3.6-flash"
     self.table_aris_arbeitsspeicher = "aris_arbeitsspeicher"
     self.table_principals = "principals"
     self.table_agent_reports = "agent_reports"
@@ -18,18 +18,18 @@ class ArisPerformanceManager:
   def _resolve_api_key(self, passed_key: str = None) -> str:
     if passed_key:
       return passed_key
-    for env_name in ["GROQ_API_KEY", "groq_api_key", "GROQ_KEY"]:
+    for env_name in ["GEMINI_API_KEY", "gemini_api_key", "GEMINI_KEY", "GOOGLE_API_KEY"]:
       val = os.getenv(env_name)
       if val:
         return val
     try:
       if hasattr(st, "secrets") and st.secrets:
-        for key_name in ["GROQ_API_KEY", "groq_api_key", "GROQ_KEY"]:
+        for key_name in ["GEMINI_API_KEY", "gemini_api_key", "GEMINI_KEY", "GOOGLE_API_KEY"]:
           if key_name in st.secrets and st.secrets[key_name]:
             return st.secrets[key_name]
         for section in st.secrets:
           if isinstance(st.secrets[section], dict):
-            for sub_key in ["groq_api_key", "GROQ_API_KEY", "api_key", "key"]:
+            for sub_key in ["gemini_api_key", "GEMINI_API_KEY", "api_key", "key"]:
               if sub_key in st.secrets[section] and st.secrets[section][sub_key]:
                 return st.secrets[section][sub_key]
     except Exception:
@@ -43,10 +43,10 @@ class ArisPerformanceManager:
     )
     try:
       if not self.api_key:
-        print("❌ Kein Groq API-Key für Aris gefunden.")
+        print("❌ Kein Gemini API-Key für Aris gefunden.")
         return
 
-      client = Groq(api_key=self.api_key)
+      genai.configure(api_key=self.api_key)
 
       # 1. Fertig berechnete Daten von Nino aus aris_arbeitsspeicher holen
       res = (
@@ -60,7 +60,7 @@ class ArisPerformanceManager:
         print("Keine Einträge im aris_arbeitsspeicher gefunden.")
         return
 
-      # 2. Daten kompakt als Textzeilen für das LLM aufbereiten (Keine Python-Berechnungen!)
+      # 2. Daten kompakt als Textzeilen für das LLM aufbereiten
       formatted_lines = []
       for item in items:
         row_str = " | ".join([f"{k}: {v}" for k, v in item.items() if k != "id"])
@@ -78,37 +78,28 @@ class ArisPerformanceManager:
             - was gibt es bei den top 5 des tages für indikatoren
             - prüft auf sonstige Muster(was funktioniert am besten)
             
-            fasse diese in prägnante Bullet-Points zusammen.
+            Fasse diese in prägnante Bullet-Points zusammen.
             
             VON NINO BEREITGESTELLTE DATEN:
             {data_payload}
             """
 
-      # 3. LLM-Synthese mit openai/gpt-oss-120b
-      completion = client.chat.completions.create(
-          model=self.model_name,
-          messages=[
-              {
-                  "role": "system",
-                  "content": (
-                      "Du bist ein präziser Analyst. Fasse dich klar"
-                      " strukturiert und datenbasiert."
-                  ),
-              },
-              {"role": "user", "content": prompt},
-          ],
-          max_tokens=800,
+      # 3. LLM-Synthese mit Google Gemini
+      system_instruction = "Du bist ein präziser Analyst. Fasse dich klar, strukturiert und datenbasiert."
+      model = genai.GenerativeModel(self.model_name, system_instruction=system_instruction)
+      
+      response = model.generate_content(
+          prompt,
+          generation_config={"temperature": 0.1, "max_output_tokens": 1500}
       )
 
-      llm_response = completion.choices[0].message.content
+      llm_response = response.text
 
       bullet_points = [
           f"Ausgewertete Datensätze von Nino: {len(items)}",
           "Qualitative KI-Synthese & Mustererkennung durchgeführt",
           llm_response[:300] + "...",
       ]
-
-      report_text = f"Auswertung von {len(items)} Datensätzen erfolgreich durchgeführt."
 
       # 4. In agent_reports speichern (für Joris)
       report_payload = {

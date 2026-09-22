@@ -390,11 +390,11 @@ with tab_nino:
     st.error(f"Nino-Tab aktuell nicht verfügbar (Fehler: {e})")
 
 # ==========================================
-# TAB 6: ARIS (PERFORMANCE MANAGER & CHAT - GROQ)
+# TAB 6: ARIS (PERFORMANCE MANAGER & CHAT - GEMINI)
 # ==========================================
 with tab_aris:
   st.subheader("🤖 Aris - Performance Manager")
-  st.caption("🤖 **Verwendetes Modell:** Groq (`openai/gpt-oss-120b`)")
+  st.caption("🤖 **Verwendetes Modell:** Google Gemini (`gemini-2.5-pro` / `gemini-1.5-pro`)")
   st.markdown(
       "Dein KI-Agent analysiert das Signals-Journal, das Trading-Journal, "
       "den Screener-Quellcode und steht dir im Chat für Rückfragen zur Verfügung."
@@ -414,6 +414,18 @@ with tab_aris:
     Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefer konkrete, direkt umsetzbare Handlungsempfehlungen.
     """
 
+  # Hilfsfunktion, um einen sicheren Gemini-Client/-Key zu holen
+  def get_gemini_api_key():
+      active_k = GEMINI_API_KEY
+      if not active_k:
+          try:
+              active_k = st.secrets.get("GEMINI_API_KEY")
+          except:
+              pass
+      if not active_k:
+          active_k = os.getenv("GEMINI_API_KEY")
+      return active_k
+
   if not st.session_state.messages_aris:
     try:
       saved_report_res = (
@@ -430,17 +442,24 @@ with tab_aris:
             "role": "assistant",
             "content": (
                 "**Letzter gespeicherter Report ("
-                f"{latest_report['created_at'][:16]}):**\n\n"
+                f"{latest_report['created_at'][:16]}}):**\n\n"
                 + latest_report["report_content"]
             ),
         })
     except Exception:
       pass
 
-  if st.button("🚀 Aris Analyse & Screener-Review starten", type="primary"):
-    with st.spinner("Aris analysiert Datenbanken und Code..."):
+  if st.button("🚀 Aris Analyse & Screener-Review starten", type="primary", key="btn_run_aris_gemini"):
+    with st.spinner("Aris (Gemini) analysiert Datenbanken und Code..."):
       try:
-        groq_client = Groq(api_key=GROQ_API_KEY)
+        active_k = get_gemini_api_key()
+        if not active_k:
+            st.error("⚠️ Kein Gemini API-Key gefunden (`GEMINI_API_KEY`).")
+            st.stop()
+
+        genai.configure(api_key=active_k)
+        # Verwende ein stabiles Gemini Pro Modell mit großem Context Window
+        model = genai.GenerativeModel("gemini-1.5-pro", system_instruction=aris_dna)
 
         signals_res = supabase.table("signals_journal").select("*").execute()
         journal_res = supabase.table("trade_journal").select("*").execute()
@@ -454,20 +473,11 @@ with tab_aris:
             {journal_df.to_string() if not journal_df.empty else "Keine Trades"}
             """
 
-        completion = groq_client.chat.completions.create(
-            model="openai/gpt-oss-120b",
-            messages=[
-                {"role": "system", "content": aris_dna},
-                {
-                    "role": "user",
-                    "content": (
-                        "Erstelle deinen Analyse-Report:\n\n" + context_data
-                    ),
-                },
-            ],
-            temperature=0.1,
+        response = model.generate_content(
+            f"Erstelle deinen Analyse-Report basierend auf folgenden Daten:\n\n{context_data}",
+            generation_config={"temperature": 0.1}
         )
-        report_content = completion.choices[0].message.content
+        report_content = response.text
 
         supabase.table("agent_reports").insert({
             "agent_name": "Aris",
@@ -480,7 +490,7 @@ with tab_aris:
         st.success("Analyse erfolgreich abgeschlossen!")
         st.rerun()
       except Exception as e:
-        st.error(f"⚠️ Fehler: {e}")
+        st.error(f"⚠️ Fehler bei der Analyse: {e}")
 
   st.markdown("---")
   st.markdown("### 💬 Diskussion mit Aris")
@@ -489,7 +499,7 @@ with tab_aris:
     with st.chat_message(message["role"]):
       st.markdown(message["content"])
 
-  if user_query := st.chat_input("Stelle Aris eine Frage...", key="aris_chat_input"):
+  if user_query := st.chat_input("Stelle Aris eine Frage...", key="aris_chat_input_gemini"):
     st.session_state.messages_aris.append(
         {"role": "user", "content": user_query}
     )
@@ -497,22 +507,28 @@ with tab_aris:
       st.markdown(user_query)
 
     with st.chat_message("assistant"):
-      with st.spinner("Aris denkt nach..."):
+      with st.spinner("Aris (Gemini) denkt nach..."):
         try:
-          groq_client = Groq(api_key=GROQ_API_KEY)
+          active_k = get_gemini_api_key()
+          if not active_k:
+              st.error("⚠️ Kein Gemini API-Key gefunden.")
+              st.stop()
 
-          groq_history = [{"role": "system", "content": aris_dna}]
+          genai.configure(api_key=active_k)
+          
+          # Chat-Historie für Gemini aufbauen
+          gemini_history = []
           for m in st.session_state.messages_aris[:-1]:
-            role = "user" if m["role"] == "user" else "assistant"
-            groq_history.append({"role": role, "content": m["content"]})
+            # Gemini erwartet 'user' und 'model' als Rollen
+            role = "user" if m["role"] == "user" else "model"
+            gemini_history.append({"role": role, "parts": [m["content"]]})
 
-          completion = groq_client.chat.completions.create(
-              model="openai/gpt-oss-120b",
-              messages=groq_history,
-              temperature=0.1,
-          )
+          model = genai.GenerativeModel("gemini-1.5-pro", system_instruction=aris_dna)
+          chat_session = model.start_chat(history=gemini_history)
+          
+          response = chat_session.send_message(user_query)
+          answer = response.text
 
-          answer = completion.choices[0].message.content
           st.markdown(answer)
           st.session_state.messages_aris.append(
               {"role": "assistant", "content": answer}
