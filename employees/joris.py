@@ -12,7 +12,7 @@ class JorisPortfolioManager:
   def __init__(self, supabase_client):
     self.supabase = supabase_client
     self.name = "Joris"
-    self.model_name = "gemini-2.5-flash"  # Aktualisiert auf stabiles Modell
+    self.model_name = "gemini-2.5-flash"
     self.description = (
         "Portfolio Manager & Synthese-Agent nach Ray Dalios Prinzipien."
     )
@@ -25,20 +25,60 @@ class JorisPortfolioManager:
     }
     return mapping.get(depot_focus, "invest_depot")
 
+  def _resolve_api_key(self, passed_key: str = None) -> str:
+    """Sucht den Gemini API-Key über alle möglichen Quellen und Namensvarianten."""
+    if passed_key:
+      return passed_key
+
+    if os.getenv("GEMINI_API_KEY"):
+      return os.getenv("GEMINI_API_KEY")
+
+    # Durchsuche Streamlit Secrets nach gängigen Varianten (auch verschachtelt)
+    try:
+      if hasattr(st, "secrets") and st.secrets:
+        # Flache Varianten
+        for key_candidate in [
+            "GEMINI_API_KEY",
+            "gemini_api_key",
+            "GOOGLE_API_KEY",
+            "google_api_key",
+            "GEMINI_KEY",
+        ]:
+          if key_candidate in st.secrets:
+            val = st.secrets[key_candidate]
+            if val:
+              return val
+
+        # Verschachtelte Varianten (z.B. [gemini] api_key = "...")
+        for section in st.secrets:
+          if isinstance(st.secrets[section], dict):
+            for sub_key in ["api_key", "GEMINI_API_KEY", "key"]:
+              if sub_key in st.secrets[section]:
+                val = st.secrets[section][sub_key]
+                if val:
+                  return val
+    except Exception:
+      pass
+
+    return None
+
   def run_synthesis(self, depot_focus: str, api_key: str = None):
     try:
-      # Robuste API-Key-Ermittlung (Argument -> Env -> Streamlit Secrets)
-      active_key = api_key
-      if not active_key:
-        active_key = os.getenv("GEMINI_API_KEY")
-      if not active_key:
-        try:
-          active_key = st.secrets.get("GEMINI_API_KEY")
-        except Exception:
-          pass
+      active_key = self._resolve_api_key(api_key)
 
       if not active_key:
-        return False, "Kein Gemini API-Key für Joris gefunden."
+        # Debug-Info erzeugen, welche Keys in st.secrets existieren (ohne Werte zu leaken)
+        available_keys = []
+        try:
+          if hasattr(st, "secrets") and st.secrets:
+            available_keys = list(st.secrets.keys())
+        except Exception:
+          pass
+        return (
+            False,
+            f"Kein Gemini API-Key für Joris gefunden. (Vorhandene Secret-Keys"
+            f" in App: {available_keys})",
+        )
 
       genai.configure(api_key=active_key)
       model = genai.GenerativeModel(self.model_name)
@@ -195,23 +235,13 @@ class JorisPortfolioManager:
       self, depot_focus: str, user_message: str, chat_history: list, api_key: str = None
   ):
     try:
-      # Robuste API-Key-Ermittlung für den Chat
-      active_key = api_key
-      if not active_key:
-        active_key = os.getenv("GEMINI_API_KEY")
-      if not active_key:
-        try:
-          active_key = st.secrets.get("GEMINI_API_KEY")
-        except Exception:
-          pass
-
+      active_key = self._resolve_api_key(api_key)
       if not active_key:
         return False, "Kein Gemini API-Key für den Joris-Chat gefunden."
 
       genai.configure(api_key=active_key)
       model = genai.GenerativeModel(self.model_name)
 
-      # Chat-Historie für Gemini aufbereiten
       formatted_history = []
       for msg in chat_history:
         role = "user" if msg["role"] == "user" else "model"
