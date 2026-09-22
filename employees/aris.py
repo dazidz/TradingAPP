@@ -18,22 +18,42 @@ class ArisPerformanceManager:
   def _resolve_api_key(self, passed_key: str = None) -> str:
     if passed_key:
       return passed_key
-    for env_name in ["GEMINI_API_KEY", "gemini_api_key", "GEMINI_KEY", "GOOGLE_API_KEY"]:
+      
+    possible_keys = [
+        "GEMINI_API_KEY", 
+        "gemini_api_key", 
+        "GEMINI_KEY", 
+        "google_api_key", 
+        "GOOGLE_API_KEY"
+    ]
+
+    # 1. Umgebungsvariablen prüfen
+    for env_name in possible_keys:
       val = os.getenv(env_name)
       if val:
         return val
+
+    # 2. Streamlit Secrets prüfen
     try:
       if hasattr(st, "secrets") and st.secrets:
-        for key_name in ["GEMINI_API_KEY", "gemini_api_key", "GEMINI_KEY", "GOOGLE_API_KEY"]:
+        # Direkter Zugriff auf flache Keys
+        for key_name in possible_keys:
           if key_name in st.secrets and st.secrets[key_name]:
             return st.secrets[key_name]
+            
+        # Durchsuche alle Sektionen (z. B. [general], [api_keys], etc.)
         for section in st.secrets:
-          if isinstance(st.secrets[section], dict):
-            for sub_key in ["gemini_api_key", "GEMINI_API_KEY", "api_key", "key"]:
-              if sub_key in st.secrets[section] and st.secrets[section][sub_key]:
-                return st.secrets[section][sub_key]
+          try:
+            sec_val = st.secrets[section]
+            if isinstance(sec_val, dict):
+              for sub_key in possible_keys + ["api_key", "key"]:
+                if sub_key in sec_val and sec_val[sub_key]:
+                  return sec_val[sub_key]
+          except Exception:
+            continue
     except Exception:
       pass
+
     return None
 
   def analyze_and_optimize(self):
@@ -84,7 +104,7 @@ class ArisPerformanceManager:
             {data_payload}
             """
 
-      # 3. LLM-Synthese mit Google Gemini
+      # 3. LLM-Synthese mit Google Gemini (gemini-3.6-flash)
       system_instruction = "Du bist ein präziser Analyst. Fasse dich klar, strukturiert und datenbasiert."
       model = genai.GenerativeModel(self.model_name, system_instruction=system_instruction)
       
