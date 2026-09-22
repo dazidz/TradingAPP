@@ -65,6 +65,7 @@ with tab_teamroom:
     joris = JorisPortfolioManager(supabase)
 
     st.subheader("Tägliches Standup & Portfolio-Synthese")
+    st.caption("🤖 **Verwendetes Modell:** Google Gemini (Multi-Agenten-Synthese)")
     st.markdown(
         "Nach Ray Dalios Prinzipien: **Radical Truth & Radical"
         " Open-Mindedness**."
@@ -218,7 +219,7 @@ with tab_jano:
 
     jano = JanoMacroAnalyst(supabase)
     st.subheader(f"🌍 {jano.name}")
-    st.caption(jano.description)
+    st.caption(f"{jano.description} | 🤖 **Verwendetes Modell:** Google Gemini")
 
     if st.button("🚀 Jano: Makro-Analyse starten", key="btn_run_jano"):
       with st.spinner("Jano analysiert die Makrolage..."):
@@ -249,7 +250,7 @@ with tab_peter:
     peter = PeterInsiderAnalyst(supabase)
 
     st.subheader(f"🕵️ {peter.name}")
-    st.caption(peter.description)
+    st.caption(f"{peter.description} | 🤖 **Verwendetes Modell:** Groq")
 
     if st.button("🔄 Peter: Fundamentaldaten & Insider analysieren"):
       with st.spinner("Peter holt Watchlist & Insider-Daten..."):
@@ -280,7 +281,7 @@ with tab_otto:
     otto = OttoAnalyst(supabase)
 
     st.subheader(f"📊 {otto.name}")
-    st.caption(otto.description)
+    st.caption(f"{otto.description} | 🤖 **Verwendetes Modell:** Google Gemini")
 
     if st.button("🚀 Otto: Historisches Muster-Matching starten"):
       with st.spinner("Otto gleicht mit der Börsenhistorie ab..."):
@@ -307,6 +308,7 @@ with tab_otto:
 with tab_nino:
   try:
     st.subheader("⚡ Nino - Signal Agent & Arbeitsspeicher")
+    st.caption("🤖 **Verwendetes Modell / Engine:** Python & Supabase Arbeitsspeicher (Screener-Feed)")
     st.markdown("Zentrale Visualisierung des `aris_arbeitsspeicher` (befüllt durch Nino).")
     st.divider()
 
@@ -355,7 +357,7 @@ with tab_nino:
             "ticker", "quelle", "candle_time", "signal_typ", 
             "smi", "adx", "max_kurs_5_tage", "max_performance_5_tage", 
             "end_kurs_5_tage", "end_performance_5_tage", 
-            "is_favorite", "status"
+            "is_favorite"
         ]
         existing_cols = [col for col in display_columns if col in filtered_df.columns]
         
@@ -381,6 +383,7 @@ with tab_nino:
 # ==========================================
 with tab_aris:
   st.subheader("🤖 Aris - Performance Manager")
+  st.caption("🤖 **Verwendetes Modell:** Groq (`openai/gpt-oss-120b`)")
   st.markdown(
       "Dein KI-Agent analysiert das Signals-Journal, das Trading-Journal, "
       "den Screener-Quellcode und steht dir im Chat für Rückfragen zur Verfügung."
@@ -512,6 +515,7 @@ with tab_aris:
 with tab_leopold:
   try:
     st.subheader("⚙️ Leopold - Signals Journal & Deep Analytics")
+    st.caption("🤖 **Verwendetes Modell / Engine:** Python Pandas & Supabase Analytics Engine")
     st.markdown("Vollständige Auswertung und detaillierte Kennzahlen des `signals_journal`.")
     st.divider()
 
