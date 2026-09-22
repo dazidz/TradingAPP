@@ -42,11 +42,29 @@ class NinoSignalsAssistant:
         if isinstance(val, bool):
             return float(val)
         try:
-            if isinstance(val, str) and len(val) > 20 and val.replace("true", "").replace("false", "") == "":
+            val_str = str(val).strip().lower()
+            if "true" in val_str or "false" in val_str or len(val_str) > 20:
+                # Fängt verklebte Strings wie 'falsetrue' ab
                 return default
             return float(val)
         except (ValueError, TypeError):
             return default
+
+    def _safe_bool(self, val, default=False):
+        """Wandelt Werte sicher in Boolean um und fängt kaputte verklebte Strings ab."""
+        if val is None:
+            return default
+        if isinstance(val, bool):
+            return val
+        val_str = str(val).strip().lower()
+        if val_str in ["true", "1", "t", "yes", "y"]:
+            return True
+        if val_str in ["false", "0", "f", "no", "n"]:
+            return False
+        # Falls Supabase hier Schrott wie 'falsetrue' liefert, fangen wir es ab:
+        if "true" in val_str and "false" not in val_str:
+            return True
+        return default
 
     def _get_favorite_tickers(self):
         """Lädt alle Favoriten-Ticker aus der Datenbank."""
@@ -64,13 +82,15 @@ class NinoSignalsAssistant:
         return favorite_tickers
 
     def _parse_meta_data(self, sig_obj):
-        """Extrahiert Meta-Daten wie SMI, ADX und EMA20 robust."""
+        """Extrahiert Meta-Daten wie SMI, ADX und EMA20 extrem robust."""
         meta_raw = sig_obj.get("meta_data", "{}")
         smi_val, adx_val = None, None
         above_ema = False
         try:
             if isinstance(meta_raw, str) and meta_raw.strip():
-                meta_dict = json.loads(meta_raw.replace("'", '"'))
+                # Falls meta_raw ein kaputter String ist, der kein echtes JSON ist
+                clean_meta = meta_raw.replace("'", '"')
+                meta_dict = json.loads(clean_meta)
             elif isinstance(meta_raw, dict):
                 meta_dict = meta_raw
             else:
@@ -81,9 +101,10 @@ class NinoSignalsAssistant:
             
             smi_val = self._safe_float(smi_raw, default=None) if smi_raw is not None else None
             adx_val = self._safe_float(adx_raw, default=None) if adx_raw is not None else None
-            above_ema = bool(meta_dict.get("above_ema20", False))
+            above_ema = self._safe_bool(meta_dict.get("above_ema20", False))
         except Exception as e:
-            print(f"Warnung beim Parsen der Meta-Daten für Ticker {sig_obj.get('ticker')}: {e}")
+            # Fallback falls json.loads wegen kaputter Strings fehlschlägt
+            pass
         return smi_val, adx_val, above_ema
 
     def _fetch_5d_performance(self, ticker, sig_date, base_preis):
@@ -285,7 +306,6 @@ class NinoSignalsAssistant:
         try:
             today = datetime.now().date()
             
-            # Holt direkt nur die Signale, die noch keinen Status haben (oder wo status is null)
             joris_res = (
                 self.supabase.table(self.table_joris_journal)
                 .select("*")
@@ -340,7 +360,6 @@ class NinoSignalsAssistant:
                 )
                 smi_val, adx_val, above_ema = self._parse_meta_data(item)
 
-                # Setzt den Status direkt auf True, damit er beim nächsten Durchlauf übersprungen wird
                 updated_joris_data = {
                     "status": True,
                     "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
