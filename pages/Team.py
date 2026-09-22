@@ -12,7 +12,7 @@ import yfinance as yf
 # Setzt das Hauptverzeichnis fest in den Suchpfad von Python
 root_dir = Path(__file__).resolve().parent.parent
 if str(root_dir) not in sys.path:
-  sys.path.append(str(root_dir))
+    sys.path.append(str(root_dir))
 
 st.set_page_config(
     layout="wide",
@@ -21,8 +21,8 @@ st.set_page_config(
 )
 
 if not st.session_state.get("password_correct", False):
-  st.warning("Bitte melde dich zuerst auf der Hauptseite an.")
-  st.stop()
+    st.warning("Bitte melde dich zuerst auf der Hauptseite an.")
+    st.stop()
 
 URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
@@ -33,14 +33,14 @@ GROQ_API_KEY = None
 GEMINI_API_KEY = None
 
 try:
-  GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
+    GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
 except Exception:
-  pass
+    pass
 
 try:
-  GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
 except Exception:
-  pass
+    pass
 
 st.title("🏢 VisionDZ - Team & Kommandozentrale")
 
