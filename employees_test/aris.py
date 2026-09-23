@@ -10,7 +10,7 @@ class ArisAgent:
         self.supabase = supabase_client
         self.name = "Aris"
         self.model_name = "gemini-1.5-flash"
-        self.description = "Performance & Metrik-Agent"
+        self.description = "Performance Manager"
 
     def _resolve_api_key(self, passed_key: str = None) -> str:
         """Ultimative Schlüsselsuche: Prüft Parameter, Env, alle denkbaren Secret-Namen."""
@@ -61,12 +61,42 @@ class ArisAgent:
             genai.configure(api_key=active_key)
             model = genai.GenerativeModel(self.model_name)
 
-            prompt = (
-                "Führe eine Performance- und Metrik-Analyse für das Portfolio durch."
+            # 1. Daten aus dem Arbeitsspeicher abrufen
+            memory_res = (
+                self.supabase.table("aris_arbeitsspeicher").select("*").execute()
             )
+            memory_data = memory_res.data if memory_res.data else []
+
+            memory_texts = [str(item) for item in memory_data]
+            memory_context = (
+                "\n".join(memory_texts)
+                if memory_texts
+                else "Keine spezifischen Einträge im Arbeitsspeicher."
+            )
+
+            # 2. Detaillierter Analyse-Prompt nach Vorgabe
+            prompt = f"""
+            Du bist Aris, der Performance Manager. 
+            Deine Aufgabe ist es, die folgenden Rohdaten aus dem Arbeitsspeicher ('aris_arbeitsspeicher') tiefgehend zu analysieren, datenbasierte Erkenntnisse abzuleiten und diese als klare **Principals** (Prinzipien) zu formulieren.
+
+            ARBEITSSPEICHER-DATEN:
+            {memory_context}
+
+            Führe folgende Analysen durch:
+            - **ADX & SMI Mustererkennung**: Welche Muster oder Kombinationen zeigen sich?
+            - **Haltedauer**: Laufen 5-Tage-End-Trades oder Max-Trades besser?
+            - **Signal-Performance**: Welche Signale laufen besser? Gibt es eine optimale Signal + ADX + SMI Kombi?
+            - **Top 5 des Tages**: Welche Indikatoren und Merkmale weisen die Top 5 des Tages auf?
+            - **Sonstige Muster**: Was funktioniert am besten?
+            - **Verbesserungstipps**: Konkrete Handlungsempfehlungen.
+
+            Schreibe die zentralen Erkenntnisse strukturiert als 'Principals' nieder.
+            """
+
             response = model.generate_content(prompt)
             report_content = response.text
 
+            # 3. Bericht / Erkenntnisse in agent_reports speichern (als Principals gekennzeichnet)
             self.supabase.table("agent_reports").insert({
                 "agent_name": self.name,
                 "report_content": report_content,
@@ -74,9 +104,17 @@ class ArisAgent:
                 "created_at": datetime.now().isoformat(),
             }).execute()
 
+            # 4. Verarbeitete Einträge aus dem Arbeitsspeicher löschen
+            for item in memory_data:
+                item_id = item.get("id")
+                if item_id:
+                    self.supabase.table("aris_arbeitsspeicher").delete().eq(
+                        "id", item_id
+                    ).execute()
+
             return (
                 True,
-                "Aris-Analyse erfolgreich durchgeführt und gespeichert!",
+                "Aris Performance-Analyse erfolgreich durchgeführt, Principals aktualisiert und Arbeitsspeicher geleert!",
             )
 
         except Exception as e:
@@ -85,13 +123,16 @@ class ArisAgent:
     def render_ui(self, api_key: str = None):
         st.subheader(f"🤖 {self.name} - {self.description}")
         st.write(
-            "Verantwortlich für Performance-Auswertungen, Metriken und statistische Validierung."
+            "Analysiert den Arbeitsspeicher, erkennt Muster (ADX, SMI, Haltedauer, Top 5) und generiert strategische Principals."
         )
 
         if st.button(
-            f"Analyse starten ({self.name})", key=f"btn_run_{self.name}"
+            f"Analyse & Principals erstellen ({self.name})",
+            key=f"btn_run_{self.name}",
         ):
-            with st.spinner(f"{self.name} analysiert die Daten..."):
+            with st.spinner(
+                f"{self.name} wertet den Arbeitsspeicher aus..."
+            ):
                 success, msg = self.run_analysis(api_key)
                 if success:
                     st.success(msg)
@@ -99,7 +140,7 @@ class ArisAgent:
                     st.error(msg)
 
         st.markdown("---")
-        st.markdown("### 📄 Letzter Aris-Bericht")
+        st.markdown("### 📄 Letzte Aris Principals / Berichte")
         try:
             res = (
                 self.supabase.table("agent_reports")
@@ -121,7 +162,7 @@ class ArisAgent:
             st.warning(f"Fehler beim Laden des Berichts aus Supabase: {e}")
 
 
-# --- MODUL-EBENE FUNKTION (Falls das Testskript direkt das Modul prüft) ---
+# --- MODUL-EBENE FUNKTION ---
 def render_ui(supabase_client, api_key: str = None):
     agent = ArisAgent(supabase_client)
     agent.render_ui(api_key)
