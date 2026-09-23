@@ -18,19 +18,8 @@ def render_ui(supabase, get_gemini_api_key):
     Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefere konkrete, direkt umsetzbare Handlungsempfehlungen.
     """
 
-    # Robuste Hilfsfunktion, um den API-Key sicher zu greifen
+    # Bombensicherer Weg, um den API-Key direkt zu laden
     def resolve_key():
-        try:
-            if callable(get_gemini_api_key):
-                val = get_gemini_api_key()
-                if val:
-                    return val
-            elif isinstance(get_gemini_api_key, str) and get_gemini_api_key:
-                return get_gemini_api_key
-        except Exception:
-            pass
-        
-        # Fallback auf Secrets oder Umgebungsvariablen
         try:
             if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
                 if st.secrets["GEMINI_API_KEY"]:
@@ -72,7 +61,7 @@ def render_ui(supabase, get_gemini_api_key):
             try:
                 active_k = resolve_key()
                 if not active_k:
-                    st.error("⚠️ Kein Gemini API-Key gefunden.")
+                    st.error("⚠️ Kein Gemini API-Key in den Streamlit Secrets gefunden.")
                     st.stop()
 
                 genai.configure(api_key=active_k)
@@ -141,7 +130,7 @@ def render_ui(supabase, get_gemini_api_key):
                 try:
                     active_k = resolve_key()
                     if not active_k:
-                        st.error("⚠️ Kein Gemini API-Key gefunden.")
+                        st.error("⚠️ Kein Gemini API-Key in den Streamlit Secrets gefunden.")
                         st.stop()
 
                     genai.configure(api_key=active_k)
