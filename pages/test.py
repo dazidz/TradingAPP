@@ -44,6 +44,7 @@ else:
         with tabs[i]:
             mod = agent_modules[name]
             if hasattr(mod, "render_ui"):
-                mod.render_ui(supabase, get_gemini_api_key)
+               actual_key = get_gemini_api_key()
+               mod.render_ui(supabase, lambda: actual_key)
             else:
                 st.error(f"Mitarbeiter '{name}' besitzt keine `render_ui` Funktion.")
