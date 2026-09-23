@@ -410,12 +410,13 @@ with tab_aris:
     """
 
   # Sichere Hilfsfunktion, um den API-Key abzurufen
+  # Sichere Hilfsfunktion, die direkt deine Python-Variable greift
   def get_gemini_api_key():
-      # 1. Prüfen ob globale Variable existiert und gesetzt ist
-      if "GEMINI_API_KEY" in globals() and globals()["GEMINI_API_KEY"]:
-          return globals()["GEMINI_API_KEY"]
+      # 1. Direkter Zugriff auf die globale Variable im Skript
+      if 'GEMINI_API_KEY' in globals() and globals()['GEMINI_API_KEY']:
+          return globals()['GEMINI_API_KEY']
       
-      # 2. Streamlit Secrets prüfen
+      # 2. Fallback auf Streamlit Secrets / Env
       try:
           if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
               if st.secrets["GEMINI_API_KEY"]:
@@ -423,7 +424,6 @@ with tab_aris:
       except Exception:
           pass
           
-      # 3. Environment Variable prüfen
       if os.getenv("GEMINI_API_KEY"):
           return os.getenv("GEMINI_API_KEY")
           
