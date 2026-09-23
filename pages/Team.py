@@ -396,8 +396,8 @@ with tab_aris:
   st.subheader("🤖 Aris - Performance Manager")
   st.caption("🤖 **Verwendetes Modell:** Google Gemini (`gemini-3.6-flash`)")
   st.markdown(
-      "Dein KI-Agent analysiert das Signals-Journal, das Trading-Journal, "
-      "den Screener-Quellcode und steht dir im Chat für Rückfragen zur Verfügung."
+      "Dein KI-Agent analysiert den Arbeitsspeicher "
+      "und steht dir im Chat für Rückfragen zur Verfügung."
   )
 
   if "messages_aris" not in st.session_state:
@@ -405,26 +405,29 @@ with tab_aris:
 
   aris_dna = """
     Du bist Aris, der leitende Performance Manager in dieser Trading-Anwendung. Deine Aufgabe ist es, die Performance objektiv, datenbasiert und gnadenlos ehrlich zu analysieren. Du verzichtest auf leere Floskeln und Schönfärberei. 
-    Analysiere die übergebenen Datenpunkte:
-    1. Signals Journal (inkl. 5-Tage und 1-Monats-Meilensteine)
-    2. Trading Journal (geschlossene Trades inkl. Post-Exit-Tracking)
-    3. Screener-Quellcode (auf Filterfehler, Schwachstellen und verpasste Chancen prüfen)
-    4. Watchlist (nach Asset-Kategorien: Invest, Swing, High Risk)
-
-    Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefer konkrete, direkt umsetzbare Handlungsempfehlungen.
+    Analysiere die übergebenen Datenpunkte aus dem Arbeitsspeicher.
+    Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefere konkrete, direkt umsetzbare Handlungsempfehlungen.
     """
 
-  # Hilfsfunktion, um einen sicheren Gemini-Client/-Key zu holen
+  # Sichere Hilfsfunktion, um den API-Key abzurufen
   def get_gemini_api_key():
-      active_k = GEMINI_API_KEY
-      if not active_k:
-          try:
-              active_k = st.secrets.get("GEMINI_API_KEY")
-          except:
-              pass
-      if not active_k:
-          active_k = os.getenv("GEMINI_API_KEY")
-      return active_k
+      # 1. Prüfen ob globale Variable existiert und gesetzt ist
+      if "GEMINI_API_KEY" in globals() and globals()["GEMINI_API_KEY"]:
+          return globals()["GEMINI_API_KEY"]
+      
+      # 2. Streamlit Secrets prüfen
+      try:
+          if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
+              if st.secrets["GEMINI_API_KEY"]:
+                  return st.secrets["GEMINI_API_KEY"]
+      except Exception:
+          pass
+          
+      # 3. Environment Variable prüfen
+      if os.getenv("GEMINI_API_KEY"):
+          return os.getenv("GEMINI_API_KEY")
+          
+      return None
 
   if not st.session_state.messages_aris:
     try:
@@ -449,12 +452,12 @@ with tab_aris:
     except Exception:
       pass
 
-  if st.button("🚀 Aris Analyse & Screener-Review starten", type="primary", key="btn_run_aris_gemini"):
+  if st.button("🚀 Aris Analyse & Arbeitsspeicher-Review starten", type="primary", key="btn_run_aris_gemini"):
     with st.spinner("Aris (Gemini) analysiert den Arbeitsspeicher..."):
       try:
         active_k = get_gemini_api_key()
         if not active_k:
-            st.error("⚠️ Kein Gemini API-Key gefunden (`GEMINI_API_KEY`).")
+            st.error("⚠️ Kein Gemini API-Key gefunden (`GEMINI_API_KEY`). Bitte in den Streamlit Secrets oder als Environment Variable hinterlegen.")
             st.stop()
 
         genai.configure(api_key=active_k)
@@ -475,24 +478,22 @@ with tab_aris:
           formatted_lines.append(f"- {row_str}")
 
         data_payload = "\n".join(formatted_lines)
-
-        # 3. Nur noch die Daten übergeben (Anweisungen liegen in aris_dna)
         prompt = f"Analysiere bitte die folgenden aktuellen Einträge aus dem Arbeitsspeicher:\n\n{data_payload}"
 
-        # 4. Gemini Abfrage
+        # 3. Gemini Abfrage
         response = model.generate_content(
             prompt,
             generation_config={"temperature": 0.1}
         )
         report_content = response.text
 
-        # 5. In agent_reports speichern
+        # 4. In agent_reports speichern
         supabase.table("agent_reports").insert({
             "agent_name": "Aris",
             "report_content": report_content,
         }).execute()
 
-        # 6. Arbeitsspeicher bereinigen
+        # 5. Arbeitsspeicher bereinigen
         for item in items:
           if "id" in item:
             supabase.table("aris_arbeitsspeicher").delete().eq("id", item["id"]).execute()
@@ -505,6 +506,48 @@ with tab_aris:
 
       except Exception as e:
         st.error(f"⚠️ Fehler bei der Aris-Analyse: {e}")
+
+  st.markdown("---")
+  st.markdown("### 💬 Diskussion mit Aris")
+
+  for message in st.session_state.messages_aris:
+    with st.chat_message(message["role"]):
+      st.markdown(message["content"])
+
+  if user_query := st.chat_input("Stelle Aris eine Frage...", key="aris_chat_input_gemini"):
+    st.session_state.messages_aris.append(
+        {"role": "user", "content": user_query}
+    )
+    with st.chat_message("user"):
+      st.markdown(user_query)
+
+    with st.chat_message("assistant"):
+      with st.spinner("Aris (Gemini) denkt nach..."):
+        try:
+          active_k = get_gemini_api_key()
+          if not active_k:
+              st.error("⚠️ Kein Gemini API-Key gefunden.")
+              st.stop()
+
+          genai.configure(api_key=active_k)
+          
+          gemini_history = []
+          for m in st.session_state.messages_aris[:-1]:
+            role = "user" if m["role"] == "user" else "model"
+            gemini_history.append({"role": role, "parts": [m["content"]]})
+
+          model = genai.GenerativeModel("gemini-3.6-flash", system_instruction=aris_dna)
+          chat_session = model.start_chat(history=gemini_history)
+          
+          response = chat_session.send_message(user_query)
+          answer = response.text
+
+          st.markdown(answer)
+          st.session_state.messages_aris.append(
+              {"role": "assistant", "content": answer}
+          )
+        except Exception as chat_err:
+          st.error(f"Fehler im Chat: {chat_err}")
 
 # ==========================================
 # TAB 7: LEOPOLD (SIGNALS JOURNAL DEEP ANALYTICS)
