@@ -9,7 +9,7 @@ class ArisAgent:
     def __init__(self, supabase_client):
         self.supabase = supabase_client
         self.name = "Aris"
-        self.model_name = "gemini-1.5-flash"  # Passe das Modell bei Bedarf an
+        self.model_name = "gemini-1.5-flash"
         self.description = "Performance & Metrik-Agent"
 
     def _resolve_api_key(self, passed_key: str = None) -> str:
@@ -17,16 +17,13 @@ class ArisAgent:
         if passed_key:
             return passed_key
 
-        # 1. Bekannte Env-Variablen prüfen
         for env_name in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GEMINI_KEY"]:
             val = os.getenv(env_name)
             if val:
                 return val
 
-        # 2. Streamlit Secrets durchkämmen
         try:
             if hasattr(st, "secrets") and st.secrets:
-                # Direkte Treffer
                 for key_name in [
                     "GEMINI_API_KEY",
                     "gemini_api_key",
@@ -37,7 +34,6 @@ class ArisAgent:
                     if key_name in st.secrets and st.secrets[key_name]:
                         return st.secrets[key_name]
 
-                # Verschachtelte Bereiche prüfen (z.B. [api_keys] gemini = "...")
                 for section in st.secrets:
                     if isinstance(st.secrets[section], dict):
                         for sub_key in [
@@ -60,10 +56,7 @@ class ArisAgent:
         try:
             active_key = self._resolve_api_key(api_key)
             if not active_key:
-                return (
-                    False,
-                    "Kein Gemini API-Key für Aris gefunden (weder übergeben, noch in Env oder Streamlit Secrets vorhanden).",
-                )
+                return False, "Kein Gemini API-Key für Aris gefunden."
 
             genai.configure(api_key=active_key)
             model = genai.GenerativeModel(self.model_name)
@@ -74,7 +67,6 @@ class ArisAgent:
             response = model.generate_content(prompt)
             report_content = response.text
 
-            # In Supabase speichern
             self.supabase.table("agent_reports").insert({
                 "agent_name": self.name,
                 "report_content": report_content,
@@ -91,7 +83,6 @@ class ArisAgent:
             return False, f"Fehler bei der Aris-Analyse: {e}"
 
     def render_ui(self, api_key: str = None):
-        """Render-Funktion für die Streamlit-Testoberfläche."""
         st.subheader(f"🤖 {self.name} - {self.description}")
         st.write(
             "Verantwortlich für Performance-Auswertungen, Metriken und statistische Validierung."
@@ -128,3 +119,9 @@ class ArisAgent:
                 st.info("Noch kein Bericht von Aris vorhanden.")
         except Exception as e:
             st.warning(f"Fehler beim Laden des Berichts aus Supabase: {e}")
+
+
+# --- MODUL-EBENE FUNKTION (Falls das Testskript direkt das Modul prüft) ---
+def render_ui(supabase_client, api_key: str = None):
+    agent = ArisAgent(supabase_client)
+    agent.render_ui(api_key)
