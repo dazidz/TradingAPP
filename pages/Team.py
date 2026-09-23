@@ -450,7 +450,7 @@ with tab_aris:
       pass
 
   if st.button("🚀 Aris Analyse & Screener-Review starten", type="primary", key="btn_run_aris_gemini"):
-    with st.spinner("Aris (Gemini) analysiert Datenbanken und Code..."):
+    with st.spinner("Aris (Gemini) analysiert den Arbeitsspeicher..."):
       try:
         active_k = get_gemini_api_key()
         if not active_k:
@@ -458,83 +458,53 @@ with tab_aris:
             st.stop()
 
         genai.configure(api_key=active_k)
-        # Verwende ein stabiles Gemini Pro Modell mit großem Context Window
         model = genai.GenerativeModel("gemini-3.6-flash", system_instruction=aris_dna)
 
-        signals_res = supabase.table("signals_journal").select("*").execute()
-        journal_res = supabase.table("trade_journal").select("*").execute()
-        signals_df = pd.DataFrame(signals_res.data)
-        journal_df = pd.DataFrame(journal_res.data)
+        # 1. Daten aus aris_arbeitsspeicher holen
+        res = supabase.table("aris_arbeitsspeicher").select("*").execute()
+        items = res.data or []
 
-        context_data = f"""
-            --- SIGNALS JOURNAL ---
-            {signals_df.to_string() if not signals_df.empty else "Keine Signale"}
-            --- TRADING JOURNAL ---
-            {journal_df.to_string() if not journal_df.empty else "Keine Trades"}
-            """
+        if not items:
+            st.warning("⚠️ Keine Einträge im `aris_arbeitsspeicher` gefunden.")
+            st.stop()
 
+        # 2. Daten kompakt als Textzeilen aufbereiten
+        formatted_lines = []
+        for item in items:
+          row_str = " | ".join([f"{k}: {v}" for k, v in item.items() if k != "id"])
+          formatted_lines.append(f"- {row_str}")
+
+        data_payload = "\n".join(formatted_lines)
+
+        # 3. Nur noch die Daten übergeben (Anweisungen liegen in aris_dna)
+        prompt = f"Analysiere bitte die folgenden aktuellen Einträge aus dem Arbeitsspeicher:\n\n{data_payload}"
+
+        # 4. Gemini Abfrage
         response = model.generate_content(
-            f"Erstelle deinen Analyse-Report basierend auf folgenden Daten:\n\n{context_data}",
+            prompt,
             generation_config={"temperature": 0.1}
         )
         report_content = response.text
 
+        # 5. In agent_reports speichern
         supabase.table("agent_reports").insert({
             "agent_name": "Aris",
             "report_content": report_content,
         }).execute()
 
+        # 6. Arbeitsspeicher bereinigen
+        for item in items:
+          if "id" in item:
+            supabase.table("aris_arbeitsspeicher").delete().eq("id", item["id"]).execute()
+
         st.session_state.messages_aris.append(
             {"role": "assistant", "content": report_content}
         )
-        st.success("Analyse erfolgreich abgeschlossen!")
+        st.success("Analyse erfolgreich abgeschlossen & Arbeitsspeicher bereinigt!")
         st.rerun()
+
       except Exception as e:
-        st.error(f"⚠️ Fehler bei der Analyse: {e}")
-
-  st.markdown("---")
-  st.markdown("### 💬 Diskussion mit Aris")
-
-  for message in st.session_state.messages_aris:
-    with st.chat_message(message["role"]):
-      st.markdown(message["content"])
-
-  if user_query := st.chat_input("Stelle Aris eine Frage...", key="aris_chat_input_gemini"):
-    st.session_state.messages_aris.append(
-        {"role": "user", "content": user_query}
-    )
-    with st.chat_message("user"):
-      st.markdown(user_query)
-
-    with st.chat_message("assistant"):
-      with st.spinner("Aris (Gemini) denkt nach..."):
-        try:
-          active_k = get_gemini_api_key()
-          if not active_k:
-              st.error("⚠️ Kein Gemini API-Key gefunden.")
-              st.stop()
-
-          genai.configure(api_key=active_k)
-          
-          # Chat-Historie für Gemini aufbauen
-          gemini_history = []
-          for m in st.session_state.messages_aris[:-1]:
-            # Gemini erwartet 'user' und 'model' als Rollen
-            role = "user" if m["role"] == "user" else "model"
-            gemini_history.append({"role": role, "parts": [m["content"]]})
-
-          model = genai.GenerativeModel("gemini-3.6-flash", system_instruction=aris_dna)
-          chat_session = model.start_chat(history=gemini_history)
-          
-          response = chat_session.send_message(user_query)
-          answer = response.text
-
-          st.markdown(answer)
-          st.session_state.messages_aris.append(
-              {"role": "assistant", "content": answer}
-          )
-        except Exception as chat_err:
-          st.error(f"Fehler im Chat: {chat_err}")
+        st.error(f"⚠️ Fehler bei der Aris-Analyse: {e}")
 
 # ==========================================
 # TAB 7: LEOPOLD (SIGNALS JOURNAL DEEP ANALYTICS)
