@@ -1,13 +1,15 @@
+from datetime import datetime
 import os
 import google.generativeai as genai
 import streamlit as st
-from datetime import datetime
+
 
 class ArisAgent:
+
     def __init__(self, supabase_client):
         self.supabase = supabase_client
         self.name = "Aris"
-        self.model_name = "gemini-3.6-flash"  # Passe das Modell bei Bedarf an
+        self.model_name = "gemini-1.5-flash"  # Passe das Modell bei Bedarf an
         self.description = "Performance & Metrik-Agent"
 
     def _resolve_api_key(self, passed_key: str = None) -> str:
@@ -38,8 +40,16 @@ class ArisAgent:
                 # Verschachtelte Bereiche prüfen (z.B. [api_keys] gemini = "...")
                 for section in st.secrets:
                     if isinstance(st.secrets[section], dict):
-                        for sub_key in ["gemini_api_key", "GEMINI_API_KEY", "api_key", "key"]:
-                            if sub_key in st.secrets[section] and st.secrets[section][sub_key]:
+                        for sub_key in [
+                            "gemini_api_key",
+                            "GEMINI_API_KEY",
+                            "api_key",
+                            "key",
+                        ]:
+                            if (
+                                sub_key in st.secrets[section]
+                                and st.secrets[section][sub_key]
+                            ):
                                 return st.secrets[section][sub_key]
         except Exception:
             pass
@@ -50,17 +60,21 @@ class ArisAgent:
         try:
             active_key = self._resolve_api_key(api_key)
             if not active_key:
-                return False, "Kein Gemini API-Key für Aris gefunden (weder übergeben, noch in Env oder Streamlit Secrets vorhanden)."
+                return (
+                    False,
+                    "Kein Gemini API-Key für Aris gefunden (weder übergeben, noch in Env oder Streamlit Secrets vorhanden).",
+                )
 
             genai.configure(api_key=active_key)
             model = genai.GenerativeModel(self.model_name)
-            
-            # Hier folgt deine spezifische Agenten-Logik (z.B. Daten aus Supabase holen, Prompt senden etc.)
-            prompt = "Führe eine Performance- und Metrik-Analyse durch."
+
+            prompt = (
+                "Führe eine Performance- und Metrik-Analyse für das Portfolio durch."
+            )
             response = model.generate_content(prompt)
             report_content = response.text
 
-            # Optional: In Supabase speichern
+            # In Supabase speichern
             self.supabase.table("agent_reports").insert({
                 "agent_name": self.name,
                 "report_content": report_content,
@@ -68,7 +82,49 @@ class ArisAgent:
                 "created_at": datetime.now().isoformat(),
             }).execute()
 
-            return True, "Aris-Analyse erfolgreich durchgeführt und gespeichert!"
+            return (
+                True,
+                "Aris-Analyse erfolgreich durchgeführt und gespeichert!",
+            )
 
         except Exception as e:
             return False, f"Fehler bei der Aris-Analyse: {e}"
+
+    def render_ui(self, api_key: str = None):
+        """Render-Funktion für die Streamlit-Testoberfläche."""
+        st.subheader(f"🤖 {self.name} - {self.description}")
+        st.write(
+            "Verantwortlich für Performance-Auswertungen, Metriken und statistische Validierung."
+        )
+
+        if st.button(
+            f"Analyse starten ({self.name})", key=f"btn_run_{self.name}"
+        ):
+            with st.spinner(f"{self.name} analysiert die Daten..."):
+                success, msg = self.run_analysis(api_key)
+                if success:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+
+        st.markdown("---")
+        st.markdown("### 📄 Letzter Aris-Bericht")
+        try:
+            res = (
+                self.supabase.table("agent_reports")
+                .select("*")
+                .eq("agent_name", self.name)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                report = res.data[0]
+                st.caption(
+                    f"Erstellt am: {report.get('created_at', 'Unbekannt')}"
+                )
+                st.markdown(report.get("report_content", "Kein Inhalt."))
+            else:
+                st.info("Noch kein Bericht von Aris vorhanden.")
+        except Exception as e:
+            st.warning(f"Fehler beim Laden des Berichts aus Supabase: {e}")
