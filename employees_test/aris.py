@@ -19,13 +19,19 @@ def render_ui(supabase, get_gemini_api_key):
     """
 
     # Bombensicherer Weg, um den API-Key direkt zu laden
+    # Diagnose-Weg für den API-Key
     def resolve_key():
+        # Zeige alle verfügbaren Secret-Keys an, falls vorhanden (nur zur Fehlersuche)
         try:
-            if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
-                if st.secrets["GEMINI_API_KEY"]:
-                    return st.secrets["GEMINI_API_KEY"]
-        except Exception:
-            pass
+            if hasattr(st, "secrets") and st.secrets:
+                available_keys = list(st.secrets.keys())
+                # Falls dein Key dort dabei ist, greifen wir ihn automatisch
+                for k in available_keys:
+                    if "gemini" in k.lower() or "google" in k.lower() or "api" in k.lower():
+                        if st.secrets[k]:
+                            return st.secrets[k]
+        except Exception as err:
+            st.warning(f"Fehler beim Lesen der Secrets: {err}")
             
         if os.getenv("GEMINI_API_KEY"):
             return os.getenv("GEMINI_API_KEY")
