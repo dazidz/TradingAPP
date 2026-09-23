@@ -41,7 +41,7 @@ class ArisPerformanceManager:
     return None
 
   def analyze_and_optimize(self):
-    print(f"Aris (Performance & Synthese [{self.model_name}]) analysiert...")
+    print("🚀 Aris: analyze_and_optimize gestartet...")
     try:
       if not self.api_key:
         print("❌ Kein Groq API-Key gefunden.")
@@ -50,11 +50,14 @@ class ArisPerformanceManager:
       client = Groq(api_key=self.api_key)
 
       # 1. Alle Daten aus aris_arbeitsspeicher holen
+      print("📥 Lese Daten aus Supabase (aris_arbeitsspeicher)...")
       res = self.supabase.table(self.table_aris_arbeitsspeicher).select("*").execute()
       items = res.data or []
 
+      print(f"📦 Anzahl gefundener Items in Supabase: {len(items)}")
+
       if not items:
-        print("Keine Einträge im aris_arbeitsspeicher gefunden.")
+        print("⚠️ Keine Einträge im aris_arbeitsspeicher gefunden.")
         return
 
       # 2. Alle Daten als Textzeilen aufbereiten
@@ -81,23 +84,21 @@ VON NINO BEREITGESTELLTE DATEN:
 {data_payload}
 """
 
-      # 🔍 DEBUG: Prompt lokal als .txt-Datei speichern, um den Inhalt zu inspizieren
+      # 🔍 Sofortiges Schreiben der Debug-Datei (egal ob API fehlschlägt)
       debug_filename = "aris_prompt_debug.txt"
       try:
         with open(debug_filename, "w", encoding="utf-8") as f:
           f.write(prompt)
-        print(f"📄 DEBUG: Prompt wurde erfolgreich in '{debug_filename}' geschrieben ({len(prompt)} Zeichen).")
+        print(f"📄 DEBUG: Datei '{debug_filename}' erfolgreich geschrieben ({len(prompt)} Zeichen).")
       except Exception as write_err:
         print(f"⚠️ Konnte Debug-Datei nicht schreiben: {write_err}")
 
-      # Zusätzliche Terminal-Statistiken
       print("=" * 60)
-      print(f"📤 ARIS DEBUG: Anzahl Datensätze: {len(items)}")
-      print(f"📤 ARIS DEBUG: Ungefähre Zeichen im Prompt: {len(prompt)}")
       print(f"📤 ARIS DEBUG: Ungefähre Token (Zeichen / 4): {len(prompt) // 4}")
       print("=" * 60)
 
       # 3. API-Aufruf über Groq
+      print("🤖 Sende Request an Groq API...")
       completion = client.chat.completions.create(
           model=self.model_name,
           messages=[
@@ -109,24 +110,20 @@ VON NINO BEREITGESTELLTE DATEN:
       )
 
       llm_response = completion.choices[0].message.content
-      print("✅ API-Aufruf von Aris erfolgreich durchgelaufen!")
+      print("✅ API-Aufruf erfolgreich!")
 
-      bullet_points = [
-          f"Ausgewertete Datensätze von Nino: {len(items)}",
-          "Qualitative KI-Synthese & Mustererkennung durchgeführt",
-          llm_response[:300] + "...",
-      ]
-
-      # 4. In agent_reports speichern (für Joris)
+      # 4. In agent_reports speichern
       report_payload = {
           "agent_name": "Aris",
           "report_content": llm_response,
-          "bullet_points": bullet_points,
+          "bullet_points": [
+              f"Ausgewertete Datensätze von Nino: {len(items)}",
+              "Qualitative KI-Synthese & Mustererkennung durchgeführt",
+              llm_response[:300] + "...",
+          ],
           "status": "unread",
       }
-      self.supabase.table(self.table_agent_reports).insert(
-          report_payload
-      ).execute()
+      self.supabase.table(self.table_agent_reports).insert(report_payload).execute()
 
       # 5. In principals speichern
       principal_entry = {
@@ -136,23 +133,17 @@ VON NINO BEREITGESTELLTE DATEN:
           "erkenntnisse": llm_response,
           "status aktiv": True,
       }
-      self.supabase.table(self.table_principals).insert(
-          principal_entry
-      ).execute()
+      self.supabase.table(self.table_principals).insert(principal_entry).execute()
 
       # 6. Arbeitsspeicher bereinigen
       item_ids = [item["id"] for item in items if "id" in item]
       for item_id in item_ids:
-        self.supabase.table(self.table_aris_arbeitsspeicher).delete().eq(
-            "id", item_id
-        ).execute()
+        self.supabase.table(self.table_aris_arbeitsspeicher).delete().eq("id", item_id).execute()
 
-      print(
-          "✅ Aris hat die Nino-Daten via Groq verarbeitet, Report abgelegt und Arbeitsspeicher bereinigt."
-      )
+      print("✅ Aris-Zyklus komplett abgeschlossen und Arbeitsspeicher bereinigt.")
 
     except Exception as e:
-      print(f"❌ FEHLER-DETAILS IN ARIS (Groq/API-Limit): {e}")
+      print(f"❌ KRITISCHER FEHLER in Aris: {e}")
 
   def run_all(self):
     self.analyze_and_optimize()
