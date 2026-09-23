@@ -18,6 +18,31 @@ def render_ui(supabase, get_gemini_api_key):
     Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefere konkrete, direkt umsetzbare Handlungsempfehlungen.
     """
 
+    # Robuste Hilfsfunktion, um den API-Key sicher zu greifen
+    def resolve_key():
+        try:
+            if callable(get_gemini_api_key):
+                val = get_gemini_api_key()
+                if val:
+                    return val
+            elif isinstance(get_gemini_api_key, str) and get_gemini_api_key:
+                return get_gemini_api_key
+        except Exception:
+            pass
+        
+        # Fallback auf Secrets oder Umgebungsvariablen
+        try:
+            if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
+                if st.secrets["GEMINI_API_KEY"]:
+                    return st.secrets["GEMINI_API_KEY"]
+        except Exception:
+            pass
+            
+        if os.getenv("GEMINI_API_KEY"):
+            return os.getenv("GEMINI_API_KEY")
+            
+        return None
+
     # Letzten gespeicherten Report laden (falls vorhanden)
     if not st.session_state.messages_aris_test:
         try:
@@ -45,7 +70,7 @@ def render_ui(supabase, get_gemini_api_key):
     if st.button("🚀 Aris Analyse & Arbeitsspeicher-Review starten", type="primary", key="btn_run_aris_test_clean"):
         with st.spinner("Aris (Gemini) analysiert den Arbeitsspeicher..."):
             try:
-                active_k = get_gemini_api_key()
+                active_k = resolve_key()
                 if not active_k:
                     st.error("⚠️ Kein Gemini API-Key gefunden.")
                     st.stop()
@@ -114,7 +139,7 @@ def render_ui(supabase, get_gemini_api_key):
         with st.chat_message("assistant"):
             with st.spinner("Aris (Gemini) denkt nach..."):
                 try:
-                    active_k = get_gemini_api_key()
+                    active_k = resolve_key()
                     if not active_k:
                         st.error("⚠️ Kein Gemini API-Key gefunden.")
                         st.stop()
