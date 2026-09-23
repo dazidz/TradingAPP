@@ -9,7 +9,7 @@ class ArisPerformanceManager:
 
   def __init__(self, supabase_client, api_key: str = None):
     self.supabase = supabase_client
-    self.model_name = "openai/gpt-oss-120b"  # Oder "llama-3.3-70b-versatile"
+    self.model_name = "openai/gpt-oss-120b"  # Alternativ: "llama-3.3-70b-versatile"
     self.table_aris_arbeitsspeicher = "aris_arbeitsspeicher"
     self.table_principals = "principals"
     self.table_agent_reports = "agent_reports"
@@ -57,7 +57,7 @@ class ArisPerformanceManager:
         print("Keine Einträge im aris_arbeitsspeicher gefunden.")
         return
 
-      # 2. Alle Daten als Textzeilen aufbereiten (volle Transparenz)
+      # 2. Alle Daten als Textzeilen aufbereiten
       formatted_lines = []
       for item in items:
         row_str = " | ".join([f"{k}: {v}" for k, v in item.items() if k != "id"])
@@ -81,12 +81,20 @@ VON NINO BEREITGESTELLTE DATEN:
 {data_payload}
 """
 
-      # 🔍 DEBUG: Hier siehst du im Terminal exakt, was an die KI gesendet wird
+      # 🔍 DEBUG: Prompt lokal als .txt-Datei speichern, um den Inhalt zu inspizieren
+      debug_filename = "aris_prompt_debug.txt"
+      try:
+        with open(debug_filename, "w", encoding="utf-8") as f:
+          f.write(prompt)
+        print(f"📄 DEBUG: Prompt wurde erfolgreich in '{debug_filename}' geschrieben ({len(prompt)} Zeichen).")
+      except Exception as write_err:
+        print(f"⚠️ Konnte Debug-Datei nicht schreiben: {write_err}")
+
+      # Zusätzliche Terminal-Statistiken
       print("=" * 60)
-      print(f"📤 ARIS DEBUG: Sende {len(items)} Datensätze an das LLM ({len(prompt)} Zeichen total)")
-      print("=" * 60)
-      # Wenn du den kompletten Prompt im Terminal sehen willst, entkommentiere die nächste Zeile:
-      # print(prompt)
+      print(f"📤 ARIS DEBUG: Anzahl Datensätze: {len(items)}")
+      print(f"📤 ARIS DEBUG: Ungefähre Zeichen im Prompt: {len(prompt)}")
+      print(f"📤 ARIS DEBUG: Ungefähre Token (Zeichen / 4): {len(prompt) // 4}")
       print("=" * 60)
 
       # 3. API-Aufruf über Groq
@@ -101,6 +109,7 @@ VON NINO BEREITGESTELLTE DATEN:
       )
 
       llm_response = completion.choices[0].message.content
+      print("✅ API-Aufruf von Aris erfolgreich durchgelaufen!")
 
       bullet_points = [
           f"Ausgewertete Datensätze von Nino: {len(items)}",
@@ -143,7 +152,7 @@ VON NINO BEREITGESTELLTE DATEN:
       )
 
     except Exception as e:
-      print(f"❌ Fehler in Aris Groq-Analyse: {e}")
+      print(f"❌ FEHLER-DETAILS IN ARIS (Groq/API-Limit): {e}")
 
   def run_all(self):
     self.analyze_and_optimize()
