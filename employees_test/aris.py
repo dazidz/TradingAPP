@@ -1,160 +1,74 @@
-import streamlit as st
-import google.generativeai as genai
 import os
+import google.generativeai as genai
+import streamlit as st
+from datetime import datetime
 
-AGENT_TITLE = "Aris (Performance)"
+class ArisAgent:
+    def __init__(self, supabase_client):
+        self.supabase = supabase_client
+        self.name = "Aris"
+        self.model_name = "gemini-3.6-flash"  # Passe das Modell bei Bedarf an
+        self.description = "Performance & Metrik-Agent"
 
-def render_ui(supabase, get_gemini_api_key):
-    st.subheader("🤖 Aris - Performance Manager (Test)")
-    st.caption("🤖 **Verwendetes Modell:** Google Gemini (`gemini-3.6-flash`)")
-    st.markdown("Dein KI-Agent analysiert ausschließlich den `aris_arbeitsspeicher` und steht im Chat zur Verfügung.")
+    def _resolve_api_key(self, passed_key: str = None) -> str:
+        """Ultimative Schlüsselsuche: Prüft Parameter, Env, alle denkbaren Secret-Namen."""
+        if passed_key:
+            return passed_key
 
-    if "messages_aris_test" not in st.session_state:
-        st.session_state.messages_aris_test = []
+        # 1. Bekannte Env-Variablen prüfen
+        for env_name in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GEMINI_KEY"]:
+            val = os.getenv(env_name)
+            if val:
+                return val
 
-    aris_dna = """
-    Du bist Aris, der leitende Performance Manager in dieser Trading-Anwendung. Deine Aufgabe ist es, die Performance objektiv, datenbasiert und gnadenlos ehrlich zu analysieren. Du verzichtest auf leere Floskeln und Schönfärberei. 
-    Analysiere die übergebenen Datenpunkte aus dem Arbeitsspeicher.
-    Finde Muster, vergleiche Gewinner vs. Verlierer, bewerte ob Trades zu früh geschlossen wurden und liefere konkrete, direkt umsetzbare Handlungsempfehlungen.
-    """
-
-    # Bombensicherer Weg, um den API-Key direkt zu laden
-    # Diagnose-Weg für den API-Key
-    def resolve_key():
-        # Zeige alle verfügbaren Secret-Keys an, falls vorhanden (nur zur Fehlersuche)
+        # 2. Streamlit Secrets durchkämmen
         try:
             if hasattr(st, "secrets") and st.secrets:
-                available_keys = list(st.secrets.keys())
-                # Falls dein Key dort dabei ist, greifen wir ihn automatisch
-                for k in available_keys:
-                    if "gemini" in k.lower() or "google" in k.lower() or "api" in k.lower():
-                        if st.secrets[k]:
-                            return st.secrets[k]
-        except Exception as err:
-            st.warning(f"Fehler beim Lesen der Secrets: {err}")
-            
-        if os.getenv("GEMINI_API_KEY"):
-            return os.getenv("GEMINI_API_KEY")
-            
-        return None
+                # Direkte Treffer
+                for key_name in [
+                    "GEMINI_API_KEY",
+                    "gemini_api_key",
+                    "GOOGLE_API_KEY",
+                    "google_api_key",
+                    "GEMINI_KEY",
+                ]:
+                    if key_name in st.secrets and st.secrets[key_name]:
+                        return st.secrets[key_name]
 
-    # Letzten gespeicherten Report laden (falls vorhanden)
-    if not st.session_state.messages_aris_test:
-        try:
-            saved_report_res = (
-                supabase.table("agent_reports")
-                .select("*")
-                .eq("agent_name", "Aris (Test)")
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-            if saved_report_res.data:
-                latest_report = saved_report_res.data[0]
-                st.session_state.messages_aris_test.append({
-                    "role": "assistant",
-                    "content": (
-                        "**Letzter gespeicherter Report ("
-                        f"{latest_report['created_at'][:16]}):**\n\n"
-                        + latest_report["report_content"]
-                    ),
-                })
+                # Verschachtelte Bereiche prüfen (z.B. [api_keys] gemini = "...")
+                for section in st.secrets:
+                    if isinstance(st.secrets[section], dict):
+                        for sub_key in ["gemini_api_key", "GEMINI_API_KEY", "api_key", "key"]:
+                            if sub_key in st.secrets[section] and st.secrets[section][sub_key]:
+                                return st.secrets[section][sub_key]
         except Exception:
             pass
 
-    if st.button("🚀 Aris Analyse & Arbeitsspeicher-Review starten", type="primary", key="btn_run_aris_test_clean"):
-        with st.spinner("Aris (Gemini) analysiert den Arbeitsspeicher..."):
-            try:
-                active_k = resolve_key()
-                if not active_k:
-                    st.error("⚠️ Kein Gemini API-Key in den Streamlit Secrets gefunden.")
-                    st.stop()
+        return None
 
-                genai.configure(api_key=active_k)
-                model = genai.GenerativeModel("gemini-3.6-flash", system_instruction=aris_dna)
+    def run_analysis(self, api_key: str = None):
+        try:
+            active_key = self._resolve_api_key(api_key)
+            if not active_key:
+                return False, "Kein Gemini API-Key für Aris gefunden (weder übergeben, noch in Env oder Streamlit Secrets vorhanden)."
 
-                # 1. EXKLUSIV: Nur aris_arbeitsspeicher auslesen
-                res = supabase.table("aris_arbeitsspeicher").select("*").execute()
-                items = res.data or []
+            genai.configure(api_key=active_key)
+            model = genai.GenerativeModel(self.model_name)
+            
+            # Hier folgt deine spezifische Agenten-Logik (z.B. Daten aus Supabase holen, Prompt senden etc.)
+            prompt = "Führe eine Performance- und Metrik-Analyse durch."
+            response = model.generate_content(prompt)
+            report_content = response.text
 
-                if not items:
-                    st.warning("⚠️ Keine Einträge im `aris_arbeitsspeicher` gefunden.")
-                    st.stop()
+            # Optional: In Supabase speichern
+            self.supabase.table("agent_reports").insert({
+                "agent_name": self.name,
+                "report_content": report_content,
+                "status": "unread",
+                "created_at": datetime.now().isoformat(),
+            }).execute()
 
-                # 2. Daten kompakt aufbereiten
-                formatted_lines = []
-                for item in items:
-                    row_str = " | ".join([f"{k}: {v}" for k, v in item.items() if k != "id"])
-                    formatted_lines.append(f"- {row_str}")
+            return True, "Aris-Analyse erfolgreich durchgeführt und gespeichert!"
 
-                data_payload = "\n".join(formatted_lines)
-                prompt = f"Analysiere bitte die folgenden aktuellen Einträge aus dem Arbeitsspeicher:\n\n{data_payload}"
-
-                # 3. Gemini Abfrage
-                response = model.generate_content(
-                    prompt,
-                    generation_config={"temperature": 0.1}
-                )
-                report_content = response.text
-
-                # 4. In agent_reports speichern
-                supabase.table("agent_reports").insert({
-                    "agent_name": "Aris (Test)",
-                    "report_content": report_content,
-                }).execute()
-
-                # 5. Arbeitsspeicher bereinigen (Einträge löschen)
-                for item in items:
-                    if "id" in item:
-                        supabase.table("aris_arbeitsspeicher").delete().eq("id", item["id"]).execute()
-
-                st.session_state.messages_aris_test.append(
-                    {"role": "assistant", "content": report_content}
-                )
-                st.success("Analyse erfolgreich abgeschlossen & Arbeitsspeicher bereinigt!")
-                st.rerun()
-
-            except Exception as e:
-                st.error(f"⚠️ Fehler bei der Aris-Analyse: {e}")
-
-    st.markdown("---")
-    st.markdown("### 💬 Test-Diskussion mit Aris")
-
-    for message in st.session_state.messages_aris_test:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    if user_query := st.chat_input("Stelle Aris eine Frage...", key="aris_chat_input_test_clean"):
-        st.session_state.messages_aris_test.append(
-            {"role": "user", "content": user_query}
-        )
-        with st.chat_message("user"):
-            st.markdown(user_query)
-
-        with st.chat_message("assistant"):
-            with st.spinner("Aris (Gemini) denkt nach..."):
-                try:
-                    active_k = resolve_key()
-                    if not active_k:
-                        st.error("⚠️ Kein Gemini API-Key in den Streamlit Secrets gefunden.")
-                        st.stop()
-
-                    genai.configure(api_key=active_k)
-                    
-                    gemini_history = []
-                    for m in st.session_state.messages_aris_test[:-1]:
-                        role = "user" if m["role"] == "user" else "model"
-                        gemini_history.append({"role": role, "parts": [m["content"]]})
-
-                    model = genai.GenerativeModel("gemini-3.6-flash", system_instruction=aris_dna)
-                    chat_session = model.start_chat(history=gemini_history)
-                    
-                    response = chat_session.send_message(user_query)
-                    answer = response.text
-
-                    st.markdown(answer)
-                    st.session_state.messages_aris_test.append(
-                        {"role": "assistant", "content": answer}
-                    )
-                except Exception as chat_err:
-                    st.error(f"Fehler im Chat: {chat_err}")
+        except Exception as e:
+            return False, f"Fehler bei der Aris-Analyse: {e}"
