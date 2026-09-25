@@ -1,6 +1,6 @@
 from datetime import datetime
 import os
-import google.generativeai as genai
+openai = __import__('openai')
 import streamlit as st
 
 
@@ -9,57 +9,45 @@ class ArisAgent:
     def __init__(self, supabase_client):
         self.supabase = supabase_client
         self.name = "Aris"
-        self.model_name = "gemini-2.5-flash"  # Stabiles Standard-Flash-Modell gegen Timeouts
+        self.model_name = "openai/gpt-oss-120b"  # Bewährtes Modell
         self.description = "Performance Manager"
 
     def _resolve_api_key(self, passed_key: str = None) -> str:
-        """Ultimative Schlüsselsuche: Prüft Parameter, Env, alle denkbaren Secret-Namen."""
+        """Sucht nach dem passenden API-Key in Parametern, Env und Streamlit Secrets."""
         if passed_key:
             return passed_key
 
-        for env_name in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GEMINI_KEY"]:
+        for env_name in ["OPENAI_API_KEY", "OPENAI_KEY", "OPENROUTER_API_KEY"]:
             val = os.getenv(env_name)
             if val:
                 return val
 
         try:
             if hasattr(st, "secrets") and st.secrets:
-                for key_name in [
-                    "GEMINI_API_KEY",
-                    "gemini_api_key",
-                    "GOOGLE_API_KEY",
-                    "google_api_key",
-                    "GEMINI_KEY",
-                ]:
+                for key_name in ["OPENAI_API_KEY", "openai_api_key", "OPENROUTER_API_KEY", "openrouter_api_key"]:
                     if key_name in st.secrets and st.secrets[key_name]:
                         return st.secrets[key_name]
-
                 for section in st.secrets:
                     if isinstance(st.secrets[section], dict):
-                        for sub_key in [
-                            "gemini_api_key",
-                            "GEMINI_API_KEY",
-                            "api_key",
-                            "key",
-                        ]:
-                            if (
-                                sub_key in st.secrets[section]
-                                and st.secrets[section][sub_key]
-                            ):
+                        for sub_key in ["openai_api_key", "OPENAI_API_KEY", "openrouter_api_key", "api_key", "key"]:
+                            if sub_key in st.secrets[section] and st.secrets[section][sub_key]:
                                 return st.secrets[section][sub_key]
         except Exception:
             pass
-
         return None
 
     def run_analysis(self, api_key: str = None):
         try:
             active_key = self._resolve_api_key(api_key)
             if not active_key:
-                return False, "Kein Gemini API-Key für Aris gefunden."
+                return False, "Kein API-Key für Aris gefunden."
 
-            genai.configure(api_key=active_key)
-            model = genai.GenerativeModel(self.model_name)
+            # Falls du über OpenRouter oder einen OpenAI-kompatiblen Provider gehst, 
+            # kann hier optional die base_url angepasst werden (falls nötig, sonst standardmäßig OpenAI).
+            client = openai.OpenAI(
+                api_key=active_key,
+                # base_url="https://openrouter.ai/api/v1" # Falls das Modell über OpenRouter läuft
+            )
 
             # 1. Daten aus dem Arbeitsspeicher abrufen
             memory_res = (
@@ -70,22 +58,14 @@ class ArisAgent:
             if not memory_data:
                 return False, "Keine Einträge im Arbeitsspeicher vorhanden."
 
-            # Kompakte und saubere Formatierung der Einträge statt rohem str(item)
-            context_lines = []
-            for item in memory_data:
-                line = (
-                    f"- Ticker: {item.get('ticker')}, "
-                    f"Typ: {item.get('signal_typ')}, "
-                    f"SMI: {item.get('smi')}, "
-                    f"ADX: {item.get('adx')}, "
-                    f"EMA20: {item.get('above_ema20')}, "
-                    f"Perf 5T: {item.get('end_performance_5_tage')}%"
-                )
-                context_lines.append(line)
-            
+            # Kompakte Formatierung der Einträge
+            context_lines = [
+                f"- Ticker: {item.get('ticker')}, Typ: {item.get('signal_typ')}, SMI: {item.get('smi')}, ADX: {item.get('adx')}, EMA20: {item.get('above_ema20')}, Perf 5T: {item.get('end_performance_5_tage')}%"
+                for item in memory_data
+            ]
             memory_context = "\n".join(context_lines)
 
-            # 2. Detaillierter Analyse-Prompt nach Vorgabe
+            # 2. Prompt aufbauen
             prompt = f"""
             Du bist Aris, der Performance Manager. 
             Deine Aufgabe ist es, die folgenden Rohdaten aus dem Arbeitsspeicher ('aris_arbeitsspeicher') tiefgehend zu analysieren, datenbasierte Erkenntnisse abzuleiten und diese als klare **Principals** (Prinzipien) zu formulieren.
@@ -104,10 +84,19 @@ class ArisAgent:
             Schreibe die zentralen Erkenntnisse strukturiert als 'Principals' nieder.
             """
 
-            response = model.generate_content(prompt)
-            report_content = response.text
+            # API Aufruf mit gpt-oss-120b
+            response = client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": "Du bist Aris, ein präziser Performance Manager für Trading-Strategien."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3
+            )
 
-            # 3. Bericht / Erkenntnisse in agent_reports speichern (als Principals gekennzeichnet)
+            report_content = response.choices[0].message.content
+
+            # 3. Bericht in agent_reports speichern
             self.supabase.table("agent_reports").insert({
                 "agent_name": self.name,
                 "report_content": report_content,
@@ -115,35 +104,23 @@ class ArisAgent:
                 "created_at": datetime.now().isoformat(),
             }).execute()
 
-            # 4. Verarbeitete Einträge aus dem Arbeitsspeicher löschen
+            # 4. Arbeitsspeicher leeren
             for item in memory_data:
                 item_id = item.get("id")
                 if item_id:
-                    self.supabase.table("aris_arbeitsspeicher").delete().eq(
-                        "id", item_id
-                    ).execute()
+                    self.supabase.table("aris_arbeitsspeicher").delete().eq("id", item_id).execute()
 
-            return (
-                True,
-                "Aris Performance-Analyse erfolgreich durchgeführt, Principals aktualisiert und Arbeitsspeicher geleert!",
-            )
+            return True, "Aris Performance-Analyse erfolgreich mit gpt-oss-120b durchgeführt!"
 
         except Exception as e:
             return False, f"Fehler bei der Aris-Analyse: {e}"
 
     def render_ui(self, api_key: str = None):
         st.subheader(f"🤖 {self.name} - {self.description}")
-        st.write(
-            "Analysiert den Arbeitsspeicher, erkennt Muster (ADX, SMI, Haltedauer, Top 5) und generiert strategische Principals."
-        )
+        st.write("Analysiert den Arbeitsspeicher über gpt-oss-120b, erkennt Muster und generiert strategische Principals.")
 
-        if st.button(
-            f"Analyse & Principals erstellen ({self.name})",
-            key=f"btn_run_{self.name}",
-        ):
-            with st.spinner(
-                f"{self.name} wertet den Arbeitsspeicher aus..."
-            ):
+        if st.button(f"Analyse & Principals erstellen ({self.name})", key=f"btn_run_{self.name}"):
+            with st.spinner(f"{self.name} wertet den Arbeitsspeicher aus..."):
                 success, msg = self.run_analysis(api_key)
                 if success:
                     st.success(msg)
@@ -163,9 +140,7 @@ class ArisAgent:
             )
             if res.data:
                 report = res.data[0]
-                st.caption(
-                    f"Erstellt am: {report.get('created_at', 'Unbekannt')}"
-                )
+                st.caption(f"Erstellt am: {report.get('created_at', 'Unbekannt')}")
                 st.markdown(report.get("report_content", "Kein Inhalt."))
             else:
                 st.info("Noch kein Bericht von Aris vorhanden.")
