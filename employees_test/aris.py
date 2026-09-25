@@ -13,20 +13,19 @@ class ArisAgent:
         self.description = "Performance Manager"
 
     def _resolve_api_key(self, passed_key: str = None) -> str:
-        # Absicherung: Prüfen, ob passed_key wirklich ein String ist
         if passed_key and isinstance(passed_key, str) and passed_key.strip():
             return passed_key.strip()
 
-        # 1. Prüfe Umgebungsvariablen
-        for env_name in ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "OPENAI_KEY"]:
+        # 1. Prüfe Umgebungsvariablen (inklusive GROQ_API_KEY)
+        for env_name in ["GROQ_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", "OPENAI_KEY"]:
             val = os.getenv(env_name)
             if val and isinstance(val, str) and val.strip():
                 return val.strip()
 
-        # 2. Prüfe Streamlit Secrets
+        # 2. Prüfe Streamlit Secrets (inklusive GROQ_API_KEY)
         try:
             if hasattr(st, "secrets") and st.secrets:
-                for key_name in ["OPENROUTER_API_KEY", "openrouter_api_key", "OPENAI_API_KEY", "openai_api_key"]:
+                for key_name in ["GROQ_API_KEY", "groq_api_key", "OPENROUTER_API_KEY", "openrouter_api_key", "OPENAI_API_KEY", "openai_api_key"]:
                     if key_name in st.secrets:
                         val = st.secrets[key_name]
                         if val and isinstance(val, str):
@@ -34,7 +33,7 @@ class ArisAgent:
                 
                 for section in st.secrets:
                     if isinstance(st.secrets[section], dict):
-                        for sub_key in ["openrouter_api_key", "OPENROUTER_API_KEY", "openai_api_key", "OPENAI_API_KEY", "api_key", "key"]:
+                        for sub_key in ["groq_api_key", "GROQ_API_KEY", "openrouter_api_key", "OPENROUTER_API_KEY", "openai_api_key", "OPENAI_API_KEY", "api_key", "key"]:
                             if sub_key in st.secrets[section]:
                                 val = st.secrets[section][sub_key]
                                 if val and isinstance(val, str):
@@ -48,7 +47,7 @@ class ArisAgent:
         try:
             active_key = self._resolve_api_key(api_key)
             if not active_key:
-                return False, "Kein API-Key gefunden! Bitte hinterlege deinen OpenRouter- oder OpenAI-Key in den Streamlit Secrets oder als Umgebungsvariable."
+                return False, "Kein API-Key gefunden! Bitte hinterlege deinen GROQ_API_KEY in den Streamlit Secrets."
 
             # 1. Daten aus dem Arbeitsspeicher abrufen
             memory_res = (
@@ -85,7 +84,7 @@ class ArisAgent:
             Schreibe die zentralen Erkenntnisse strukturiert als 'Principals' nieder.
             """
 
-            # 3. Direkter API-Aufruf an OpenRouter
+            # 3. API-Aufruf (Standardmäßig OpenRouter; falls es direkt über Groq läuft, kann hier die URL angepasst werden)
             headers = {
                 "Authorization": f"Bearer {active_key}",
                 "Content-Type": "application/json",
