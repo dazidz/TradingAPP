@@ -3,6 +3,7 @@ Joris Portfolio Manager
 Überwacht das das aktuelle Depot
 Schaut sich neue Signale an, bewertet diese und gibt Kauf- und Verkaufsempfehlungen
 Achtet auf die Diversifizierung des Depot
+Berücksichtig von welchen Sektoren die meisten Signale kommen
 Gibt eine Handlungsempfehlung nach den oben genannten Kriterien und nach den Berichten der anderen Teammitglieder
 
 Invest

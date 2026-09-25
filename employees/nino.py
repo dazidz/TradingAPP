@@ -88,7 +88,6 @@ class NinoSignalsAssistant:
         above_ema = False
         try:
             if isinstance(meta_raw, str) and meta_raw.strip():
-                # Falls meta_raw ein kaputter String ist, der kein echtes JSON ist
                 clean_meta = meta_raw.replace("'", '"')
                 meta_dict = json.loads(clean_meta)
             elif isinstance(meta_raw, dict):
@@ -103,15 +102,14 @@ class NinoSignalsAssistant:
             adx_val = self._safe_float(adx_raw, default=None) if adx_raw is not None else None
             above_ema = self._safe_bool(meta_dict.get("above_ema20", False))
         except Exception as e:
-            # Fallback falls json.loads wegen kaputter Strings fehlschlägt
             pass
         return smi_val, adx_val, above_ema
 
     def _fetch_5d_performance(self, ticker, sig_date, base_preis):
-        """Zieht über yfinance die Kursdaten ab sig_date und berechnet 5-Tage Max- & End-Performance."""
+        """Zieht über yfinance die Kursdaten ab sig_date und berechnet 5-Tage Max- & End-Performance (ab Tag nach Signal)."""
         clean_ticker = self._clean_ticker_for_yf(ticker)
         try:
-            end_date_fetch = sig_date + timedelta(days=15)
+            end_date_fetch = sig_date + timedelta(days=20)
             df_hist = yf.download(
                 clean_ticker,
                 start=sig_date.strftime("%Y-%m-%d"),
@@ -120,7 +118,7 @@ class NinoSignalsAssistant:
                 auto_adjust=True,
             )
 
-            if df_hist.empty:
+            if df_hist.empty or len(df_hist) < 2:
                 return None
 
             def get_col(df, col_name):
@@ -134,13 +132,18 @@ class NinoSignalsAssistant:
             close_s = get_col(df_hist, "Close")
             high_s = get_col(df_hist, "High")
 
-            if close_s is None or close_s.empty:
+            if close_s is None or close_s.empty or high_s is None or high_s.empty:
                 return None
 
             if base_preis <= 0:
                 base_preis = self._safe_float(close_s.iloc[0], default=1.0)
 
-            df_5d = df_hist.head(5)
+            # Exakt die 5 Handelstage NACH dem Signaltag (Index 1 bis 5)
+            df_5d = df_hist.iloc[1:6] if len(df_hist) >= 6 else df_hist.iloc[1:]
+
+            if df_5d.empty:
+                return None
+
             high_5d_s = get_col(df_5d, "High")
             close_5d_s = get_col(df_5d, "Close")
 
