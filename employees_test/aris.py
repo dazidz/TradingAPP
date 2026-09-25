@@ -13,33 +13,39 @@ class ArisAgent:
         self.description = "Performance Manager"
 
     def _resolve_api_key(self, passed_key: str = None) -> str:
+        # 1. Übergebener Key
         if passed_key and isinstance(passed_key, str) and passed_key.strip():
             return passed_key.strip()
 
-        # 1. Prüfe Umgebungsvariablen (inklusive GROQ_API_KEY)
-        for env_name in ["GROQ_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", "OPENAI_KEY"]:
-            val = os.getenv(env_name)
-            if val and isinstance(val, str) and val.strip():
-                return val.strip()
+        # 2. Umgebungsvariablen prüfen
+        val = os.getenv("GROQ_API_KEY") or os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
+        if val and isinstance(val, str) and val.strip():
+            return val.strip()
 
-        # 2. Prüfe Streamlit Secrets (inklusive GROQ_API_KEY)
+        # 3. Streamlit Secrets direkt und fehlertolerant prüfen
         try:
-            if hasattr(st, "secrets") and st.secrets:
-                for key_name in ["GROQ_API_KEY", "groq_api_key", "OPENROUTER_API_KEY", "openrouter_api_key", "OPENAI_API_KEY", "openai_api_key"]:
-                    if key_name in st.secrets:
-                        val = st.secrets[key_name]
-                        if val and isinstance(val, str):
-                            return val.strip()
+            if hasattr(st, "secrets"):
+                # Direkter Zugriff auf Top-Level Keys
+                if "GROQ_API_KEY" in st.secrets:
+                    return str(st.secrets["GROQ_API_KEY"]).strip()
+                if "OPENROUTER_API_KEY" in st.secrets:
+                    return str(st.secrets["OPENROUTER_API_KEY"]).strip()
+                if "OPENAI_API_KEY" in st.secrets:
+                    return str(st.secrets["OPENAI_API_KEY"]).strip()
                 
+                # Sektionen durchgehen falls verschachtelt
                 for section in st.secrets:
-                    if isinstance(st.secrets[section], dict):
-                        for sub_key in ["groq_api_key", "GROQ_API_KEY", "openrouter_api_key", "OPENROUTER_API_KEY", "openai_api_key", "OPENAI_API_KEY", "api_key", "key"]:
-                            if sub_key in st.secrets[section]:
-                                val = st.secrets[section][sub_key]
-                                if val and isinstance(val, str):
-                                    return val.strip()
-        except Exception:
-            pass
+                    try:
+                        sec_content = st.secrets[section]
+                        if isinstance(sec_content, dict):
+                            for k in ["groq_api_key", "GROQ_API_KEY", "openrouter_api_key", "OPENROUTER_API_KEY", "api_key", "key"]:
+                                if k in sec_content and sec_content[k]:
+                                    return str(sec_content[k]).strip()
+                    except Exception:
+                        continue
+        except Exception as e:
+            # Falls st.secrets gar nicht konfiguriert ist (z.B. lokal ohne toml-Datei)
+            print(f"Debug - st.secrets nicht verfügbar: {e}")
             
         return ""
 
@@ -47,7 +53,7 @@ class ArisAgent:
         try:
             active_key = self._resolve_api_key(api_key)
             if not active_key:
-                return False, "Kein API-Key gefunden! Bitte hinterlege deinen GROQ_API_KEY in den Streamlit Secrets."
+                return False, "Kein API-Key gefunden! Bitte prüfe, ob GROQ_API_KEY in deinen Streamlit Secrets korrekt hinterlegt ist."
 
             # 1. Daten aus dem Arbeitsspeicher abrufen
             memory_res = (
@@ -84,7 +90,7 @@ class ArisAgent:
             Schreibe die zentralen Erkenntnisse strukturiert als 'Principals' nieder.
             """
 
-            # 3. API-Aufruf (Standardmäßig OpenRouter; falls es direkt über Groq läuft, kann hier die URL angepasst werden)
+            # 3. API-Aufruf an OpenRouter
             headers = {
                 "Authorization": f"Bearer {active_key}",
                 "Content-Type": "application/json",
