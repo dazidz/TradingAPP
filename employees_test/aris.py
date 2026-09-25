@@ -1,7 +1,6 @@
 from datetime import datetime
 import os
-import httpx
-openai = __import__('openai')
+import requests
 import streamlit as st
 
 
@@ -17,7 +16,6 @@ class ArisAgent:
         if passed_key:
             return passed_key
 
-        # Prüfe zuerst OpenRouter-Keys, da das Modell dorthin gehört
         for env_name in ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "OPENAI_KEY"]:
             val = os.getenv(env_name)
             if val:
@@ -42,13 +40,6 @@ class ArisAgent:
             active_key = self._resolve_api_key(api_key)
             if not active_key:
                 return False, "Kein API-Key (OpenRouter/OpenAI) für Aris gefunden."
-
-            # Korrekter Client mit OpenRouter Basis-URL und Timeout
-            client = openai.OpenAI(
-                api_key=active_key,
-                base_url="https://openrouter.ai/api/v1",
-                http_client=httpx.Client(timeout=120.0)
-            )
 
             # 1. Daten aus dem Arbeitsspeicher abrufen
             memory_res = (
@@ -85,19 +76,37 @@ class ArisAgent:
             Schreibe die zentralen Erkenntnisse strukturiert als 'Principals' nieder.
             """
 
-            # API Aufruf
-            response = client.chat.completions.create(
-                model=self.model_name,
-                messages=[
+            # 3. Direkter API-Aufruf an OpenRouter via requests (vermeidet Paket-Abhängigkeiten)
+            headers = {
+                "Authorization": f"Bearer {active_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://streamlit.io",  # Optional für OpenRouter Rankings
+                "X-Title": "Trading App Aris"
+            }
+
+            payload = {
+                "model": self.model_name,
+                "messages": [
                     {"role": "system", "content": "Du bist Aris, ein präziser Performance Manager für Trading-Strategien."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3
+                "temperature": 0.3
+            }
+
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=120.0
             )
 
-            report_content = response.choices[0].message.content
+            if response.status_code != 200:
+                return False, f"API-Fehler ({response.status_code}): {response.text}"
 
-            # 3. Bericht in agent_reports speichern
+            res_json = response.json()
+            report_content = res_json["choices"][0]["message"]["content"]
+
+            # 4. Bericht in agent_reports speichern
             self.supabase.table("agent_reports").insert({
                 "agent_name": self.name,
                 "report_content": report_content,
@@ -105,7 +114,7 @@ class ArisAgent:
                 "created_at": datetime.now().isoformat(),
             }).execute()
 
-            # 4. Arbeitsspeicher leeren
+            # 5. Arbeitsspeicher leeren
             for item in memory_data:
                 item_id = item.get("id")
                 if item_id:
