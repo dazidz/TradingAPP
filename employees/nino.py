@@ -104,7 +104,7 @@ class NinoSignalsAssistant:
         return smi_val, adx_val, above_ema
 
     def _fetch_5d_performance(self, ticker, sig_date, base_preis):
-        """Zieht über yfinance die Kursdaten ab sig_date und berechnet 5-Tage Max- & End-Performance."""
+        """Zieht über yfinance ausschließlich die Kursdaten und berechnet die Performance."""
         clean_ticker = self._clean_ticker_for_yf(ticker)
         try:
             end_date_fetch = sig_date + timedelta(days=20)
@@ -177,7 +177,6 @@ class NinoSignalsAssistant:
                 "max_kurs_5_tage": high_5d,
                 "max_performance_5_tage": max_perf_5d,
                 "candle_time_max_5_tage": candle_time_max,
-                "end_kurs_5_tage": close_5d,
                 "end_performance_5_tage": end_perf_5d,
             }
         except Exception as e:
@@ -200,7 +199,6 @@ class NinoSignalsAssistant:
                 return
 
             for sig in active_signals:
-                # GESICHERT PRO SIGNAL: Ein Fehler hier bricht nicht den gesamten Lauf ab
                 try:
                     if not sig:
                         continue
@@ -209,6 +207,8 @@ class NinoSignalsAssistant:
                         continue
 
                     ticker_upper = ticker.upper()
+                    company_name = sig.get("company_name") or ticker_upper
+
                     sig_date_str = (
                         sig.get("candle_time")
                         or sig.get("datum")
@@ -250,6 +250,7 @@ class NinoSignalsAssistant:
 
                     journal_entry = {
                         "ticker": ticker_upper,
+                        "company_name": company_name,
                         "candle_time": pd.to_datetime(sig_date_str).isoformat(),
                         "signal_typ": sig_type,
                         "status": True,
@@ -260,7 +261,6 @@ class NinoSignalsAssistant:
                         "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
                         "max_performance_5_tage": perf_data["max_performance_5_tage"],
                         "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
-                        "end_kurs_5_tage": perf_data["end_kurs_5_tage"],
                         "end_performance_5_tage": perf_data["end_performance_5_tage"],
                     }
 
@@ -270,12 +270,16 @@ class NinoSignalsAssistant:
 
                     arbeitsspeicher_entry = {
                         "ticker": ticker_upper,
+                        "company_name": company_name,
                         "candle_time": pd.to_datetime(sig_date_str).isoformat(),
                         "signal_typ": sig_type,
                         "smi": smi_val,
                         "adx": adx_val,
                         "is_favorite": is_fav,
                         "above_ema20": above_ema,
+                        "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
+                        "max_performance_5_tage": perf_data["max_performance_5_tage"],
+                        "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
                         "end_performance_5_tage": perf_data["end_performance_5_tage"],
                         "quelle": "signals_journal",
                     }
@@ -319,6 +323,8 @@ class NinoSignalsAssistant:
                         continue
 
                     ticker_upper = ticker.upper()
+                    company_name = item.get("company_name") or ticker_upper
+
                     date_str = (
                         item.get("candle_time")
                         or item.get("signal_datum")
@@ -356,10 +362,10 @@ class NinoSignalsAssistant:
 
                     updated_joris_data = {
                         "status": True,
+                        "company_name": company_name,
                         "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
                         "max_performance_5_tage": perf_data["max_performance_5_tage"],
                         "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
-                        "end_kurs_5_tage": perf_data["end_kurs_5_tage"],
                         "end_performance_5_tage": perf_data["end_performance_5_tage"],
                     }
 
@@ -371,11 +377,15 @@ class NinoSignalsAssistant:
 
                     arbeitsspeicher_entry = {
                         "ticker": ticker_upper,
+                        "company_name": company_name,
                         "candle_time": pd.to_datetime(date_str).isoformat(),
                         "signal_typ": sig_type,
                         "smi": smi_val,
                         "adx": adx_val,
                         "above_ema20": above_ema,
+                        "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
+                        "max_performance_5_tage": perf_data["max_performance_5_tage"],
+                        "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
                         "end_performance_5_tage": perf_data["end_performance_5_tage"],
                         "quelle": "joris_journal",
                     }
@@ -410,6 +420,8 @@ class NinoSignalsAssistant:
 
                 try:
                     clean_ticker = self._clean_ticker_for_yf(ticker)
+                    company_name = item.get("company_name") or ticker
+
                     start_fetch = today - timedelta(days=10)
                     df_hist = yf.download(
                         clean_ticker,
@@ -448,11 +460,11 @@ class NinoSignalsAssistant:
 
                     performance_results.append({
                         "ticker": ticker,
+                        "company_name": company_name,
                         "signal_typ": None,
                         "smi": smi_val,
                         "adx": adx_val,
                         "end_performance_5_tage": perf,
-                        "end_kurs_5_tage": end_kurs,
                         "candle_time": datetime.now().isoformat(),
                     })
                 except Exception as e:
@@ -474,15 +486,16 @@ class NinoSignalsAssistant:
                     "datum": today_iso,
                     "kategorie": "TOP",
                     "ticker": ticker,
+                    "company_name": entry.get("company_name"),
                     "signal_typ": None,
                     "performance": perf,
-                    "end_kurs": entry.get("end_kurs_5_tage"),
                     "quelle": "top_flop_watchlist",
                 }
                 self.supabase.table("top_flop_journal").insert(payload).execute()
 
                 arbeitsspeicher_entry = {
                     "ticker": ticker,
+                    "company_name": entry.get("company_name"),
                     "candle_time": entry.get("candle_time"),
                     "signal_typ": None,
                     "smi": entry.get("smi"),
