@@ -12,46 +12,56 @@ class ArisAgent:
         self.model_name = "openai/gpt-oss-120b"
         self.description = "Performance Manager"
 
-    def _resolve_api_key(self, passed_key: str = None) -> str:
+    def _resolve_api_key(self, passed_key: str = None) -> tuple[str, str]:
+        """Ermittelt den Key und gibt ein Tupel aus (api_key, provider) zurück."""
         # 1. Übergebener Key
         if passed_key and isinstance(passed_key, str) and passed_key.strip():
-            return passed_key.strip()
+            k = passed_key.strip()
+            provider = "groq" if k.startswith("gsk") else "openrouter"
+            return k, provider
 
         # 2. Umgebungsvariablen prüfen
-        val = os.getenv("GROQ_API_KEY") or os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
-        if val and isinstance(val, str) and val.strip():
-            return val.strip()
+        for env_name in ["GROQ_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"]:
+            val = os.getenv(env_name)
+            if val and isinstance(val, str) and val.strip():
+                k = val.strip()
+                provider = "groq" if "GROQ" in env_name or k.startswith("gsk") else "openrouter"
+                return k, provider
 
-        # 3. Streamlit Secrets direkt und fehlertolerant prüfen
+        # 3. Streamlit Secrets prüfen
         try:
             if hasattr(st, "secrets"):
-                # Direkter Zugriff auf Top-Level Keys
                 if "GROQ_API_KEY" in st.secrets:
-                    return str(st.secrets["GROQ_API_KEY"]).strip()
+                    k = str(st.secrets["GROQ_API_KEY"]).strip()
+                    if k:
+                        return k, "groq"
                 if "OPENROUTER_API_KEY" in st.secrets:
-                    return str(st.secrets["OPENROUTER_API_KEY"]).strip()
-                if "OPENAI_API_KEY" in st.secrets:
-                    return str(st.secrets["OPENAI_API_KEY"]).strip()
+                    k = str(st.secrets["OPENROUTER_API_KEY"]).strip()
+                    if k:
+                        return k, "openrouter"
                 
-                # Sektionen durchgehen falls verschachtelt
                 for section in st.secrets:
                     try:
                         sec_content = st.secrets[section]
                         if isinstance(sec_content, dict):
-                            for k in ["groq_api_key", "GROQ_API_KEY", "openrouter_api_key", "OPENROUTER_API_KEY", "api_key", "key"]:
-                                if k in sec_content and sec_content[k]:
-                                    return str(sec_content[k]).strip()
+                            for k_name in ["groq_api_key", "GROQ_API_KEY"]:
+                                if k_name in sec_content and sec_content[k_name]:
+                                    return str(sec_content[k_name]).strip(), "groq"
+                            for k_name in ["openrouter_api_key", "OPENROUTER_API_KEY", "api_key", "key"]:
+                                if k_name in sec_content and sec_content[k_name]:
+                                    val_str = str(sec_content[k_name]).strip()
+                                    provider = "groq" if val_str.startswith("gsk") else "openrouter"
+                                    return val_str, provider
                     except Exception:
                         continue
-        except Exception as e:
-            # Falls st.secrets gar nicht konfiguriert ist (z.B. lokal ohne toml-Datei)
-            print(f"Debug - st.secrets nicht verfügbar: {e}")
+        except Exception:
+            pass
             
-        return ""
+        return "", ""
 
     def run_analysis(self, api_key: str = None):
         try:
-            active_key = self._resolve_api_key(api_key)
+            active_key, provider = self._resolve_api_key(api_key)
             if not active_key:
                 return False, "Kein API-Key gefunden! Bitte prüfe, ob GROQ_API_KEY in deinen Streamlit Secrets korrekt hinterlegt ist."
 
@@ -90,13 +100,21 @@ class ArisAgent:
             Schreibe die zentralen Erkenntnisse strukturiert als 'Principals' nieder.
             """
 
-            # 3. API-Aufruf an OpenRouter
-            headers = {
-                "Authorization": f"Bearer {active_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://streamlit.io",
-                "X-Title": "Trading App Aris"
-            }
+            # 3. API-Aufruf je nach Provider (Groq oder OpenRouter) konfigurieren
+            if provider == "groq":
+                api_url = "https://api.groq.com/openai/v1/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {active_key}",
+                    "Content-Type": "application/json"
+                }
+            else:
+                api_url = "https://openrouter.ai/api/v1/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {active_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://streamlit.io",
+                    "X-Title": "Trading App Aris"
+                }
 
             payload = {
                 "model": self.model_name,
@@ -108,7 +126,7 @@ class ArisAgent:
             }
 
             response = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
+                api_url,
                 headers=headers,
                 json=payload,
                 timeout=120.0
