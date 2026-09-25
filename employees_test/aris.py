@@ -13,29 +13,32 @@ class ArisAgent:
         self.description = "Performance Manager"
 
     def _resolve_api_key(self, passed_key: str = None) -> str:
-        if passed_key and passed_key.strip():
+        # Absicherung: Prüfen, ob passed_key wirklich ein String ist
+        if passed_key and isinstance(passed_key, str) and passed_key.strip():
             return passed_key.strip()
 
         # 1. Prüfe Umgebungsvariablen
         for env_name in ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "OPENAI_KEY"]:
             val = os.getenv(env_name)
-            if val and val.strip():
+            if val and isinstance(val, str) and val.strip():
                 return val.strip()
 
         # 2. Prüfe Streamlit Secrets
         try:
             if hasattr(st, "secrets") and st.secrets:
-                # Direkter Zugriff auf gängige Secret-Keys
                 for key_name in ["OPENROUTER_API_KEY", "openrouter_api_key", "OPENAI_API_KEY", "openai_api_key"]:
-                    if key_name in st.secrets and st.secrets[key_name]:
-                        return str(st.secrets[key_name]).strip()
+                    if key_name in st.secrets:
+                        val = st.secrets[key_name]
+                        if val and isinstance(val, str):
+                            return val.strip()
                 
-                # Verschachtelte Secrets durchsuchen (z.B. [openrouter] api_key = "...")
                 for section in st.secrets:
                     if isinstance(st.secrets[section], dict):
                         for sub_key in ["openrouter_api_key", "OPENROUTER_API_KEY", "openai_api_key", "OPENAI_API_KEY", "api_key", "key"]:
-                            if sub_key in st.secrets[section] and st.secrets[section][sub_key]:
-                                return str(st.secrets[section][sub_key]).strip()
+                            if sub_key in st.secrets[section]:
+                                val = st.secrets[section][sub_key]
+                                if val and isinstance(val, str):
+                                    return val.strip()
         except Exception:
             pass
             
