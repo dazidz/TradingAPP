@@ -9,7 +9,7 @@ class ArisAgent:
     def __init__(self, supabase_client):
         self.supabase = supabase_client
         self.name = "Aris"
-        self.model_name = "gemini-3.6-flash"
+        self.model_name = "gemini-2.5-flash"  # Stabiles Standard-Flash-Modell gegen Timeouts
         self.description = "Performance Manager"
 
     def _resolve_api_key(self, passed_key: str = None) -> str:
@@ -67,12 +67,23 @@ class ArisAgent:
             )
             memory_data = memory_res.data if memory_res.data else []
 
-            memory_texts = [str(item) for item in memory_data]
-            memory_context = (
-                "\n".join(memory_texts)
-                if memory_texts
-                else "Keine spezifischen Einträge im Arbeitsspeicher."
-            )
+            if not memory_data:
+                return False, "Keine Einträge im Arbeitsspeicher vorhanden."
+
+            # Kompakte und saubere Formatierung der Einträge statt rohem str(item)
+            context_lines = []
+            for item in memory_data:
+                line = (
+                    f"- Ticker: {item.get('ticker')}, "
+                    f"Typ: {item.get('signal_typ')}, "
+                    f"SMI: {item.get('smi')}, "
+                    f"ADX: {item.get('adx')}, "
+                    f"EMA20: {item.get('above_ema20')}, "
+                    f"Perf 5T: {item.get('end_performance_5_tage')}%"
+                )
+                context_lines.append(line)
+            
+            memory_context = "\n".join(context_lines)
 
             # 2. Detaillierter Analyse-Prompt nach Vorgabe
             prompt = f"""
