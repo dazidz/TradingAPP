@@ -1,5 +1,6 @@
 from datetime import datetime
 import os
+import httpx
 openai = __import__('openai')
 import streamlit as st
 
@@ -9,27 +10,27 @@ class ArisAgent:
     def __init__(self, supabase_client):
         self.supabase = supabase_client
         self.name = "Aris"
-        self.model_name = "openai/gpt-oss-120b"  # Bewährtes Modell
+        self.model_name = "openai/gpt-oss-120b"
         self.description = "Performance Manager"
 
     def _resolve_api_key(self, passed_key: str = None) -> str:
-        """Sucht nach dem passenden API-Key in Parametern, Env und Streamlit Secrets."""
         if passed_key:
             return passed_key
 
-        for env_name in ["OPENAI_API_KEY", "OPENAI_KEY", "OPENROUTER_API_KEY"]:
+        # Prüfe zuerst OpenRouter-Keys, da das Modell dorthin gehört
+        for env_name in ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "OPENAI_KEY"]:
             val = os.getenv(env_name)
             if val:
                 return val
 
         try:
             if hasattr(st, "secrets") and st.secrets:
-                for key_name in ["OPENAI_API_KEY", "openai_api_key", "OPENROUTER_API_KEY", "openrouter_api_key"]:
+                for key_name in ["OPENROUTER_API_KEY", "openrouter_api_key", "OPENAI_API_KEY", "openai_api_key"]:
                     if key_name in st.secrets and st.secrets[key_name]:
                         return st.secrets[key_name]
                 for section in st.secrets:
                     if isinstance(st.secrets[section], dict):
-                        for sub_key in ["openai_api_key", "OPENAI_API_KEY", "openrouter_api_key", "api_key", "key"]:
+                        for sub_key in ["openrouter_api_key", "openai_api_key", "OPENAI_API_KEY", "api_key", "key"]:
                             if sub_key in st.secrets[section] and st.secrets[section][sub_key]:
                                 return st.secrets[section][sub_key]
         except Exception:
@@ -40,13 +41,13 @@ class ArisAgent:
         try:
             active_key = self._resolve_api_key(api_key)
             if not active_key:
-                return False, "Kein API-Key für Aris gefunden."
+                return False, "Kein API-Key (OpenRouter/OpenAI) für Aris gefunden."
 
-            # Falls du über OpenRouter oder einen OpenAI-kompatiblen Provider gehst, 
-            # kann hier optional die base_url angepasst werden (falls nötig, sonst standardmäßig OpenAI).
+            # Korrekter Client mit OpenRouter Basis-URL und Timeout
             client = openai.OpenAI(
                 api_key=active_key,
-                # base_url="https://openrouter.ai/api/v1" # Falls das Modell über OpenRouter läuft
+                base_url="https://openrouter.ai/api/v1",
+                http_client=httpx.Client(timeout=120.0)
             )
 
             # 1. Daten aus dem Arbeitsspeicher abrufen
@@ -84,7 +85,7 @@ class ArisAgent:
             Schreibe die zentralen Erkenntnisse strukturiert als 'Principals' nieder.
             """
 
-            # API Aufruf mit gpt-oss-120b
+            # API Aufruf
             response = client.chat.completions.create(
                 model=self.model_name,
                 messages=[
