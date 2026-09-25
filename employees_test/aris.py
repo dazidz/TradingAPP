@@ -9,7 +9,7 @@ class ArisAgent:
     def __init__(self, supabase_client):
         self.supabase = supabase_client
         self.name = "Aris"
-        self.model_name = "gemini-1.5-flash"
+        self.model_name = "gemini-3.6-flash"
         self.description = "Performance Manager"
 
     def _resolve_api_key(self, passed_key: str = None) -> str:
