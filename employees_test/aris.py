@@ -13,33 +13,39 @@ class ArisAgent:
         self.description = "Performance Manager"
 
     def _resolve_api_key(self, passed_key: str = None) -> str:
-        if passed_key:
-            return passed_key
+        if passed_key and passed_key.strip():
+            return passed_key.strip()
 
+        # 1. Prüfe Umgebungsvariablen
         for env_name in ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "OPENAI_KEY"]:
             val = os.getenv(env_name)
-            if val:
-                return val
+            if val and val.strip():
+                return val.strip()
 
+        # 2. Prüfe Streamlit Secrets
         try:
             if hasattr(st, "secrets") and st.secrets:
+                # Direkter Zugriff auf gängige Secret-Keys
                 for key_name in ["OPENROUTER_API_KEY", "openrouter_api_key", "OPENAI_API_KEY", "openai_api_key"]:
                     if key_name in st.secrets and st.secrets[key_name]:
-                        return st.secrets[key_name]
+                        return str(st.secrets[key_name]).strip()
+                
+                # Verschachtelte Secrets durchsuchen (z.B. [openrouter] api_key = "...")
                 for section in st.secrets:
                     if isinstance(st.secrets[section], dict):
-                        for sub_key in ["openrouter_api_key", "openai_api_key", "OPENAI_API_KEY", "api_key", "key"]:
+                        for sub_key in ["openrouter_api_key", "OPENROUTER_API_KEY", "openai_api_key", "OPENAI_API_KEY", "api_key", "key"]:
                             if sub_key in st.secrets[section] and st.secrets[section][sub_key]:
-                                return st.secrets[section][sub_key]
+                                return str(st.secrets[section][sub_key]).strip()
         except Exception:
             pass
-        return None
+            
+        return ""
 
     def run_analysis(self, api_key: str = None):
         try:
             active_key = self._resolve_api_key(api_key)
             if not active_key:
-                return False, "Kein API-Key (OpenRouter/OpenAI) für Aris gefunden."
+                return False, "Kein API-Key gefunden! Bitte hinterlege deinen OpenRouter- oder OpenAI-Key in den Streamlit Secrets oder als Umgebungsvariable."
 
             # 1. Daten aus dem Arbeitsspeicher abrufen
             memory_res = (
@@ -76,11 +82,11 @@ class ArisAgent:
             Schreibe die zentralen Erkenntnisse strukturiert als 'Principals' nieder.
             """
 
-            # 3. Direkter API-Aufruf an OpenRouter via requests (vermeidet Paket-Abhängigkeiten)
+            # 3. Direkter API-Aufruf an OpenRouter
             headers = {
                 "Authorization": f"Bearer {active_key}",
                 "Content-Type": "application/json",
-                "HTTP-Referer": "https://streamlit.io",  # Optional für OpenRouter Rankings
+                "HTTP-Referer": "https://streamlit.io",
                 "X-Title": "Trading App Aris"
             }
 
