@@ -136,7 +136,7 @@ class JorisPortfolioManager:
             Fokus-Mandat: {depot_focus.upper()} (Zugehörige Depot-Tabelle: {table_name})
             
             WICHTIG - TRADINGVIEW LINKS:
-            Füge bei **jeder** erwähnten Aktie im Markdown-Format einen Link ein: `[Ticker](https://www.tradingview.com/chart/?symbol=NASDAQ:TICKER)`.
+            Füge bei **jeder** erwähnten Aktie im Markdown-Format einen Link ein: `[Ticker](https://www.tradingview.com/chart/?symbol=GETTEX:TICKER)`.
 
             DATENGRUNDLAGE (Nur frische Team-Bullet-Points):
             A) DEPOT ({table_name}): {depot_data_text}
