@@ -167,6 +167,10 @@ class NinoSignalsAssistant:
 
     def process_signals_to_journal(self):
         print("Nino verarbeitet aktive Signale (signals -> signals_journal -> aris_arbeitsspeicher)...")
+
+        print("DEBUG TABELLE ACTIVE SIGNALS:", repr(self.table_active_signals))
+        print("DEBUG SUPABASE CLIENT:", repr(self.supabase))
+
         try:
             today = datetime.now().date()
             favorite_tickers = self._get_favorite_tickers()
