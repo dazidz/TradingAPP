@@ -29,7 +29,7 @@ jobs:
           python -m pip install yfinance pandas numpy pytz requests supabase
 
       - name: Run Nino
-        run: python -m employees.nino
+        run: python -m employees_test.nino
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
