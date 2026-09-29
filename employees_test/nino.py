@@ -18,6 +18,12 @@ class NinoSignalsAssistant:
         self.table_aris_arbeitsspeicher = "aris_arbeitsspeicher"
         self.table_favorites = "favorites"
 
+        try:
+            test_res = self.supabase.table(self.table_active_signals).select("*", count="exact").limit(1).execute()
+            print(f"✅ Supabase Verbindung erfolgreich! Tabelle '{self.table_active_signals}' erreichbar.")
+        except Exception as e:
+            print(f"❌ SUPABASE VERBINDUNGS-FEHLER: {e}")
+
     def is_valid_ticker(self, ticker):
         """Prüft, ob ein Ticker ein gültiges Börsensymbol ist und keine Platzhalter/Systemnamen."""
         if not ticker or not isinstance(ticker, str):
