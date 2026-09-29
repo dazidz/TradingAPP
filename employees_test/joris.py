@@ -13,8 +13,25 @@ class JorisPortfolioManager:
     def __init__(self, supabase_client):
         self.supabase = supabase_client
         self.name = "Joris"
-        self.model_name = "gemini-3.6-flash"  # Oder dein gewünschtes Modell
+        self.model_name = "gemini-3.6-flash"
         self.description = "Portfolio Manager"
+
+    def _fetch_dna_from_supabase(self, depot_focus: str):
+        """Lädt die Kern-Prinzipien und die mandatspezifischen Kriterien strikt aus Supabase (ohne Fallback)."""
+        res = self.supabase.table("agent_dna").select("mandate, rules_content").execute()
+        
+        if not res.data:
+            raise ValueError("Die Tabelle 'agent_dna' in Supabase ist komplett leer!")
+
+        dna_dict = {row["mandate"]: row["rules_content"] for row in res.data}
+        
+        if "core" not in dna_dict:
+            raise KeyError("Das Mandat 'core' (Kern-Prinzipien) fehlt in der Supabase-Tabelle 'agent_dna'!")
+            
+        if depot_focus not in dna_dict:
+            raise KeyError(f"Das angeforderte Mandat '{depot_focus}' wurde nicht in der Supabase-Tabelle 'agent_dna' gefunden!")
+
+        return dna_dict["core"], dna_dict[depot_focus]
 
     def _get_table_name(self, depot_focus: str) -> str:
         mapping = {
@@ -25,7 +42,6 @@ class JorisPortfolioManager:
         return mapping.get(depot_focus, "invest_depot")
 
     def _resolve_api_key(self, passed_key=None) -> str:
-        """Ermittelt den API-Key extrem robust (unterstützt Callables, Env und Streamlit Secrets)."""
         if callable(passed_key):
             try:
                 passed_key = passed_key()
@@ -35,22 +51,14 @@ class JorisPortfolioManager:
         if passed_key and isinstance(passed_key, str) and passed_key.strip():
             return passed_key.strip()
 
-        # 1. Bekannte Env-Variablen prüfen
         for env_name in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GEMINI_KEY"]:
             val = os.getenv(env_name)
             if val and isinstance(val, str) and val.strip():
                 return val.strip()
 
-        # 2. Streamlit Secrets durchkämmen
         try:
             if hasattr(st, "secrets") and st.secrets:
-                for key_name in [
-                    "GEMINI_API_KEY",
-                    "gemini_api_key",
-                    "GOOGLE_API_KEY",
-                    "google_api_key",
-                    "GEMINI_KEY",
-                ]:
+                for key_name in ["GEMINI_API_KEY", "gemini_api_key", "GOOGLE_API_KEY", "google_api_key", "GEMINI_KEY"]:
                     if key_name in st.secrets and st.secrets[key_name]:
                         return str(st.secrets[key_name]).strip()
 
@@ -72,12 +80,15 @@ class JorisPortfolioManager:
         try:
             active_key = self._resolve_api_key(api_key)
             if not active_key:
-                return False, "Kein Gemini API-Key für Joris gefunden! Bitte prüfe deine Secrets."
+                return False, "Kein Gemini API-Key für Joris gefunden!"
 
             genai.configure(api_key=active_key)
             model = genai.GenerativeModel(self.model_name)
 
-            # 1. NUR UNGELESENE BERICHTE DER KOLLEGEN ABRUFEN (Status = 'unread')
+            # 1. DNA strikt aus Supabase laden (wirft Fehler, wenn Daten fehlen)
+            core_principles, active_mandate_criteria = self._fetch_dna_from_supabase(depot_focus)
+
+            # 2. Ungelesene Team-Berichte abrufen
             reports_res = (
                 self.supabase.table("agent_reports")
                 .select("id, created_at, agent_name, bullet_points, report_content")
@@ -87,7 +98,6 @@ class JorisPortfolioManager:
             )
 
             raw_reports = reports_res.data if reports_res.data else []
-
             formatted_reports_list = []
             processed_report_ids = []
 
@@ -116,42 +126,42 @@ class JorisPortfolioManager:
                 else "Keine neuen Team-Bullet-Points vorhanden."
             )
 
-            # 2. Depot, Signale und Favoriten laden
+            # 3. Daten laden (Depot, Screener, Favoriten)
             table_name = self._get_table_name(depot_focus)
             depot_res = self.supabase.table(table_name).select("*").execute()
             depot_data_text = str(depot_res.data) if depot_res.data else "Keine Einträge."
 
-            screener_res = (
-                self.supabase.table("signals").select("*").limit(20).execute()
-            )
+            screener_res = self.supabase.table("signals").select("*").limit(20).execute()
             screener_data_text = str(screener_res.data) if screener_res.data else "Keine Signale."
 
             favorites_res = self.supabase.table("favorites").select("*").execute()
             favorites_data_text = str(favorites_res.data) if favorites_res.data else "Keine Favoriten."
 
-            # Prompt zusammenbauen
+            # 4. Prompt mit den reinen Supabase-Kriterien zusammenbauen
             prompt_content = f"""
-            Du bist Joris, der leitende Portfolio Manager. 
-            Deine Arbeitsweise folgt Ray Dalios Prinzipien: **Radical Truth & Radical Open-Mindedness**.
+            {core_principles}
+            
             Fokus-Mandat: {depot_focus.upper()} (Zugehörige Depot-Tabelle: {table_name})
             
+            FESTE AUSWAHL- UND PRÜFKRITERIEN AUS DER DATENBANK:
+            {active_mandate_criteria}
+            
             WICHTIG - TRADINGVIEW LINKS:
-            Füge bei **jeder** erwähnten Aktie im Markdown-Format einen Link ein: `[Ticker](https://www.tradingview.com/chart/?symbol=GETTEX:TICKER)`.
+            Füge bei **jeder** erwähnten Aktie im Markdown-Format exakt diesen Link ein: `[Ticker](https://www.tradingview.com/chart/?symbol=GETTEX:TICKER)`.
 
-            DATENGRUNDLAGE (Nur frische Team-Bullet-Points):
+            DATENGRUNDLAGE:
             A) DEPOT ({table_name}): {depot_data_text}
-            B) SCREENER: {screener_data_text}
+            B) SCREENER (Signale): {screener_data_text}
             C) FAVORITEN: {favorites_data_text}
-            D) NEUESTE TEAM-BULLET-POINTS: {reports_text}
+            D) TEAM-BULLET-POINTS: {reports_text}
             
             AUFGABE:
-            Erstelle eine datenbasierte Portfolio-Synthese für '{depot_focus.upper()}'. 
-            1. Zusammenfassung & Synthese der Bullet-Points.
-            2. Depot-Prüfung & Diversifikation.
-            3. Verkaufsempfehlungen.
-            4. Top-Empfehlungen des Tages.
+            Erstelle eine kompromisslose, datenbasierte Portfolio-Synthese, die sich buchstabengetreu an deine Prinzipien und die obigen Mandatskriterien hält.
+            1. Makroökonomische Synthese der Team-Berichte im Sinne von Ray Dalio.
+            2. Harte Depot-Prüfung: Entsprechen die aktuellen Positionen streng den Kriterien von '{depot_focus.upper()}'? (Wenn nicht -> Verkaufsempfehlung begründen).
+            3. Konkrete Handlungsanweisungen und Top-Empfehlungen auf Basis der Daten.
             
-            ZUSATZ-FORMAT FÜR DAS JOURNAL (BEI SWING):
+            ZUSATZ-FORMAT FÜR DAS JOURNAL (NUR BEI SWING):
             ===JOURNAL_DATA_START===
             [
               {{"ticker": "AAPL", "setup_reason": "Ausbruch", "target": 220.0, "stop_loss": 175.0}}
@@ -162,25 +172,25 @@ class JorisPortfolioManager:
             response = model.generate_content(prompt_content)
             report_content = response.text
 
-            # 3. Bericht in agent_reports speichern
+            # 5. Bericht speichern
             self.supabase.table("agent_reports").insert({
                 "agent_name": f"Joris_{depot_focus}",
                 "report_content": report_content,
                 "bullet_points": [
-                    f"Synthese Mandat {depot_focus.upper()} erfolgreich abgeschlossen",
-                    "Frische Team-Daten und Screener-Signale verarbeitet",
+                    f"Synthese Mandat {depot_focus.upper()} strikt nach Supabase-DNA durchgeführt",
+                    "Frische Team-Daten und Screener-Signale analysiert",
                 ],
                 "status": "unread",
                 "created_at": datetime.now().isoformat(),
             }).execute()
 
-            # 4. Verarbeitete Team-Berichte auf 'processed' setzen
+            # 6. Team-Berichte auf 'processed' setzen
             for rep_id in processed_report_ids:
                 self.supabase.table("agent_reports").update({"status": "processed"}).eq(
                     "id", rep_id
                 ).execute()
 
-            # 5. Journal befüllen bei Swing
+            # 7. Journal befüllen bei Swing
             if depot_focus.lower() == "swing":
                 match = re.search(
                     r"===JOURNAL_DATA_START===\s*(.*?)\s*===JOURNAL_DATA_END===",
@@ -218,56 +228,42 @@ class JorisPortfolioManager:
         except Exception:
             return None
 
-    def chat_with_joris(
-        self,
-        depot_focus: str,
-        user_message: str,
-        chat_history: list,
-        api_key=None,
-    ):
-        try:
-            active_key = self._resolve_api_key(api_key)
-            if not active_key:
-                return False, "Kein Gemini API-Key für den Joris-Chat gefunden."
-
-            genai.configure(api_key=active_key)
-            model = genai.GenerativeModel(self.model_name)
-
-            formatted_history = []
-            for msg in chat_history:
-                role = "user" if msg["role"] == "user" else "model"
-                formatted_history.append({"role": role, "parts": [msg["content"]]})
-
-            chat = model.start_chat(history=formatted_history)
-
-            system_context = f"""
-            Du bist Joris, der leitende Portfolio Manager. Du chattest mit deinem Vorgesetzten.
-            Aktuelles Fokus-Mandat: {depot_focus.upper()}.
-            Handle stets nach Ray Dalios Prinzipien: Radical Truth & Radical Open-Mindedness.
-            Antworte präzise, analytisch und direkt auf Basis der vorliegenden Mandatsdaten.
-            """
-
-            full_prompt = f"{system_context}\n\nFrage des Nutzers: {user_message}"
-            response = chat.send_message(full_prompt)
-            return True, response.text
-        except Exception as e:
-            return False, f"Fehler im Chat mit Joris: {e}"
-
     def render_ui(self, api_key=None):
         st.subheader(f"🤖 {self.name} - {self.description}")
-        st.write("Führt portfolioübergreifende Synthesen nach Ray Dalios Prinzipien durch. Modell: gemini-3.6-flash")
+        st.write("Führt portfolioübergreifende Synthesen nach rein in Supabase gepflegter DNA aus.")
 
         depot_focus = st.selectbox(
             "Fokus-Mandat wählen:", ["invest", "swing", "high_risk"], key=f"sel_depot_{self.name}"
         )
 
-        if st.button(f"Portfolio-Synthese starten ({self.name})", key=f"btn_run_{self.name}"):
-            with st.spinner(f"{self.name} analysiert Berichte und Depots..."):
-                success, msg = self.run_synthesis(depot_focus, api_key)
-                if success:
-                    st.success(msg)
-                else:
-                    st.error(msg)
+        # Versuche die DNA zu laden – wenn etwas in Supabase fehlt, wird es direkt in der UI angezeigt
+        try:
+            core, active_rules = self._fetch_dna_from_supabase(depot_focus)
+            dna_loaded_successfully = True
+        except Exception as e:
+            dna_loaded_successfully = False
+            error_message = str(e)
+
+        with st.expander(f"🧬 Joris' aktive Supabase-DNA für '{depot_focus.upper()}'"):
+            if dna_loaded_successfully:
+                st.markdown("**Core Principles (aus DB):**")
+                st.code(core, language="text")
+                st.markdown(f"**Mandats-Kriterien ({depot_focus.upper()} aus DB):**")
+                st.code(active_rules, language="text")
+            else:
+                st.error(f"Fehler beim Laden der DNA aus Supabase: {error_message}")
+                st.warning("Bitte stelle sicher, dass die Tabelle `agent_dna` existiert und die Einträge für 'core' sowie das gewählte Mandat ('{depot_focus}') vorhanden sind.")
+
+        if dna_loaded_successfully:
+            if st.button(f"Portfolio-Synthese starten ({self.name})", key=f"btn_run_{self.name}"):
+                with st.spinner(f"{self.name} lädt DNA aus Supabase und analysiert..."):
+                    success, msg = self.run_synthesis(depot_focus, api_key)
+                    if success:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+        else:
+            st.button(f"Portfolio-Synthese starten ({self.name})", key=f"btn_run_{self.name}", disabled=True)
 
         st.markdown("---")
         st.markdown(f"### 📄 Letzter Synthese-Bericht ({depot_focus.upper()})")
