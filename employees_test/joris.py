@@ -18,18 +18,18 @@ class JorisPortfolioManager:
 
     def _fetch_dna_from_supabase(self, depot_focus: str):
         """Lädt die Kern-Prinzipien und die mandatspezifischen Kriterien strikt aus Supabase (ohne Fallback)."""
-        res = self.supabase.table("agent_dna").select("mandate, rules_content").execute()
+        res = self.supabase.table("joris_dna").select("mandate, rules_content").execute()
         
         if not res.data:
-            raise ValueError("Die Tabelle 'agent_dna' in Supabase ist komplett leer!")
+            raise ValueError("Die Tabelle 'joris_dna' in Supabase ist komplett leer!")
 
         dna_dict = {row["mandate"]: row["rules_content"] for row in res.data}
         
         if "core" not in dna_dict:
-            raise KeyError("Das Mandat 'core' (Kern-Prinzipien) fehlt in der Supabase-Tabelle 'agent_dna'!")
+            raise KeyError("Das Mandat 'core' (Kern-Prinzipien) fehlt in der Supabase-Tabelle 'joris_dna'!")
             
         if depot_focus not in dna_dict:
-            raise KeyError(f"Das angeforderte Mandat '{depot_focus}' wurde nicht in der Supabase-Tabelle 'agent_dna' gefunden!")
+            raise KeyError(f"Das angeforderte Mandat '{depot_focus}' wurde nicht in der Supabase-Tabelle 'joris_dna' gefunden!")
 
         return dna_dict["core"], dna_dict[depot_focus]
 
@@ -252,7 +252,7 @@ class JorisPortfolioManager:
                 st.code(active_rules, language="text")
             else:
                 st.error(f"Fehler beim Laden der DNA aus Supabase: {error_message}")
-                st.warning("Bitte stelle sicher, dass die Tabelle `agent_dna` existiert und die Einträge für 'core' sowie das gewählte Mandat ('{depot_focus}') vorhanden sind.")
+                st.warning("Bitte stelle sicher, dass die Tabelle `joris_dna` existiert und die Einträge für 'core' sowie das gewählte Mandat ('{depot_focus}') vorhanden sind.")
 
         if dna_loaded_successfully:
             if st.button(f"Portfolio-Synthese starten ({self.name})", key=f"btn_run_{self.name}"):
