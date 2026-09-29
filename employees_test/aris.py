@@ -90,10 +90,10 @@ class ArisAgent:
             {memory_context}
 
             Führe folgende Analysen durch:
-            - **ADX & SMI Mustererkennung**: Welche Muster oder Kombinationen zeigen sich?
-            - **Haltedauer**: Laufen 5-Tage-End-Trades oder Max-Trades besser?
+            - **ADX & SMI Mustererkennung**: Gibt es besonders starke Kombinationen?
+            - **Haltedauer**: Laufen 5-Tage-End-Trades oder Max-Trades besser? Wenn Max-Trades besser, gibt es eine optimale Haltezeit?
             - **Signal-Performance**: Welche Signale laufen besser? Gibt es eine optimale Signal + ADX + SMI Kombi?
-            - **Top 5 des Tages**: Welche Indikatoren und Merkmale weisen die Top 5 des Tages auf?
+            - **Top 5 des Tages**: Hier wird von der gesamten Watchliste ausgewertet, welche in den letzten 5 Tagen die beste performance hatten. Welche Indikatoren und Merkmale weisen die Top 5 des Tages auf?
             - **Sonstige Muster**: Was funktioniert am besten?
             - **Verbesserungstipps**: Konkrete Handlungsempfehlungen.
 
@@ -159,7 +159,7 @@ class ArisAgent:
 
     def render_ui(self, api_key: str = None):
         st.subheader(f"🤖 {self.name} - {self.description}")
-        st.write("Analysiert den Arbeitsspeicher über gpt-oss-120b, erkennt Muster und generiert strategische Principals.")
+        st.write("Analysiert den Arbeitsspeicher, erkennt Muster und generiert strategische Principals. Modell: gpt-oss-120b")
 
         if st.button(f"Analyse & Principals erstellen ({self.name})", key=f"btn_run_{self.name}"):
             with st.spinner(f"{self.name} wertet den Arbeitsspeicher aus..."):

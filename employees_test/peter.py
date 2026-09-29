@@ -183,7 +183,7 @@ class PeterInsiderAnalyst:
         st.subheader(f"🤖 {self.name} - {self.description}")
 
         st.markdown(
-            "Dein KI-Agent analysiert Live-Daten, News und Insider-Aktivitäten "
+            "Peter analysiert Live-Daten, News und Insider-Aktivitäten. Modell: openai/gpt-oss-120b "
             "und steht dir im Chat für Rückfragen zur Verfügung."
         )
 

@@ -13,8 +13,8 @@ class JorisPortfolioManager:
     def __init__(self, supabase_client):
         self.supabase = supabase_client
         self.name = "Joris"
-        self.model_name = "gemini-2.5-flash"  # Oder dein gewünschtes Modell
-        self.description = "Portfolio Manager & Synthese-Agent nach Ray Dalios Prinzipien."
+        self.model_name = "gemini-3.6-flash"  # Oder dein gewünschtes Modell
+        self.description = "Portfolio Manager"
 
     def _get_table_name(self, depot_focus: str) -> str:
         mapping = {
@@ -255,7 +255,7 @@ class JorisPortfolioManager:
 
     def render_ui(self, api_key=None):
         st.subheader(f"🤖 {self.name} - {self.description}")
-        st.write("Führt portfolioübergreifende Synthesen nach Ray Dalios Prinzipien durch.")
+        st.write("Führt portfolioübergreifende Synthesen nach Ray Dalios Prinzipien durch. Modell: gemini-3.6-flash")
 
         depot_focus = st.selectbox(
             "Fokus-Mandat wählen:", ["invest", "swing", "high_risk"], key=f"sel_depot_{self.name}"

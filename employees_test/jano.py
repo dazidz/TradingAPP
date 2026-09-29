@@ -13,7 +13,7 @@ class JanoMacroAnalyst:
         self.supabase = supabase_client
         self.name = "Jano"
         self.description = "Makro-Analyst (Zyklen, Zinsen, VIX, Rohstoffe, Top-Down)"
-        self.model_name = "gemini-2.5-flash" # Auf Standard-Modell angepasst (oder dein bevorzugtes Gemini-Modell)
+        self.model_name = "gemini-3.6-flash" # Auf Standard-Modell angepasst (oder dein bevorzugtes Gemini-Modell)
 
         self.jano_dna = """
         Du bist Jano, der leitende Makro-Analyst in unserem Team. Deine Brille ist strikt Top-Down.
@@ -139,7 +139,7 @@ class JanoMacroAnalyst:
 
     def render_ui(self, api_key=None):
         st.subheader(f"🤖 {self.name} - {self.description}")
-        st.write("Analysiert die globale Makro-Lage, Zyklen, Zinsen und den VIX via Top-Down-Ansatz.")
+        st.write("Analysiert die globale Makro-Lage, Zyklen, Zinsen und den VIX via Top-Down-Ansatz. Modell: gemini-3.6-flash")
 
         if st.button(f"Makro-Analyse starten ({self.name})", key=f"btn_run_{self.name}"):
             with st.spinner(f"{self.name} holt Makro-Daten und analysiert die Märkte..."):
