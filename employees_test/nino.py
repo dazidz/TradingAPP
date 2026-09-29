@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import json
 import pandas as pd
 import yfinance as yf
+import streamlit as st
 
 AGENT_TITLE = "Nino"
 
@@ -517,7 +518,45 @@ class NinoSignalsAssistant:
         self.process_top_flop_list()
 
 
-# --- MODUL-EBENE FUNKTION ---
+# --- MODUL-EBENE FUNKTIONEN FÜR DIE NEUE EMPLOYEES-STRUKTUR ---
+
 def run_nino(supabase_client):
     assistant = NinoSignalsAssistant(supabase_client)
     assistant.run_all()
+
+def render_ui(supabase_client=None, *args, **kwargs):
+    """Rendert die Benutzeroberfläche für Nino in der neuen Team-Struktur (zeigt den Aris Arbeitsspeicher)."""
+    st.subheader("🧠 Aris Arbeitsspeicher (Nino)")
+    st.write("Übersicht aller verarbeiteten Signale und Zwischenstände im Arbeitsspeicher.")
+
+    if supabase_client is None:
+        st.error("Supabase-Client nicht verfügbar.")
+        return
+
+    try:
+        res = supabase_client.table("aris_arbeitsspeicher").select("*").order("candle_time", desc=True).execute()
+        data = res.data or []
+
+        if not data:
+            st.info("Keine Daten im Aris Arbeitsspeicher vorhanden.")
+            return
+
+        df = pd.DataFrame(data)
+
+        # Suchfeld zur Filterung
+        search_ticker = st.text_input("Nach Ticker filtern:", "").strip().upper()
+        if search_ticker:
+            df = df[df["ticker"].str.contains(search_ticker, na=False)]
+
+        st.dataframe(df, use_container_width=True)
+
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Arbeitsspeicher als CSV herunterladen",
+            data=csv,
+            file_name="aris_arbeitsspeicher.csv",
+            mime="text/csv",
+        )
+
+    except Exception as e:
+        st.error(f"Fehler beim Laden des Arbeitsspeichers: {e}")
