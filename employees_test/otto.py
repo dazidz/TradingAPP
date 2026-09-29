@@ -12,7 +12,7 @@ class OttoAnalyst:
     def __init__(self, supabase_client):
         self.supabase = supabase_client
         self.name = "Otto"
-        self.model_name = "gemini-2.5-flash"  # Auf stabiles Standard-Modell angepasst
+        self.model_name = "gemini-3.6-flash"  
         self.description = (
             "History & Patterns Analyst (Muster-Matching, historische Korrelationen, analoge Börsenphasen)"
         )
@@ -148,7 +148,7 @@ class OttoAnalyst:
 
     def render_ui(self, api_key=None):
         st.subheader(f"🤖 {self.name} - {self.description}")
-        st.write("Vergleicht aktuelle Märkte mit historischen Zyklen, Krisen und Mustern.")
+        st.write("Vergleicht aktuelle Märkte mit historischen Zyklen, Krisen und Mustern. Modell: gemini-3.6-flash")
 
         if st.button(f"Historische Analyse starten ({self.name})", key=f"btn_run_{self.name}"):
             with st.spinner(f"{self.name} durchsucht historische Muster..."):
