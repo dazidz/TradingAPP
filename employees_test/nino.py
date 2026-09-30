@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import os
 import json
+import math
 import pandas as pd
 import yfinance as yf
 import streamlit as st
@@ -52,7 +53,10 @@ class NinoSignalsAssistant:
             val_str = str(val).strip().lower()
             if "true" in val_str or "false" in val_str or len(val_str) > 20:
                 return default
-            return float(val)
+            res = float(val)
+            if math.isnan(res) or math.isinf(res):
+                return default
+            return res
         except (ValueError, TypeError):
             return default
 
@@ -151,14 +155,14 @@ class NinoSignalsAssistant:
                 if pd.notnull(max_idx):
                     candle_time_max = pd.to_datetime(max_idx).isoformat()
 
-            max_perf_5d = round(((high_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0
-            end_perf_5d = round(((close_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0
+            max_perf_5d = round(((high_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0.0
+            end_perf_5d = round(((close_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0.0
 
             return {
                 "base_preis": base_preis,
-                "max_performance_5_tage": max_perf_5d,
+                "max_performance_5_tage": self._safe_float(max_perf_5d, 0.0),
                 "candle_time_max_5_tage": candle_time_max,
-                "end_performance_5_tage": end_perf_5d,
+                "end_performance_5_tage": self._safe_float(end_perf_5d, 0.0),
             }
         except Exception as e:
             print(f"Fehler bei yfinance Download für {clean_ticker}: {e}")
@@ -243,7 +247,6 @@ class NinoSignalsAssistant:
                     }
                     self.supabase.table(self.table_aris_arbeitsspeicher).insert(arbeitsspeicher_entry).execute()
 
-                    # Signal aus 'signals' löschen, da es >= 5 Tage alt ist und erfolgreich verarbeitet wurde
                     sig_id = sig.get("id")
                     if sig_id:
                         self.supabase.table(self.table_active_signals).delete().eq("id", sig_id).execute()
@@ -342,9 +345,10 @@ class NinoSignalsAssistant:
                     clean_ticker = self._clean_ticker_for_yf(ticker)
                     company_name = item.get("company_name") or ticker
 
+                    start_fetch = today - timedelta(days=10)
                     df_hist = yf.download(
                         clean_ticker,
-                        start=(today - timedelta(days=10)).strftime("%Y-%m-%d"),
+                        start=start_fetch.strftime("%Y-%m-%d"),
                         end=today.strftime("%Y-%m-%d"),
                         progress=False,
                         auto_adjust=True,
@@ -361,19 +365,27 @@ class NinoSignalsAssistant:
                             c = c.iloc[:, 0]
                         return c
 
-                    close_s = get_col(df_hist.tail(5), "Close")
+                    df_5d = df_hist.tail(5)
+                    close_s = get_col(df_5d, "Close")
+                    
                     if close_s is None or close_s.empty:
                         continue
 
                     base_kurs = self._safe_float(close_s.iloc[0], default=1.0)
                     end_kurs = self._safe_float(close_s.iloc[-1], default=base_kurs)
-                    perf = round(((end_kurs - base_kurs) / base_kurs) * 100, 2) if base_kurs > 0 else 0
+                    perf = (
+                        round(((end_kurs - base_kurs) / base_kurs) * 100, 2)
+                        if base_kurs > 0
+                        else 0
+                    )
+                    perf = self._safe_float(perf, 0.0)
 
                     smi_val, adx_val, above_ema = self._parse_meta_data(item)
 
                     performance_results.append({
                         "ticker": ticker,
                         "company_name": company_name,
+                        "signal_typ": None,
                         "smi": smi_val,
                         "adx": adx_val,
                         "end_performance_5_tage": perf,
@@ -385,12 +397,14 @@ class NinoSignalsAssistant:
             if not performance_results:
                 return
 
-            performance_results.sort(key=lambda x: self._safe_float(x.get("end_performance_5_tage", 0)), reverse=True)
+            performance_results.sort(
+                key=lambda x: self._safe_float(x.get("end_performance_5_tage", 0)), reverse=True
+            )
             top_5 = performance_results[:5]
 
             for entry in top_5:
                 ticker = entry.get("ticker")
-                perf = entry.get("end_performance_5_tage")
+                perf = self._safe_float(entry.get("end_performance_5_tage"), 0.0)
 
                 payload = {
                     "datum": today_iso,
@@ -413,9 +427,12 @@ class NinoSignalsAssistant:
                     "end_performance_5_tage": perf,
                     "quelle": "top_flop_watchlist",
                 }
-                self.supabase.table(self.table_aris_arbeitsspeicher).insert(arbeitsspeicher_entry).execute()
+                self.supabase.table(self.table_aris_arbeitsspeicher).insert(
+                    arbeitsspeicher_entry
+                ).execute()
 
             print("✅ Top 5 Watchlist verarbeitet und gespeichert.")
+
         except Exception as e:
             print(f"❌ Fehler in process_top_flop_list: {e}")
 
