@@ -472,16 +472,14 @@ def render_ui(supabase_client=None, *args, **kwargs):
         st.error(f"Fehler beim Laden des Arbeitsspeichers: {e}")
 
 
-# --- DIREKTAUSFÜHRUNG FÜR GITHUB ACTIONS ---
 if __name__ == "__main__":
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_KEY")
-
-    print(f"DEBUG URL Type: {type(url)}, Value: {repr(url)}")
-    print(f"DEBUG KEY Vorhanden: {bool(key)}, Länge: {len(key) if key else 0}")
-
-    if not url or not key:
-        print("❌ Fehler: SUPABASE_URL oder SUPABASE_KEY Umgebungsvariablen fehlen.")
+    print("🚀 Starte Nino Routine (GitHub Action)...")
+    try:
+        supabase_client = get_db_client()
+        run_nino(supabase_client)
+        print("🏁 Nino Routine erfolgreich beendet.")
+    except Exception as e:
+        print(f"❌ Fehler beim Starten der Nino Routine: {e}")
         exit(1)
 
     print("🚀 Starte Nino Routine (GitHub Action)...")
