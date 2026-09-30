@@ -156,7 +156,6 @@ class NinoSignalsAssistant:
 
             return {
                 "base_preis": base_preis,
-                "max_kurs_5_tage": high_5d,
                 "max_performance_5_tage": max_perf_5d,
                 "candle_time_max_5_tage": candle_time_max,
                 "end_performance_5_tage": end_perf_5d,
@@ -167,9 +166,6 @@ class NinoSignalsAssistant:
 
     def process_signals_to_journal(self):
         print("Nino verarbeitet aktive Signale (signals -> signals_journal -> aris_arbeitsspeicher)...")
-
-        print("DEBUG TABELLE ACTIVE SIGNALS:", repr(self.table_active_signals))
-        print("DEBUG SUPABASE CLIENT:", repr(self.supabase))
 
         try:
             today = datetime.now().date()
@@ -225,7 +221,6 @@ class NinoSignalsAssistant:
                         "adx": adx_val,
                         "is_favorite": is_fav,
                         "above_ema20": above_ema,
-                        "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
                         "max_performance_5_tage": perf_data["max_performance_5_tage"],
                         "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
                         "end_performance_5_tage": perf_data["end_performance_5_tage"],
@@ -241,7 +236,6 @@ class NinoSignalsAssistant:
                         "adx": adx_val,
                         "is_favorite": is_fav,
                         "above_ema20": above_ema,
-                        "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
                         "max_performance_5_tage": perf_data["max_performance_5_tage"],
                         "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
                         "end_performance_5_tage": perf_data["end_performance_5_tage"],
@@ -249,11 +243,12 @@ class NinoSignalsAssistant:
                     }
                     self.supabase.table(self.table_aris_arbeitsspeicher).insert(arbeitsspeicher_entry).execute()
 
+                    # Signal aus 'signals' löschen, da es >= 5 Tage alt ist und erfolgreich verarbeitet wurde
                     sig_id = sig.get("id")
                     if sig_id:
                         self.supabase.table(self.table_active_signals).delete().eq("id", sig_id).execute()
 
-                    print(f"✅ Signal für {ticker_upper} erfolgreich ausgewertet und übergeben.")
+                    print(f"✅ Signal für {ticker_upper} erfolgreich ausgewertet, übergeben und aus Active Signals gelöscht.")
                 except Exception as inner_e:
                     print(f"❌ Fehler bei Signal {sig.get('ticker')}: {inner_e}")
                     continue
@@ -296,7 +291,6 @@ class NinoSignalsAssistant:
                     updated_joris_data = {
                         "status": True,
                         "company_name": company_name,
-                        "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
                         "max_performance_5_tage": perf_data["max_performance_5_tage"],
                         "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
                         "end_performance_5_tage": perf_data["end_performance_5_tage"],
@@ -314,7 +308,6 @@ class NinoSignalsAssistant:
                         "smi": smi_val,
                         "adx": adx_val,
                         "above_ema20": above_ema,
-                        "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
                         "max_performance_5_tage": perf_data["max_performance_5_tage"],
                         "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
                         "end_performance_5_tage": perf_data["end_performance_5_tage"],
@@ -481,8 +474,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"❌ Fehler beim Starten der Nino Routine: {e}")
         exit(1)
-
-    print("🚀 Starte Nino Routine (GitHub Action)...")
-    client: Client = create_client(url, key)
-    run_nino(client)
-    print("🏁 Nino Routine erfolgreich beendet.")
