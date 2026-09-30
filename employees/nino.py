@@ -104,7 +104,7 @@ class NinoSignalsAssistant:
         return smi_val, adx_val, above_ema
 
     def _fetch_5d_performance(self, ticker, sig_date, base_preis):
-        """Zieht über yfinance ausschließlich die Kursdaten und berechnet die Performance."""
+        """Zieht über yfinance ausschließlich die Kursdaten und berechnet die Performance (ohne absolute Kurs-Speicherung)."""
         clean_ticker = self._clean_ticker_for_yf(ticker)
         try:
             end_date_fetch = sig_date + timedelta(days=20)
@@ -173,8 +173,6 @@ class NinoSignalsAssistant:
             )
 
             return {
-                "base_preis": base_preis,
-                "max_kurs_5_tage": high_5d,
                 "max_performance_5_tage": max_perf_5d,
                 "candle_time_max_5_tage": candle_time_max,
                 "end_performance_5_tage": end_perf_5d,
@@ -248,6 +246,7 @@ class NinoSignalsAssistant:
                     if not perf_data:
                         continue
 
+                    # signals_journal (ohne absolute Kurswerte)
                     journal_entry = {
                         "ticker": ticker_upper,
                         "company_name": company_name,
@@ -258,7 +257,6 @@ class NinoSignalsAssistant:
                         "adx": adx_val,
                         "is_favorite": is_fav,
                         "above_ema20": above_ema,
-                        "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
                         "max_performance_5_tage": perf_data["max_performance_5_tage"],
                         "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
                         "end_performance_5_tage": perf_data["end_performance_5_tage"],
@@ -268,6 +266,7 @@ class NinoSignalsAssistant:
                         journal_entry
                     ).execute()
 
+                    # aris_arbeitsspeicher (enthält Max Performance & Candle Time sowie End-Performance)
                     arbeitsspeicher_entry = {
                         "ticker": ticker_upper,
                         "company_name": company_name,
@@ -277,7 +276,6 @@ class NinoSignalsAssistant:
                         "adx": adx_val,
                         "is_favorite": is_fav,
                         "above_ema20": above_ema,
-                        "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
                         "max_performance_5_tage": perf_data["max_performance_5_tage"],
                         "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
                         "end_performance_5_tage": perf_data["end_performance_5_tage"],
@@ -360,10 +358,10 @@ class NinoSignalsAssistant:
                     )
                     smi_val, adx_val, above_ema = self._parse_meta_data(item)
 
+                    # joris_journal (ohne absolute Kurswerte)
                     updated_joris_data = {
                         "status": True,
                         "company_name": company_name,
-                        "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
                         "max_performance_5_tage": perf_data["max_performance_5_tage"],
                         "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
                         "end_performance_5_tage": perf_data["end_performance_5_tage"],
@@ -375,6 +373,7 @@ class NinoSignalsAssistant:
                             updated_joris_data
                         ).eq("id", item_id).execute()
 
+                    # aris_arbeitsspeicher (ohne absolute Kurswerte)
                     arbeitsspeicher_entry = {
                         "ticker": ticker_upper,
                         "company_name": company_name,
@@ -383,7 +382,6 @@ class NinoSignalsAssistant:
                         "smi": smi_val,
                         "adx": adx_val,
                         "above_ema20": above_ema,
-                        "max_kurs_5_tage": perf_data["max_kurs_5_tage"],
                         "max_performance_5_tage": perf_data["max_performance_5_tage"],
                         "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
                         "end_performance_5_tage": perf_data["end_performance_5_tage"],
