@@ -6,65 +6,66 @@ import streamlit as st
 
 class ArisAgent:
 
-    def __init__(self, supabase_client):
+def __init__(self, supabase_client, api_key: str = None):
         self.supabase = supabase_client
         self.name = "Aris"
         self.model_name = "openai/gpt-oss-120b"
         self.description = "Performance Manager"
+        # Hier wird der Key sofort beim Initialisieren aufgelöst und gespeichert:
+        self.api_key, self.provider = self._resolve_api_key(api_key)
 
     def _resolve_api_key(self, passed_key: str = None) -> tuple[str, str]:
         """Ermittelt den Key und gibt ein Tupel aus (api_key, provider) zurück."""
-        # 1. Übergebener Key
         if passed_key and isinstance(passed_key, str) and passed_key.strip():
             k = passed_key.strip()
             provider = "groq" if k.startswith("gsk") else "openrouter"
             return k, provider
 
-        # 2. Umgebungsvariablen prüfen
-        for env_name in ["GROQ_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"]:
+        possible_keys = ["GROQ_API_KEY", "groq_api_key", "GROQ_KEY", "groq_key", "OPENROUTER_API_KEY", "openrouter_api_key"]
+
+        # 1. Umgebungsvariablen prüfen
+        for env_name in possible_keys:
             val = os.getenv(env_name)
             if val and isinstance(val, str) and val.strip():
                 k = val.strip()
-                provider = "groq" if "GROQ" in env_name or k.startswith("gsk") else "openrouter"
+                provider = "groq" if "groq" in env_name.lower() or k.startswith("gsk") else "openrouter"
                 return k, provider
 
-        # 3. Streamlit Secrets prüfen
+        # 2. Streamlit Secrets prüfen (flexible Suche wie im alten Code)
         try:
-            if hasattr(st, "secrets"):
-                if "GROQ_API_KEY" in st.secrets:
-                    k = str(st.secrets["GROQ_API_KEY"]).strip()
-                    if k:
-                        return k, "groq"
-                if "OPENROUTER_API_KEY" in st.secrets:
-                    k = str(st.secrets["OPENROUTER_API_KEY"]).strip()
-                    if k:
-                        return k, "openrouter"
-                
+            if hasattr(st, "secrets") and st.secrets:
+                # Direkte Keys in st.secrets
+                for key_name in possible_keys:
+                    if key_name in st.secrets and st.secrets[key_name]:
+                        k = str(st.secrets[key_name]).strip()
+                        if k:
+                            provider = "groq" if "groq" in key_name.lower() or k.startswith("gsk") else "openrouter"
+                            return k, provider
+
+                # Sektionen in st.secrets durchsuchen
                 for section in st.secrets:
                     try:
-                        sec_content = st.secrets[section]
-                        if isinstance(sec_content, dict):
-                            for k_name in ["groq_api_key", "GROQ_API_KEY"]:
-                                if k_name in sec_content and sec_content[k_name]:
-                                    return str(sec_content[k_name]).strip(), "groq"
-                            for k_name in ["openrouter_api_key", "OPENROUTER_API_KEY", "api_key", "key"]:
-                                if k_name in sec_content and sec_content[k_name]:
-                                    val_str = str(sec_content[k_name]).strip()
-                                    provider = "groq" if val_str.startswith("gsk") else "openrouter"
-                                    return val_str, provider
+                        sec_val = st.secrets[section]
+                        if isinstance(sec_val, dict):
+                            for sub_key in possible_keys + ["api_key", "key"]:
+                                if sub_key in sec_val and sec_val[sub_key]:
+                                    k = str(sec_val[sub_key]).strip()
+                                    if k:
+                                        provider = "groq" if "groq" in sub_key.lower() or k.startswith("gsk") else "openrouter"
+                                        return k, provider
                     except Exception:
                         continue
         except Exception:
             pass
-            
+
         return "", ""
 
     def run_analysis(self, api_key: str = None):
-        try:
-            active_key, provider = self._resolve_api_key(api_key)
-            if not active_key:
-                return False, "Kein API-Key gefunden! Bitte prüfe, ob GROQ_API_KEY in deinen Streamlit Secrets korrekt hinterlegt ist."
-
+        # Falls ein neuer Key übergeben wird, direkt auflösen, sonst den Instanz-Key nutzen
+        active_key, provider = self._resolve_api_key(api_key) if api_key else (self.api_key, self.provider)
+        if not active_key:
+            return False, "Kein API-Key gefunden! Bitte prüfe, ob GROQ_API_KEY in deinen Streamlit Secrets korrekt hinterlegt ist."
+        
             # 1. Daten aus dem Arbeitsspeicher abrufen
             memory_res = (
                 self.supabase.table("aris_arbeitsspeicher").select("*").execute()
