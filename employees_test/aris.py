@@ -6,7 +6,7 @@ import streamlit as st
 
 class ArisAgent:
 
-def __init__(self, supabase_client, api_key: str = None):
+    def __init__(self, supabase_client, api_key: str = None):
         self.supabase = supabase_client
         self.name = "Aris"
         self.model_name = "openai/gpt-oss-120b"
@@ -66,6 +66,7 @@ def __init__(self, supabase_client, api_key: str = None):
         if not active_key:
             return False, "Kein API-Key gefunden! Bitte prüfe, ob GROQ_API_KEY in deinen Streamlit Secrets korrekt hinterlegt ist."
         
+        try:
             # 1. Daten aus dem Arbeitsspeicher abrufen
             memory_res = (
                 self.supabase.table("aris_arbeitsspeicher").select("*").execute()
