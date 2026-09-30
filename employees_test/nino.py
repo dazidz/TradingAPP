@@ -155,8 +155,8 @@ class NinoSignalsAssistant:
                 if pd.notnull(max_idx):
                     candle_time_max = pd.to_datetime(max_idx).isoformat()
 
-            max_perf_5d = round(((high_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0.0
-            end_perf_5d = round(((close_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0.0
+            max_perf_5d = round(((high_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0
+            end_perf_5d = round(((close_5d - base_preis) / base_preis) * 100, 2) if base_preis > 0 else 0
 
             return {
                 "base_preis": base_preis,
@@ -386,8 +386,8 @@ class NinoSignalsAssistant:
                         "ticker": ticker,
                         "company_name": company_name,
                         "signal_typ": None,
-                        "smi": smi_val,
-                        "adx": adx_val,
+                        "smi": self._safe_float(smi_val, None) if smi_val is not None else None,
+                        "adx": self._safe_float(adx_val, None) if adx_val is not None else None,
                         "end_performance_5_tage": perf,
                         "candle_time": datetime.now().isoformat(),
                     })
