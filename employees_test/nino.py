@@ -4,7 +4,7 @@ import json
 import pandas as pd
 import yfinance as yf
 import streamlit as st
-from supabase import create_client, Client
+from db import get_db_client
 
 AGENT_TITLE = "Nino"
 
