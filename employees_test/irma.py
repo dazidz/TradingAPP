@@ -15,7 +15,7 @@ class IrmaSectorAssistant:
         self.supabase = supabase_client
 
     def get_top_sector_quotas(self) -> pd.DataFrame:
-        """Ermittelt die Top 5 Sektoren nach prozentualem Signal-Anteil."""
+        """Ermittelt die Top 10 Sektoren nach prozentualem Signal-Anteil."""
         if not self.supabase:
             return pd.DataFrame()
 
@@ -59,6 +59,6 @@ class IrmaSectorAssistant:
         if df.empty:
             return df
 
-        # Absteigend nach Quote sortieren und Top 5 nehmen
-        df = df.sort_values(by="signal_quota_percent", ascending=False).head(5)
+        # Absteigend nach Quote sortieren und Top 10 nehmen
+        df = df.sort_values(by="signal_quota_percent", ascending=False).head(10)
         return df
