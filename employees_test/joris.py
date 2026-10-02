@@ -137,6 +137,47 @@ class JorisPortfolioManager:
             favorites_res = self.supabase.table("favorites").select("*").execute()
             favorites_data_text = str(favorites_res.data) if favorites_res.data else "Keine Favoriten."
 
+            # Irma Sektor-Quoten laden (nur bei swing und high_risk)
+            irma_sectors_text = ""
+            if depot_focus.lower() in ["swing", "high_risk"]:
+                try:
+                    wl_res = self.supabase.table("watchlist").select("ticker, sector").execute()
+                    wl_data = wl_res.data if wl_res.data else []
+                    sector_stats = {}
+                    for item in wl_data:
+                        sec = item.get("sector") or "Unbekannt"
+                        tick = item.get("ticker")
+                        if not tick:
+                            continue
+                        if sec not in sector_stats:
+                            sector_stats[sec] = set()
+                        sector_stats[sec].add(tick)
+
+                    sig_res = self.supabase.table("signals").select("ticker").execute()
+                    sig_data = sig_res.data if sig_res.data else []
+                    active_signals = {item.get("ticker") for item in sig_data if item.get("ticker")}
+
+                    rows = []
+                    for sec, tickers in sector_stats.items():
+                        total = len(tickers)
+                        if total == 0:
+                            continue
+                        signaled = len(tickers.intersection(active_signals))
+                        quota = (signaled / total) * 100
+                        rows.append({
+                            "sector": sec,
+                            "total_tickers": total,
+                            "signal_tickers": signaled,
+                            "signal_quota_percent": round(quota, 2)
+                        })
+
+                    df_sec = pd.DataFrame(rows)
+                    if not df_sec.empty:
+                        df_sec = df_sec.sort_values(by="signal_quota_percent", ascending=False).head(10)
+                        irma_sectors_text = f"\n            E) IRMA SEKTOR-QUOTEN (Top 10):\n{df_sec.to_string(index=False)}"
+                except Exception:
+                    pass
+
             # 4. Prompt mit den reinen Supabase-Kriterien zusammenbauen
             prompt_content = f"""
             {core_principles}
@@ -153,7 +194,7 @@ class JorisPortfolioManager:
             A) DEPOT ({table_name}): {depot_data_text}
             B) SCREENER (Signale): {screener_data_text}
             C) FAVORITEN: {favorites_data_text}
-            D) TEAM-BULLET-POINTS: {reports_text}
+            D) TEAM-BULLET-POINTS: {reports_text}{irma_sectors_text}
             
             AUFGABE:
             Erstelle eine kompromisslose, datenbasierte Portfolio-Synthese, die sich buchstabengetreu an deine Prinzipien und die obigen Mandatskriterien hält.
@@ -252,7 +293,7 @@ class JorisPortfolioManager:
                 st.code(active_rules, language="text")
             else:
                 st.error(f"Fehler beim Laden der DNA aus Supabase: {error_message}")
-                st.warning("Bitte stelle sicher, dass die Tabelle `joris_dna` existiert und die Einträge für 'core' sowie das gewählte Mandat ('{depot_focus}') vorhanden sind.")
+                st.warning(f"Bitte stelle sicher, dass die Tabelle `joris_dna` existiert und die Einträge für 'core' sowie das gewählte Mandat ('{depot_focus}') vorhanden sind.")
 
         if dna_loaded_successfully:
             if st.button(f"Portfolio-Synthese starten ({self.name})", key=f"btn_run_{self.name}"):
