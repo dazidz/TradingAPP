@@ -32,14 +32,19 @@ supabase = create_client(URL, KEY)
 irma = IrmaSectorAssistant(supabase)
 sector_df = irma.get_top_sector_quotas()
 
-st.markdown("### 🏆 Irma: Top 5 Sektoren nach Signal-Quote")
+st.markdown("### 🏆 Irma: Top 10 Sektoren nach Signal-Quote")
 if not sector_df.empty:
     chart = (
         alt.Chart(sector_df)
         .mark_bar(color="#10b981")
         .encode(
             x=alt.X("signal_quota_percent:Q", title="Signal-Quote (%)", axis=alt.Axis(format=".1f")),
-            y=alt.Y("sector:N", sort="-x", title="Sektor"),
+            y=alt.Y(
+                "sector:N", 
+                sort="-x", 
+                title="Sektor",
+                axis=alt.Axis(values=sector_df['sector'].tolist())  # Erzwingt alle Beschriftungen
+            ),
             tooltip=[
                 "sector",
                 alt.Tooltip("signal_quota_percent:Q", format=".1f", title="Quote (%)"),
@@ -47,7 +52,7 @@ if not sector_df.empty:
                 alt.Tooltip("total_tickers:Q", title="Gesamt Ticker im Sektor"),
             ],
         )
-        .properties(height=200)
+        .properties(height=420)  # Höhe angepasst, damit 10 Einträge sauber Platz haben
     )
     st.altair_chart(chart, use_container_width=True)
 else:
