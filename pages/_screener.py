@@ -5,6 +5,9 @@ import streamlit as st
 from supabase import create_client
 import yfinance as yf
 
+# Irma (Sektor-Assistenz) importieren
+from employees_test.irma import IrmaSectorAssistant
+
 # Passwort-Schutz
 if "password_correct" not in st.session_state or not st.session_state.password_correct:
     st.error("Bitte zuerst auf der Startseite anmelden!")
@@ -24,6 +27,33 @@ with st.sidebar:
 URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(URL, KEY)
+
+# Irma initialisieren und Top-Sektoren direkt oben anzeigen
+irma = IrmaSectorAssistant(supabase)
+sector_df = irma.get_top_sector_quotas()
+
+st.markdown("### 🏆 Irma: Top 5 Sektoren nach Signal-Quote")
+if not sector_df.empty:
+    chart = (
+        alt.Chart(sector_df)
+        .mark_bar(color="#10b981")
+        .encode(
+            x=alt.X("signal_quota_percent:Q", title="Signal-Quote (%)", axis=alt.Axis(format=".1f")),
+            y=alt.Y("sector:N", sort="-x", title="Sektor"),
+            tooltip=[
+                "sector",
+                alt.Tooltip("signal_quota_percent:Q", format=".1f", title="Quote (%)"),
+                alt.Tooltip("signal_tickers:Q", title="Ticker mit Signal"),
+                alt.Tooltip("total_tickers:Q", title="Gesamt Ticker im Sektor"),
+            ],
+        )
+        .properties(height=200)
+    )
+    st.altair_chart(chart, use_container_width=True)
+else:
+    st.info("Irma konnte keine Sektor-Daten berechnen.")
+
+st.markdown("---")
 
 
 # Caching für Daten & Exchange-Informationen
@@ -143,11 +173,6 @@ try:
         ) * 100
         df["EMA20_Dist_%"] = df["ticker"].map(ema_stats)
 
-        # Globale Sektor-Anteile für das Diagramm
-        total_count_global = len(df)
-        sector_counts_global = df.groupby("sector").size()
-        sector_share_global = (sector_counts_global / total_count_global) * 100
-
         # Tabs für die einzelnen Kategorien inklusive Gesamtliste
         (
             tab_favs,
@@ -261,69 +286,6 @@ try:
 
             existing_cols = [c for c in cols if c in d.columns]
 
-            # --- DIAGRAMM (Kombinierter Score) ---
-            if "sector" in d.columns and "Performance (%)" in d.columns:
-                chart_data = d[
-                    (d["Performance (%)"] < 3.0) & (d["Performance (%)"].notnull())
-                ]
-                if not chart_data.empty and "sector" in chart_data.columns:
-                    total_subset_count = len(chart_data)
-                    sector_counts_subset = chart_data.groupby("sector").size()
-
-                    sector_share_subset = (
-                        sector_counts_subset / total_subset_count
-                    ) * 100
-
-                    sector_df = pd.DataFrame({
-                        "Anteil_Signale": sector_share_subset,
-                        "Anteil_Watchlist": sector_share_global,
-                        "Treffer": sector_counts_subset,
-                        "Gesamt_WL": sector_counts_global,
-                    }).dropna()
-
-                    sector_df["Score"] = sector_df["Treffer"] * (
-                        (sector_df["Anteil_Signale"] + 1)
-                        / (sector_df["Anteil_Watchlist"] + 1)
-                    )
-
-                    sector_df = (
-                        sector_df.reset_index()
-                        .sort_values(by="Score", ascending=False)
-                        .head(10)
-                    )
-
-                    if not sector_df.empty:
-                        c = (
-                            alt.Chart(sector_df)
-                            .mark_bar(color="#3b82f6")
-                            .encode(
-                                x=alt.X(
-                                    "Score:Q",
-                                    title="Sektor-Score (Treffer & Gewichtung kombiniert)",
-                                    axis=alt.Axis(format=".1f"),
-                                ),
-                                y=alt.Y("sector:N", sort="-x", title="Sektor"),
-                                tooltip=[
-                                    "sector",
-                                    alt.Tooltip("Score:Q", format=".2f", title="Score"),
-                                    alt.Tooltip(
-                                        "Anteil_Signale:Q",
-                                        format=".1f",
-                                        title="Anteil Signale (%)",
-                                    ),
-                                    alt.Tooltip(
-                                        "Anteil_Watchlist:Q",
-                                        format=".1f",
-                                        title="Anteil Watchlist (%)",
-                                    ),
-                                    "Treffer",
-                                    "Gesamt_WL",
-                                ],
-                            )
-                            .properties(height=250)
-                        )
-                        st.altair_chart(c, use_container_width=True)
-
             if (
                 "Performance (%)" in d.columns
                 and not d["Performance (%)"].dropna().empty
@@ -428,7 +390,7 @@ try:
                         " ath, distance_from_ath, strategy_kategorie"
                     )
                     .lte("distance_from_ath", -20.0)
-                    .neq("strategy_kategorie", "risk")  # <--- Risk-Werte ausgeschlossen
+                    .neq("strategy_kategorie", "risk")
                     .order("distance_from_ath", desc=False)
                     .execute()
                 )
