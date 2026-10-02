@@ -210,8 +210,8 @@ def scan_ticker(ticker_info):
   cUp = (smiV.shift(1) < sigN.shift(1)) & (smiV > sigN)
   regD = (low < lPL) & (smiV > lSL) & (smiV < -40)
   hidD = (low > lPL) & (smiV < lSL) & (lSL < -20)
-  is_elite = cUp & (regD | hidD) & (adxV > 18)
-  is_buy = (~is_elite) & cUp & (smiV < -35) & (adxV > 18)
+  is_elite = cUp & (regD | hidD) & (adxV > 27)
+  is_buy = (~is_elite) & cUp & (smiV < -36) & (adxV > 27)
 
   # Signal-Suche
   signal_found = False
