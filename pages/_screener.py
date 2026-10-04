@@ -329,45 +329,41 @@ try:
         with tab_favs:
             show_table(df[df["is_favorite"] == True], category_type="favorites")
 
-        # Tab 2: EMA20 + ELITE (dist >= 0 und elite)
+        # Tab 2: EMA20 + ELITE (dist >= 0 und elite) - ohne restriktiven Status-Filter
         with tab_ema20_elite:
             show_table(
                 df[
-                    (df.get("status") == "signal")
-                    & (df["EMA20_Dist_%"].fillna(-1) >= 0)
+                    (df["EMA20_Dist_%"].fillna(-1) >= 0)
                     & (df["signal_type"].apply(is_elite))
                 ],
                 category_type="ema20_elite",
             )
 
-        # Tab 3: EMA20 (dist >= 0 und kein elite)
+        # Tab 3: EMA20 (dist >= 0 und kein elite) - ohne restriktiven Status-Filter
         with tab_ema20:
             show_table(
                 df[
-                    (df.get("status") == "signal")
-                    & (df["EMA20_Dist_%"].fillna(-1) >= 0)
+                    (df["EMA20_Dist_%"].fillna(-1) >= 0)
                     & (~df["signal_type"].apply(is_elite))
                 ],
                 category_type="ema20",
             )
 
-        # Tab 4: unter EMA20 + ELITE (dist < 0 und elite)
+        # Tab 4: unter EMA20 + ELITE (dist < 0 und elite) - ohne restriktiven Status-Filter
         with tab_unter_elite:
             show_table(
                 df[
-                    (df.get("status") == "signal")
-                    & (df["EMA20_Dist_%"].fillna(0) < 0)
+                    (df["EMA20_Dist_%"].fillna(0) < 0)
                     & (df["signal_type"].apply(is_elite))
                 ],
                 category_type="unter_elite",
             )
 
-        # Tab 5: unter EMA20 (dist < 0 und kein elite)
+        # Tab 5: unter EMA20 (dist < 0 und kein elite) - ohne restriktiven Status-Filter
         with tab_unter_ema20:
             show_table(
                 df[
-                    (df.get("status") == "signal")
-                    & (df["EMA20_Dist_%"].fillna(0) < 0)
+                    (df["EMA20_Dist_%"].fillna(0) < 0)
                     & (~df["signal_type"].apply(is_elite))
                 ],
                 category_type="unter_ema20",
