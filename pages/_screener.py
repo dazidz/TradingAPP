@@ -43,7 +43,7 @@ if not sector_df.empty:
                 "sector:N", 
                 sort="-x", 
                 title="Sektor",
-                axis=alt.Axis(values=sector_df['sector'].tolist())  # Erzwingt alle Beschriftungen
+                axis=alt.Axis(values=sector_df['sector'].tolist())
             ),
             tooltip=[
                 "sector",
@@ -52,7 +52,7 @@ if not sector_df.empty:
                 alt.Tooltip("total_tickers:Q", title="Gesamt Ticker im Sektor"),
             ],
         )
-        .properties(height=420)  # Höhe angepasst, damit 10 Einträge sauber Platz haben
+        .properties(height=420)
     )
     st.altair_chart(chart, use_container_width=True)
 else:
@@ -205,12 +205,13 @@ try:
 
             d["Action"] = False
 
-            # Präfix-Logik je nach Kategorie/Zustand
+            # Präfix-Logik mit striktem Fallback bei fehlendem EMA20 (NaN -> wird wie unter EMA20 behandelt)
             def get_company_prefix(row):
                 sig = str(row.get("signal_type", "")).strip().lower()
-                dist = row.get("EMA20_Dist_%", 0)
-                if pd.isna(dist):
-                    dist = 0
+                dist = row.get("EMA20_Dist_%", None)
+                
+                # Wenn dist NaN/None ist, gilt EMA20 strikt als FALSE (< 0)
+                is_above_ema = False if pd.isna(dist) else (dist >= 0)
                 is_el = "elite" in sig
 
                 if category_type == "favorites":
@@ -227,13 +228,13 @@ try:
                     if is_el:
                         return (
                             f"🟣 {row.get('company_name', '')}"
-                            if dist >= 0
+                            if is_above_ema
                             else f"🟡 {row.get('company_name', '')}"
                         )
                     else:
                         return (
                             f"🟢 {row.get('company_name', '')}"
-                            if dist >= 0
+                            if is_above_ema
                             else f"🔴 {row.get('company_name', '')}"
                         )
                 else:
@@ -329,41 +330,43 @@ try:
         with tab_favs:
             show_table(df[df["is_favorite"] == True], category_type="favorites")
 
-        # Tab 2: EMA20 + ELITE (dist >= 0 und elite) - ohne restriktiven Status-Filter
+        # Tab 2: EMA20 + ELITE (dist >= 0 und elite) -> NaN wird hier ausgeschlossen
         with tab_ema20_elite:
             show_table(
                 df[
-                    (df["EMA20_Dist_%"].fillna(-1) >= 0)
+                    (df["EMA20_Dist_%"].notna())
+                    & (df["EMA20_Dist_%"] >= 0)
                     & (df["signal_type"].apply(is_elite))
                 ],
                 category_type="ema20_elite",
             )
 
-        # Tab 3: EMA20 (dist >= 0 und kein elite) - ohne restriktiven Status-Filter
+        # Tab 3: EMA20 (dist >= 0 und kein elite) -> NaN wird hier ausgeschlossen
         with tab_ema20:
             show_table(
                 df[
-                    (df["EMA20_Dist_%"].fillna(-1) >= 0)
+                    (df["EMA20_Dist_%"].notna())
+                    & (df["EMA20_Dist_%"] >= 0)
                     & (~df["signal_type"].apply(is_elite))
                 ],
                 category_type="ema20",
             )
 
-        # Tab 4: unter EMA20 + ELITE (dist < 0 und elite) - ohne restriktiven Status-Filter
+        # Tab 4: unter EMA20 + ELITE (entweder dist < 0 ODER dist ist NaN)
         with tab_unter_elite:
             show_table(
                 df[
-                    (df["EMA20_Dist_%"].fillna(0) < 0)
+                    (df["EMA20_Dist_%"].isna() | (df["EMA20_Dist_%"] < 0))
                     & (df["signal_type"].apply(is_elite))
                 ],
                 category_type="unter_elite",
             )
 
-        # Tab 5: unter EMA20 (dist < 0 und kein elite) - ohne restriktiven Status-Filter
+        # Tab 5: unter EMA20 (entweder dist < 0 ODER dist ist NaN)
         with tab_unter_ema20:
             show_table(
                 df[
-                    (df["EMA20_Dist_%"].fillna(0) < 0)
+                    (df["EMA20_Dist_%"].isna() | (df["EMA20_Dist_%"] < 0))
                     & (~df["signal_type"].apply(is_elite))
                 ],
                 category_type="unter_ema20",
