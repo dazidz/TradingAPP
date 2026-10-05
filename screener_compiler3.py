@@ -35,38 +35,46 @@ def save_to_supabase(
     strategy_type,
 ):
   try:
+    # 1. Wir prüfen im 5-Tage-Fenster, ob EXAKT DIESE Kerze (candle_time) 
+    # für diesen Ticker schon existiert. 
+    # So erlaubst du Signale an Tag 1, Tag 2, Tag 3 (bullische Sequenz),
+    # verhinderst aber absolut identische Duplikate auf dieselbe Kerze.
     cutoff_time = (
-        datetime.datetime.now(pytz.UTC) - datetime.timedelta(hours=48)
+        datetime.datetime.now(pytz.UTC) - datetime.timedelta(days=5)
     ).isoformat()
+    
+    candle_time_str = candle_time.isoformat()
+
     check = (
         supabase.table("signals")
         .select("id")
         .eq("ticker", ticker)
-        .eq("signal_type", signal_type)
+        .eq("candle_time", candle_time_str) # Prüft exakt auf den Kerzenzeitpunkt!
+        .eq("signal_type", signal_type)     # Optional: Verhindert Mehrfach-Eintrag desselben Typs auf dieselbe Kerze
         .gte("created_at", cutoff_time)
         .execute()
     )
 
-    if len(check.data) > 0:
+    if check.data and len(check.data) > 0:
+      print(f"⏳ Ticker {ticker} hat für die Kerze {candle_time_str} ({signal_type}) bereits ein Signal. Überspringe Duplikat.")
       return
 
     data = {
         "ticker": ticker,
         "company_name": company_name,
         "signal_type": signal_type,
-        "candle_time": candle_time.isoformat(),
+        "candle_time": candle_time_str,
         "sector": sector,
         "gettex_ticker": gettex_ticker,
         "entry_price": float(entry_price),
         "created_at": datetime.datetime.now(pytz.UTC).isoformat(),
         "meta_data": meta_data,
-        "strategy_type": strategy_type
-        or "Swing",  # Überträgt den Typ aus der Watchlist (Fallback: Swing)
+        "strategy_type": strategy_type or "Swing",
     }
 
     response = supabase.table("signals").insert(data).execute()
     print(
-        f"✅ {ticker} -> {signal_type} [{strategy_type}] gespeichert (Einstieg:"
+        f"✅ {ticker} -> {signal_type} [{strategy_type}] gespeichert (Kerze: {candle_time_str}, Einstieg:"
         f" {entry_price:.2f})"
     )
 

@@ -210,8 +210,8 @@ def scan_ticker(ticker_info):
   cUp = (smiV.shift(1) < sigN.shift(1)) & (smiV > sigN)
   regD = (low < lPL) & (smiV > lSL) & (smiV < -40)
   hidD = (low > lPL) & (smiV < lSL) & (lSL < -20)
-  is_elite = cUp & (regD | hidD) & (adxV > 18)
-  is_buy = (~is_elite) & cUp & (smiV < -35) & (adxV > 18)
+  is_elite = cUp & (regD | hidD) & (adxV > 27)
+  is_buy = (~is_elite) & cUp & (smiV < -36) & (adxV > 27)
 
   # Signal-Suche
   signal_found = False
@@ -300,18 +300,6 @@ def scan_ticker(ticker_info):
 
 
 if __name__ == "__main__":
-  print("🧹 Räume alte Signale (> 5 Tage) in der aktiven Tabelle auf...")
-  try:
-    cutoff_5days = (
-        datetime.datetime.now(pytz.UTC) - datetime.timedelta(days=5)
-    ).isoformat()
-    supabase.table("signals").delete().lt(
-        "created_at", cutoff_5days
-    ).execute()
-    print("✅ Alte Signale erfolgreich bereinigt.")
-  except Exception as e:
-    print(f"❌ Fehler bei der Signal-Bereinigung: {e}")
-
   print("🚀 Starte Batch-Scan...")
   ticker_liste = get_ticker_list_with_names()
   for t_info in ticker_liste:
