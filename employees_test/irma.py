@@ -15,7 +15,7 @@ class IrmaSectorAssistant:
         self.supabase = supabase_client
 
     def get_top_sector_quotas(self) -> pd.DataFrame:
-        """Ermittelt die Top 10 Sektoren nach prozentualem Signal-Anteil."""
+        """Ermittelt die Top 10 Sektoren nach prozentualem Signal-Anteil (Sektoren mit nur 1 Ticker werden ausgeschlossen)."""
         if not self.supabase:
             return pd.DataFrame()
 
@@ -44,8 +44,10 @@ class IrmaSectorAssistant:
         rows = []
         for sec, tickers in sector_stats.items():
             total = len(tickers)
-            if total == 0:
+            # Ausschluss von Sektoren mit nur einem Ticker
+            if total <= 1:
                 continue
+            
             signaled = len(tickers.intersection(active_signals))
             quota = (signaled / total) * 100
             rows.append({
