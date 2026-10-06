@@ -6,7 +6,8 @@ class IrmaSectorAssistant:
     """Irma – Sektor-Assistenz
 
     Zuständig für Sektor-Rotation und Berechnung der Signal-Quoten 
-    (Anzahl Signale / Gesamt-Ticker im Sektor).
+    (Anzahl Signale / Gesamt-Ticker im Sektor), mit flexibler Filterung 
+    nach Signal-Typ (Alle, Elite, Kauf, etc.).
     """
 
     def __init__(self, supabase_client):
@@ -14,8 +15,17 @@ class IrmaSectorAssistant:
         self.role = "Sektor-Assistenz"
         self.supabase = supabase_client
 
-    def get_top_sector_quotas(self) -> pd.DataFrame:
-        """Ermittelt die Top 10 Sektoren nach prozentualem Signal-Anteil (Sektoren mit nur 1 Ticker werden ausgeschlossen)."""
+    def get_top_sector_quotas(self, signal_filter: str = "ALL") -> pd.DataFrame:
+        """Ermittelt die Top 10 Sektoren nach prozentualem Signal-Anteil.
+        
+        signal_filter kann sein:
+        - 'ALL': Alle Signale
+        - 'ELITE': Nur Elite-Signale
+        - 'ELITE_EMA': Nur Elite mit über EMA20
+        - 'KAUF': Nur Kauf-Signale
+        - 'KAUF_EMA': Nur Kauf mit über EMA20
+        (oder exakt der String, der in deiner DB als `signal_type` bzw. in `meta_data` steht)
+        """
         if not self.supabase:
             return pd.DataFrame()
 
@@ -33,23 +43,62 @@ class IrmaSectorAssistant:
                 continue
             if sec not in sector_stats:
                 sector_stats[sec] = set()
-            sector_stats[sec].add(tick)
+            sector_stats[sec].add(tick.upper())
 
-        # 2. Aktive Signale laden
-        sig_res = self.supabase.table("signals").select("ticker").execute()
+        # 2. Signale dynamisch je nach Filter laden
+        query = self.supabase.table("signals").select("ticker, signal_type, meta_data")
+        
+        sig_res = query.execute()
         sig_data = sig_res.data if sig_res.data else []
-        active_signals = {item.get("ticker") for item in sig_data if item.get("ticker")}
+        
+        filtered_signals = set()
+        for item in sig_data:
+            t = item.get("ticker")
+            if not t:
+                continue
+            
+            s_type = str(item.get("signal_type", "")).strip().lower()
+            meta = item.get("meta_data", {})
+            # Falls meta_data als String gespeichert ist, ggf. parsen oder direkt prüfen
+            if isinstance(meta, str):
+                import json
+                try:
+                    meta = json.loads(meta.replace("'", '"'))
+                except:
+                    meta = {}
+            
+            above_ema = meta.get("above_ema20", False)
+
+            # Filterlogik anwenden
+            match = False
+            if signal_filter == "ALL":
+                match = True
+            elif signal_filter == "ELITE" and "elite" in s_type:
+                match = True
+            elif signal_filter == "ELITE_EMA" and "elite" in s_type and above_ema:
+                match = True
+            elif signal_filter == "KAUF" and ("kauf" in s_type or "buy" in s_type):
+                match = True
+            elif signal_filter == "KAUF_EMA" and ("kauf" in s_type or "buy" in s_type) and above_ema:
+                match = True
+            elif s_type == signal_filter.lower():
+                # Fallback, falls ein exakter Signal-String übergeben wird
+                match = True
+
+            if match:
+                filtered_signals.add(t.upper())
 
         # 3. Quoten berechnen
         rows = []
         for sec, tickers in sector_stats.items():
             total = len(tickers)
-            # Ausschluss von Sektoren mit nur einem Ticker
+            # Sektoren mit nur einem Ticker ausschließen
             if total <= 1:
                 continue
             
-            signaled = len(tickers.intersection(active_signals))
-            quota = (signaled / total) * 100
+            signaled = len(tickers.intersection(filtered_signals))
+            quota = (signaled / total) * 100 if total > 0 else 0
+            
             rows.append({
                 "sector": sec,
                 "total_tickers": total,
