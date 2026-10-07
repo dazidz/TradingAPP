@@ -295,4 +295,39 @@ try:
                 ),
                 "candle_time": st.column_config.TextColumn("Candle Time"),
                 "sector": st.column_config.TextColumn("Sektor", disabled=True),
-                "signal_type": st.column_config.TextColumn
+                "signal_type": st.column_config.TextColumn(
+                    "Signal Type", disabled=True
+                ),
+                "gettex_ticker": st.column_config.TextColumn(
+                    "Gettex Ticker", disabled=True
+                ),
+                "Action": st.column_config.CheckboxColumn(
+                    "Entfernen" if category_type == "favorites" else "Favorit",
+                    default=False,
+                ),
+            }
+
+            existing_cols = [c for c in cols if c in d.columns]
+
+            if (
+                "Performance (%)" in d.columns
+                and not d["Performance (%)"].dropna().empty
+            ):
+                avg_perf = d["Performance (%)"].mean()
+                st.metric("Ø Performance der Liste", f"{avg_perf:.2f}%")
+
+            edited = st.data_editor(
+                d[existing_cols],
+                column_config=conf,
+                hide_index=True,
+                use_container_width=True,
+            )
+
+            changed_rows = edited[edited["Action"] == True]
+            if not changed_rows.empty:
+                for _, row in changed_rows.iterrows():
+                    orig_row_idx = edited[edited["Action"] == True].index[0]
+                    t_symbol = d.loc[orig_row_idx, "ticker"]
+
+                    if category_type == "favorites":
+                        supabase.table("favorites").delete().
