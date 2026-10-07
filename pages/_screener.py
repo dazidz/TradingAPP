@@ -28,11 +28,28 @@ URL = st.secrets["SUPABASE_URL"]
 KEY = st.secrets["SUPABASE_KEY"]
 supabase = create_client(URL, KEY)
 
-# Irma initialisieren und Top-Sektoren direkt oben anzeigen
+# Irma initialisieren
 irma = IrmaSectorAssistant(supabase)
-sector_df = irma.get_top_sector_quotas()
 
-st.markdown("### 🏆 Irma: Top 10 Sektoren nach Signal-Quote")
+# --- IRMA SEKTOR FILTER AUSWAHL ---
+col_filter1, col_filter2 = st.columns([2, 3])
+with col_filter1:
+    signal_choice = st.selectbox(
+        "🎯 Filter für Irma Sektor-Analyse:",
+        options=["ALL", "ELITE", "ELITE_EMA", "KAUF", "KAUF_EMA"],
+        format_func=lambda x: {
+            "ALL": "Alle Signale",
+            "ELITE": "Elite Signale",
+            "ELITE_EMA": "Elite + Über EMA20",
+            "KAUF": "Kauf Signale",
+            "KAUF_EMA": "Kauf + Über EMA20"
+        }[x]
+    )
+
+# Sektor-Daten entsprechend der Auswahl laden
+sector_df = irma.get_top_sector_quotas(signal_filter=signal_choice)
+
+st.markdown(f"### 🏆 Irma: Top 10 Sektoren nach Signal-Quote ({signal_choice})")
 if not sector_df.empty:
     chart = (
         alt.Chart(sector_df)
@@ -56,7 +73,7 @@ if not sector_df.empty:
     )
     st.altair_chart(chart, use_container_width=True)
 else:
-    st.info("Irma konnte keine Sektor-Daten berechnen.")
+    st.info("Irma konnte für diese Filterkombination keine Sektor-Daten berechnen.")
 
 st.markdown("---")
 
@@ -278,186 +295,4 @@ try:
                 ),
                 "candle_time": st.column_config.TextColumn("Candle Time"),
                 "sector": st.column_config.TextColumn("Sektor", disabled=True),
-                "signal_type": st.column_config.TextColumn(
-                    "Signal Type", disabled=True
-                ),
-                "gettex_ticker": st.column_config.TextColumn(
-                    "Gettex Ticker", disabled=True
-                ),
-                "Action": st.column_config.CheckboxColumn(
-                    "Entfernen" if category_type == "favorites" else "Favorit",
-                    default=False,
-                ),
-            }
-
-            existing_cols = [c for c in cols if c in d.columns]
-
-            if (
-                "Performance (%)" in d.columns
-                and not d["Performance (%)"].dropna().empty
-            ):
-                avg_perf = d["Performance (%)"].mean()
-                st.metric("Ø Performance der Liste", f"{avg_perf:.2f}%")
-
-            edited = st.data_editor(
-                d[existing_cols],
-                column_config=conf,
-                hide_index=True,
-                use_container_width=True,
-            )
-
-            changed_rows = edited[edited["Action"] == True]
-            if not changed_rows.empty:
-                for _, row in changed_rows.iterrows():
-                    orig_row_idx = edited[edited["Action"] == True].index[0]
-                    t_symbol = d.loc[orig_row_idx, "ticker"]
-
-                    if category_type == "favorites":
-                        supabase.table("favorites").delete().eq(
-                            "ticker", t_symbol
-                        ).execute()
-                    else:
-                        supabase.table("favorites").upsert(
-                            {"ticker": t_symbol}, on_conflict="ticker"
-                        ).execute()
-                st.rerun()
-
-        # Hilfsfunktion zur Prüfung auf Elite im Signaltyp
-        def is_elite(sig):
-            return "elite" in str(sig).lower()
-
-        # Tab 1: Favoriten
-        with tab_favs:
-            show_table(df[df["is_favorite"] == True], category_type="favorites")
-
-        # Tab 2: EMA20 + ELITE (dist >= 0 und elite) -> NaN wird hier ausgeschlossen
-        with tab_ema20_elite:
-            show_table(
-                df[
-                    (df["EMA20_Dist_%"].notna())
-                    & (df["EMA20_Dist_%"] >= 0)
-                    & (df["signal_type"].apply(is_elite))
-                ],
-                category_type="ema20_elite",
-            )
-
-        # Tab 3: EMA20 (dist >= 0 und kein elite) -> NaN wird hier ausgeschlossen
-        with tab_ema20:
-            show_table(
-                df[
-                    (df["EMA20_Dist_%"].notna())
-                    & (df["EMA20_Dist_%"] >= 0)
-                    & (~df["signal_type"].apply(is_elite))
-                ],
-                category_type="ema20",
-            )
-
-        # Tab 4: unter EMA20 + ELITE (entweder dist < 0 ODER dist ist NaN)
-        with tab_unter_elite:
-            show_table(
-                df[
-                    (df["EMA20_Dist_%"].isna() | (df["EMA20_Dist_%"] < 0))
-                    & (df["signal_type"].apply(is_elite))
-                ],
-                category_type="unter_elite",
-            )
-
-        # Tab 5: unter EMA20 (entweder dist < 0 ODER dist ist NaN)
-        with tab_unter_ema20:
-            show_table(
-                df[
-                    (df["EMA20_Dist_%"].isna() | (df["EMA20_Dist_%"] < 0))
-                    & (~df["signal_type"].apply(is_elite))
-                ],
-                category_type="unter_ema20",
-            )
-
-        # Tab 6: Gesamtliste
-        with tab_gesamt:
-            show_table(df, category_type="gesamt", is_total_view=True)
-
-        # --- TAB: DIP-SCANNER ---
-        with tab_dip:
-            st.subheader(
-                "📉 Dip-Scanner: Aktien mit $\\ge$ 20% Korrektur vom Allzeithoch"
-            )
-            st.markdown(
-                "Solide Werte aus deiner Watchlist (ohne Risk-Werte), die sich in einer tieferen"
-                " Konsolidierung befinden."
-            )
-
-            try:
-                dip_response = (
-                    supabase.table("watchlist")
-                    .select(
-                        "ticker, company_name, sector, gettex_ticker, current_price,"
-                        " ath, distance_from_ath, strategy_kategorie"
-                    )
-                    .lte("distance_from_ath", -20.0)
-                    .neq("strategy_kategorie", "risk")
-                    .order("distance_from_ath", desc=False)
-                    .execute()
-                )
-
-                dip_data = dip_response.data
-
-                if dip_data:
-                    df_dip = pd.DataFrame(dip_data)
-                    df_dip["Chart"] = df_dip["gettex_ticker"].apply(
-                        lambda x: (
-                            f"https://www.tradingview.com/chart/?symbol={x}" if x else ""
-                        )
-                    )
-
-                    dip_cols = [
-                        "company_name",
-                        "Chart",
-                        "sector",
-                        "current_price",
-                        "ath",
-                        "distance_from_ath",
-                        "gettex_ticker",
-                    ]
-                    existing_dip_cols = [c for c in dip_cols if c in df_dip.columns]
-
-                    dip_conf = {
-                        "company_name": st.column_config.TextColumn(
-                            "Firma", disabled=True
-                        ),
-                        "Chart": st.column_config.LinkColumn(
-                            "Link", display_text="📈 Öffnen"
-                        ),
-                        "sector": st.column_config.TextColumn("Sektor", disabled=True),
-                        "current_price": st.column_config.NumberColumn(
-                            "Aktueller Kurs", format="€%.2f"
-                        ),
-                        "ath": st.column_config.NumberColumn(
-                            "Allzeithoch (ATH)", format="€%.2f"
-                        ),
-                        "distance_from_ath": st.column_config.NumberColumn(
-                            "Abstand vom ATH", format="%.2f%%"
-                        ),
-                        "gettex_ticker": st.column_config.TextColumn(
-                            "Gettex Ticker", disabled=True
-                        ),
-                    }
-
-                    st.dataframe(
-                        df_dip[existing_dip_cols],
-                        column_config=dip_conf,
-                        hide_index=True,
-                        use_container_width=True,
-                    )
-                else:
-                    st.info(
-                        "Aktuell befinden sich keine Aktien aus der Watchlist im Bereich"
-                        " von -20% oder tiefer vom Allzeithoch."
-                    )
-            except Exception as e:
-                st.error(f"Fehler beim Laden der Dip-Daten: {e}")
-
-    else:
-        st.info("Keine Daten in der Supabase-Datenbank vorhanden.")
-
-except Exception as e:
-    st.error(f"Fehler: {e}")
+                "signal_type": st.column_config.TextColumn
