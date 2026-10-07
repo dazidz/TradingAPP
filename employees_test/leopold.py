@@ -16,12 +16,19 @@ class LeopoldAnalyticsManager:
         st.markdown("Vollständige Auswertung und detaillierte Kennzahlen des `signals_journal`.")
         st.divider()
 
-        # Daten aus signals_journal laden
+        # Daten aus signals_journal laden (mit Paginierung, um das 1000er-Limit zu umgehen)
         sj_data = []
         load_error = None
         try:
-            res = self.supabase.table("signals_journal").select("*").execute()
-            sj_data = res.data if res and res.data else []
+            page_size = 1000
+            offset = 0
+            while True:
+                res = self.supabase.table("signals_journal").select("*").range(offset, offset + page_size - 1).execute()
+                batch = res.data if res and res.data else []
+                sj_data.extend(batch)
+                if len(batch) < page_size:
+                    break
+                offset += page_size
         except Exception as e:
             load_error = str(e)
 
@@ -40,11 +47,15 @@ class LeopoldAnalyticsManager:
             possible_type_cols = ["signal_typ", "typ", "signal_type", "type"]
             type_col = next((c for c in possible_type_cols if c in df_sj.columns), None)
 
+            # Text-Spalten für den Typ bereinigen (Leerzeichen entfernen, einheitlich machen)
+            if type_col:
+                df_sj[type_col] = df_sj[type_col].astype(str).str.strip()
+
             # Filter-Optionen in der UI (Nur nach Signal-Typ)
             col_f1 = st.columns(1)[0]
             with col_f1:
                 if type_col:
-                    unique_types = ["Alle"] + list(df_sj[type_col].dropna().unique())
+                    unique_types = ["Alle"] + sorted(list(df_sj[type_col].dropna().unique()))
                     sel_type = st.selectbox("Nach Signal-Typ filtern", unique_types, key="leopold_type_filter")
                 else:
                     sel_type = "Alle"
@@ -57,8 +68,8 @@ class LeopoldAnalyticsManager:
 
             # Teilmengen für Elite vs. Kauf bestimmen (falls Spalte existiert)
             if type_col:
-                df_elite = df_sj[df_sj[type_col].astype(str).str.lower().str.contains("elite", na=False)]
-                df_kauf = df_sj[df_sj[type_col].astype(str).str.lower().str.contains("kauf|buy", na=False)]
+                df_elite = df_sj[df_sj[type_col].str.lower().str.contains("elite", na=False)]
+                df_kauf = df_sj[df_sj[type_col].str.lower().str.contains("kauf|buy", na=False)]
             else:
                 df_elite = pd.DataFrame()
                 df_kauf = pd.DataFrame()
@@ -120,7 +131,7 @@ class LeopoldAnalyticsManager:
             st.divider()
 
             # --- KOMPLETTES JOURNAL ALS TABELLE ---
-            st.subheader(f"📋 Komplettes Signals Journal ({len(df_filtered)} Einträge)")
+            st.subheader(f"📋 Komplettes Signals Journal ({len(df_filtered)} Einträge von insgesamt {len(df_sj)})")
             st.dataframe(df_filtered, use_container_width=True, hide_index=True)
 
             # Download-Button als CSV
