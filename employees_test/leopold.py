@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import pandas as pd
+import json
 import streamlit as st
 
 AGENT_TITLE = "Leopold"
@@ -13,7 +14,7 @@ class LeopoldAnalyticsManager:
 
     def render_ui(self, api_key=None):
         st.subheader(f"⚙️ {self.name} - {self.description}")
-        st.markdown("Vollständige Auswertung und detaillierte Kennzahlen des `signals_journal`.")
+        st.markdown("Vollständige Auswertung, Indikatoren-Analyse (ADX & SMI) und detaillierte Kennzahlen des `signals_journal`.")
         st.divider()
 
         # Daten aus signals_journal laden (mit Paginierung, um das 1000er-Limit zu umgehen)
@@ -43,33 +44,96 @@ class LeopoldAnalyticsManager:
         else:
             df_sj = pd.DataFrame(sj_data)
 
-            # Spalten-Erkennung für den Typ absichern
+            # Meta-Data entpacken, falls ADX/SMI darin gespeichert sind
+            if "meta_data" in df_sj.columns:
+                def parse_meta(x):
+                    if isinstance(x, dict):
+                        return x
+                    if isinstance(x, str) and x.startswith("{"):
+                        try:
+                            return json.loads(x.replace("'", '"'))
+                        except Exception:
+                            return {}
+                    return {}
+                
+                meta_parsed = df_sj["meta_data"].apply(parse_meta)
+                if not meta_parsed.empty and any(meta_parsed.apply(lambda d: len(d) > 0)):
+                    meta_df = pd.json_normalize(meta_parsed)
+                    meta_df = meta_df[[c for c in meta_df.columns if c not in df_sj.columns]]
+                    df_sj = pd.concat([df_sj, meta_df], axis=1)
+
+            # Spalten-Erkennung absichern
             possible_type_cols = ["signal_typ", "typ", "signal_type", "type"]
             type_col = next((c for c in possible_type_cols if c in df_sj.columns), None)
 
-            # Text-Spalten für den Typ bereinigen (Leerzeichen entfernen, einheitlich machen)
+            adx_col = next((c for c in ["adx", "average_directional_index", "adx_value"] if c in df_sj.columns), None)
+            smi_col = next((c for c in ["smi", "stochastic_momentum_index", "smi_value"] if c in df_sj.columns), None)
+
+            # Text-Spalten für den Typ bereinigen
             if type_col:
                 df_sj[type_col] = df_sj[type_col].astype(str).str.strip()
 
-            # Filter-Optionen in der UI (Nur nach Signal-Typ)
-            col_f1 = st.columns(1)[0]
+            # Numerische Konvertierung für ADX & SMI
+            if adx_col:
+                df_sj[adx_col] = pd.to_numeric(df_sj[adx_col], errors="coerce")
+            if smi_col:
+                df_sj[smi_col] = pd.to_numeric(df_sj[smi_col], errors="coerce")
+
+            # --- FILTER-OPTIONEN IN DER UI ---
+            st.markdown("### 🎛️ Filter & Analyse-Parameter")
+            col_f1, col_f2, col_f3 = st.columns(3)
+
             with col_f1:
                 if type_col:
                     unique_types = ["Alle"] + sorted(list(df_sj[type_col].dropna().unique()))
                     sel_type = st.selectbox("Nach Signal-Typ filtern", unique_types, key="leopold_type_filter")
                 else:
                     sel_type = "Alle"
-                    st.info("ℹ️ Keine Signal-Typ-Spalte gefunden ('signal_typ' oder ähnlich). Filter wird übersprungen.")
+                    st.info("ℹ️ Keine Signal-Typ-Spalte gefunden.")
 
-            # DataFrame nach Filter verfeinern
+            with col_f2:
+                if adx_col and not df_sj[adx_col].dropna().empty:
+                    min_adx = float(df_sj[adx_col].min())
+                    max_adx = float(df_sj[adx_col].max())
+                    if min_adx < max_adx:
+                        adx_range = st.slider("ADX Bereich", min_value=min_adx, max_value=max_adx, value=(min_adx, max_adx), key="leopold_adx_slider")
+                    else:
+                        adx_range = (min_adx, max_adx)
+                        st.info(f"ADX konstanter Wert: {min_adx}")
+                else:
+                    adx_range = None
+                    st.info("ℹ️ Keine ADX-Spalte gefunden.")
+
+            with col_f3:
+                if smi_col and not df_sj[smi_col].dropna().empty:
+                    min_smi = float(df_sj[smi_col].min())
+                    max_smi = float(df_sj[smi_col].max())
+                    if min_smi < max_smi:
+                        smi_range = st.slider("SMI Bereich", min_value=min_smi, max_value=max_smi, value=(min_smi, max_smi), key="leopold_smi_slider")
+                    else:
+                        smi_range = (min_smi, max_smi)
+                        st.info(f"SMI konstanter Wert: {min_smi}")
+                else:
+                    smi_range = None
+                    st.info("ℹ️ Keine SMI-Spalte gefunden.")
+
+            st.divider()
+
+            # --- FILTER ANWENDEN ---
             df_filtered = df_sj.copy()
             if type_col and sel_type != "Alle":
                 df_filtered = df_filtered[df_filtered[type_col] == sel_type]
 
-            # Teilmengen für Elite vs. Kauf bestimmen (falls Spalte existiert)
+            if adx_col and adx_range:
+                df_filtered = df_filtered[df_filtered[adx_col].between(adx_range[0], adx_range[1]) | df_filtered[adx_col].isna()]
+
+            if smi_col and smi_range:
+                df_filtered = df_filtered[df_filtered[smi_col].between(smi_range[0], smi_range[1]) | df_filtered[smi_col].isna()]
+
+            # Teilmengen für Elite vs. Kauf basierend auf dem gefilterten Bestand
             if type_col:
-                df_elite = df_sj[df_sj[type_col].str.lower().str.contains("elite", na=False)]
-                df_kauf = df_sj[df_sj[type_col].str.lower().str.contains("kauf|buy", na=False)]
+                df_elite = df_filtered[df_filtered[type_col].str.lower().str.contains("elite", na=False)]
+                df_kauf = df_filtered[df_filtered[type_col].str.lower().str.contains("kauf|buy", na=False)]
             else:
                 df_elite = pd.DataFrame()
                 df_kauf = pd.DataFrame()
@@ -106,7 +170,7 @@ class LeopoldAnalyticsManager:
             kauf_5d_max = safe_mean(df_kauf, "max_performance_5_tage")
 
             # --- ANZEIGE DER KPI METRIKEN ---
-            st.markdown("### 📊 Performance-Kennzahlen")
+            st.markdown("### 📊 Performance-Kennzahlen (Gefiltert)")
             
             r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
             with r1_c1:
@@ -131,15 +195,15 @@ class LeopoldAnalyticsManager:
             st.divider()
 
             # --- KOMPLETTES JOURNAL ALS TABELLE ---
-            st.subheader(f"📋 Komplettes Signals Journal ({len(df_filtered)} Einträge von insgesamt {len(df_sj)})")
+            st.subheader(f"📋 Gefiltertes Signals Journal ({len(df_filtered)} Einträge von insgesamt {len(df_sj)})")
             st.dataframe(df_filtered, use_container_width=True, hide_index=True)
 
             # Download-Button als CSV
             csv_data = df_filtered.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="📥 Signals Journal als CSV herunterladen",
+                label="📥 Gefiltertes Signals Journal als CSV herunterladen",
                 data=csv_data,
-                file_name="signals_journal_complete_export.csv",
+                file_name="signals_journal_filtered_export.csv",
                 mime="text/csv",
             )
 
