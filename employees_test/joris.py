@@ -188,7 +188,7 @@ class JorisPortfolioManager:
             {active_mandate_criteria}
             
             WICHTIG - TRADINGVIEW LINKS:
-            Füge bei **jeder** erwähnten Aktie im Markdown-Format exakt diesen Link ein: `[Ticker](https://www.tradingview.com/chart/?symbol=GETTEX:TICKER)`.
+            Füge bei **jeder** erwähnten Aktie im Markdown-Format exakt diesen Link ein: `[Ticker](https://www.tradingview.com/chart/?symbol=TICKER)`.
 
             DATENGRUNDLAGE:
             A) DEPOT ({table_name}): {depot_data_text}
