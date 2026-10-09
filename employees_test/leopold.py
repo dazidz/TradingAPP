@@ -155,4 +155,85 @@ class LeopoldAnalyticsManager:
                 mask = df_filtered.apply(lambda row: (str(row["ADX_Zone"]), str(row["SMI_Zone"])) in active_combinations, axis=1)
                 df_filtered = df_filtered[mask]
             else:
-                df_filtered = pd.DataFrame(columns=df
+                df_filtered = pd.DataFrame(columns=df_base.columns)
+
+            # Hilfsfunktion für sichere Mittelwert-Berechnung
+            def safe_mean(dataframe, column_name):
+                if not dataframe.empty and column_name in dataframe.columns:
+                    val = pd.to_numeric(dataframe[column_name], errors='coerce').mean()
+                    return val if pd.notnull(val) else 0.0
+                return 0.0
+
+            perf_target_col = next((c for c in ["end_performance_5_tage", "performance", "end_performance"] if c in df_sj.columns), None)
+            max_perf_col = next((c for c in ["max_performance_5_tage", "mfe", "max_performance"] if c in df_sj.columns), None)
+            drawdown_col = next((c for c in ["max_drawdown", "mae", "drawdown"] if c in df_sj.columns), None)
+            days_col = next((c for c in ["tage_bis_max_perf", "days_to_max", "max_perf_tage", "tage_bis_max"] if c in df_filtered.columns), None)
+
+            win_rate = 0.0
+            if not df_filtered.empty and perf_target_col:
+                numeric_perf = pd.to_numeric(df_filtered[perf_target_col], errors='coerce')
+                winning_trades = (numeric_perf > 0).sum()
+                total_valid_trades = numeric_perf.dropna().count()
+                if total_valid_trades > 0:
+                    win_rate = (winning_trades / total_valid_trades) * 100
+
+            avg_days_to_max = safe_mean(df_filtered, days_col)
+            avg_max_perf = safe_mean(df_filtered, max_perf_col)
+            avg_drawdown = safe_mean(df_filtered, drawdown_col)
+
+            # --- KPI METRIKEN (INKL. TIMING) ---
+            st.markdown("### 📊 Performance- & Timing-Kennzahlen (für gewählte Kombinationen)")
+            
+            r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
+            with r1_c1: st.metric("Win-Rate (Quote)", f"{win_rate:.1f}%")
+            with r1_c2: st.metric("Ø Max. Performance (MFE)", f"{avg_max_perf:+.2f}%")
+            with r1_c3: st.metric("Ø Max. Drawdown (MAE)", f"{avg_drawdown:+.2f}%")
+            with r1_c4: st.metric("Ø Tage bis Peak-Perf.", f"{avg_days_to_max:.1f} Tage")
+
+            st.divider()
+
+            # --- VISUELLE HEATMAP FÜR SWEET-SPOTS ---
+            if adx_col and smi_col and perf_target_col and not df_base.empty:
+                st.markdown("### 🎯 Sweet-Spot Heatmap (Ø Performance nach Zonen)")
+                st.markdown("Die Heatmap zeigt dir sofort, in welchen Zonen-Kombinationen die durchschnittliche Performance am höchsten ist.")
+
+                df_hm = df_base.dropna(subset=["ADX_Zone", "SMI_Zone", perf_target_col]).copy()
+                if not df_hm.empty:
+                    pivot_hm = df_hm.pivot_table(
+                        values=perf_target_col, 
+                        index="ADX_Zone", 
+                        columns="SMI_Zone", 
+                        aggfunc="mean"
+                    ).reset_index()
+
+                    df_melted = pivot_hm.melt(id_vars="ADX_Zone", var_name="SMI_Zone", value_name="Avg_Performance")
+
+                    heatmap = alt.Chart(df_melted).mark_rect().encode(
+                        x=alt.X("SMI_Zone:N", title="SMI Zone"),
+                        y=alt.Y("ADX_Zone:N", title="ADX Zone"),
+                        color=alt.Color("Avg_Performance:Q", title="Ø Perf (%)", scale=alt.Scale(scheme="greens")),
+                        tooltip=["ADX_Zone", "SMI_Zone", alt.Tooltip("Avg_Performance:Q", format=".2f")]
+                    ).properties(height=280)
+
+                    st.altair_chart(heatmap, use_container_width=True)
+                else:
+                    st.info("Nicht genügend Daten für die Heatmap vorhanden.")
+
+            st.divider()
+
+            # --- TABELLE & DOWNLOAD ---
+            st.subheader(f"📋 Gefiltertes Signals Journal ({len(df_filtered)} Einträge)")
+            st.dataframe(df_filtered, use_container_width=True, hide_index=True)
+
+            csv_data = df_filtered.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Signals Journal als CSV herunterladen",
+                data=csv_data,
+                file_name="signals_journal_combinations_export.csv",
+                mime="text/csv",
+            )
+
+
+def render_ui(supabase_client, api_key=None):
+    agent = LeopoldAnalyticsManager(supabase_client)
+    agent.render_ui(api_key)
