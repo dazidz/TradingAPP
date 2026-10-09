@@ -89,22 +89,29 @@ class LeopoldAnalyticsManager:
             if type_col and sel_type != "Alle":
                 df_base = df_base[df_base[type_col] == sel_type]
 
-            # --- ZONEN SICHER DEFINIEREN (NACH FILTERUNG) ---
-            if adx_col and not df_base[adx_col].dropna().empty and len(df_base[adx_col].dropna()) >= 4:
-                try:
-                    df_base["ADX_Zone"] = pd.qcut(df_base[adx_col], q=4, labels=["ADX: Q1 (Tief)", "ADX: Q2 (Med-Tief)", "ADX: Q3 (Med-Hoch)", "ADX: Q4 (Stark)"], duplicates="drop")
-                except Exception:
-                    df_base["ADX_Zone"] = "ADX: Standard"
-            else:
-                df_base["ADX_Zone"] = "ADX: Nicht verfügbar"
+            # --- ZONEN SICHER DEFINIEREN ---
+            df_base["ADX_Zone"] = "ADX: N/A"
+            df_base["SMI_Zone"] = "SMI: N/A"
 
-            if smi_col and not df_base[smi_col].dropna().empty and len(df_base[smi_col].dropna()) >= 4:
-                try:
-                    df_base["SMI_Zone"] = pd.qcut(df_base[smi_col], q=4, labels=["SMI: Q1 (Tief)", "SMI: Q2 (Med-Tief)", "SMI: Q3 (Med-Hoch)", "SMI: Q4 (Hoch)"], duplicates="drop")
-                except Exception:
-                    df_base["SMI_Zone"] = "SMI: Standard"
-            else:
-                df_base["SMI_Zone"] = "SMI: Nicht verfügbar"
+            if adx_col and not df_base.empty:
+                valid_adx = df_base[adx_col].dropna()
+                if len(valid_adx) >= 4:
+                    try:
+                        df_base.loc[valid_adx.index, "ADX_Zone"] = pd.qcut(
+                            valid_adx, q=4, labels=["ADX: Q1 (Tief)", "ADX: Q2 (Med-Tief)", "ADX: Q3 (Med-Hoch)", "ADX: Q4 (Stark)"], duplicates="drop"
+                        ).astype(str)
+                    except Exception:
+                        df_base.loc[valid_adx.index, "ADX_Zone"] = "ADX: Standard"
+
+            if smi_col and not df_base.empty:
+                valid_smi = df_base[smi_col].dropna()
+                if len(valid_smi) >= 4:
+                    try:
+                        df_base.loc[valid_smi.index, "SMI_Zone"] = pd.qcut(
+                            valid_smi, q=4, labels=["SMI: Q1 (Tief)", "SMI: Q2 (Med-Tief)", "SMI: Q3 (Med-Hoch)", "SMI: Q4 (Hoch)"], duplicates="drop"
+                        ).astype(str)
+                    except Exception:
+                        df_base.loc[valid_smi.index, "SMI_Zone"] = "SMI: Standard"
 
             st.markdown("### 🧬 2. Exakte Kombinations-Auswahl (ADX x SMI Matrix)")
             st.markdown("Wähle hier per Checkbox aus, **welche konkreten Kombinationen** (Schnittmengen aus ADX- und SMI-Zone) in die Auswertung einfließen sollen:")
@@ -144,7 +151,7 @@ class LeopoldAnalyticsManager:
 
             # --- FILTER ANWENDEN AUF BASIS DER GEWÄHLTEN KOMBINATIONEN ---
             df_filtered = df_base.copy()
-            if active_combinations:
+            if active_combinations and not df_base.empty:
                 mask = df_filtered.apply(lambda row: (str(row["ADX_Zone"]), str(row["SMI_Zone"])) in active_combinations, axis=1)
                 df_filtered = df_filtered[mask]
             else:
@@ -191,7 +198,7 @@ class LeopoldAnalyticsManager:
 
             csv_data = df_filtered.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="📥 Gefiltertes Signals Journal als CSV herunterladen",
+                label="📥 Signals Journal als CSV herunterladen",
                 data=csv_data,
                 file_name="signals_journal_combinations_export.csv",
                 mime="text/csv",
