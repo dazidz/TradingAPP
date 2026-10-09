@@ -74,18 +74,7 @@ class LeopoldAnalyticsManager:
             if smi_col:
                 df_sj[smi_col] = pd.to_numeric(df_sj[smi_col], errors="coerce")
 
-            # --- ZONEN DEFINIEREN (QUARTILE) ---
-            if adx_col and not df_sj[adx_col].dropna().empty:
-                df_sj["ADX_Zone"] = pd.qcut(df_sj[adx_col], q=4, labels=["ADX: Q1 (Tief)", "ADX: Q2 (Med-Tief)", "ADX: Q3 (Med-Hoch)", "ADX: Q4 (Stark)"], duplicates="drop")
-            else:
-                df_sj["ADX_Zone"] = "Kein ADX"
-
-            if smi_col and not df_sj[smi_col].dropna().empty:
-                df_sj["SMI_Zone"] = pd.qcut(df_sj[smi_col], q=4, labels=["SMI: Q1 (Tief)", "SMI: Q2 (Med-Tief)", "SMI: Q3 (Med-Hoch)", "SMI: Q4 (Hoch)"], duplicates="drop")
-            else:
-                df_sj["SMI_Zone"] = "Kein SMI"
-
-            # --- UI: SIGNAL-TYP FILTER ---
+            # --- UI: SIGNAL-TYP FILTER (VORAB) ---
             st.markdown("### 🎛️ 1. Grundfilter")
             col_f1, _ = st.columns([2, 2])
             with col_f1:
@@ -95,23 +84,38 @@ class LeopoldAnalyticsManager:
                 else:
                     sel_type = "Alle"
 
-            # Grundfilter anwenden für die Zonen-Ermittlung
+            # Grundfilter anwenden
             df_base = df_sj.copy()
             if type_col and sel_type != "Alle":
                 df_base = df_base[df_base[type_col] == sel_type]
 
+            # --- ZONEN SICHER DEFINIEREN (NACH FILTERUNG) ---
+            if adx_col and not df_base[adx_col].dropna().empty and len(df_base[adx_col].dropna()) >= 4:
+                try:
+                    df_base["ADX_Zone"] = pd.qcut(df_base[adx_col], q=4, labels=["ADX: Q1 (Tief)", "ADX: Q2 (Med-Tief)", "ADX: Q3 (Med-Hoch)", "ADX: Q4 (Stark)"], duplicates="drop")
+                except Exception:
+                    df_base["ADX_Zone"] = "ADX: Standard"
+            else:
+                df_base["ADX_Zone"] = "ADX: Nicht verfügbar"
+
+            if smi_col and not df_base[smi_col].dropna().empty and len(df_base[smi_col].dropna()) >= 4:
+                try:
+                    df_base["SMI_Zone"] = pd.qcut(df_base[smi_col], q=4, labels=["SMI: Q1 (Tief)", "SMI: Q2 (Med-Tief)", "SMI: Q3 (Med-Hoch)", "SMI: Q4 (Hoch)"], duplicates="drop")
+                except Exception:
+                    df_base["SMI_Zone"] = "SMI: Standard"
+            else:
+                df_base["SMI_Zone"] = "SMI: Nicht verfügbar"
+
             st.markdown("### 🧬 2. Exakte Kombinations-Auswahl (ADX x SMI Matrix)")
             st.markdown("Wähle hier per Checkbox aus, **welche konkreten Kombinationen** (Schnittmengen aus ADX- und SMI-Zone) in die Auswertung einfließen sollen:")
 
-            # Erstelle eine Matrix aller möglichen Kombinationen
             adx_labels = sorted(list(df_base["ADX_Zone"].astype(str).unique()))
             smi_labels = sorted(list(df_base["SMI_Zone"].astype(str).unique()))
 
-            # Initialsierung der Session State für Kombinationen, falls noch nicht geschehen
             if "combo_selections" not in st.session_state:
                 st.session_state.combo_selections = {}
 
-            # UI-Matrix als Tabelle / Checkbox-Raster
+            # UI-Matrix als Checkbox-Raster
             cols_matrix = st.columns(len(smi_labels) + 1)
             with cols_matrix[0]:
                 st.markdown("**ADX \\ SMI**")
@@ -127,7 +131,6 @@ class LeopoldAnalyticsManager:
                 
                 for idx, smi_lbl in enumerate(smi_labels):
                     combo_key = f"{adx_lbl}__AND__{smi_lbl}"
-                    # Standardmäßig auf True (oder False) setzen
                     if combo_key not in st.session_state.combo_selections:
                         st.session_state.combo_selections[combo_key] = True
                     
@@ -142,20 +145,12 @@ class LeopoldAnalyticsManager:
             # --- FILTER ANWENDEN AUF BASIS DER GEWÄHLTEN KOMBINATIONEN ---
             df_filtered = df_base.copy()
             if active_combinations:
-                # Filtere Zeilen, deren (ADX_Zone, SMI_Zone) Tupel in den aktiven Kombinationen enthalten ist
                 mask = df_filtered.apply(lambda row: (str(row["ADX_Zone"]), str(row["SMI_Zone"])) in active_combinations, axis=1)
                 df_filtered = df_filtered[mask]
             else:
-                df_filtered = pd.DataFrame(columns=df_base.columns) # Nichts ausgewählt
+                df_filtered = pd.DataFrame(columns=df_base.columns)
 
-            # Teilmengen für Elite vs. Kauf
-            if type_col:
-                df_elite = df_filtered[df_filtered[type_col].str.lower().str.contains("elite", na=False)]
-                df_kauf = df_filtered[df_filtered[type_col].str.lower().str.contains("kauf|buy", na=False)]
-            else:
-                df_elite = pd.DataFrame()
-                df_kauf = pd.DataFrame()
-
+            # Hilfsfunktion für sichere Mittelwert-Berechnung
             def safe_mean(dataframe, column_name):
                 if not dataframe.empty and column_name in dataframe.columns:
                     val = pd.to_numeric(dataframe[column_name], errors='coerce').mean()
@@ -166,9 +161,6 @@ class LeopoldAnalyticsManager:
             max_perf_col = next((c for c in ["max_performance_5_tage", "mfe", "max_performance"] if c in df_sj.columns), None)
             drawdown_col = next((c for c in ["max_drawdown", "mae", "drawdown"] if c in df_sj.columns), None)
             days_col = next((c for c in ["tage_bis_max_perf", "days_to_max", "max_perf_tage", "tage_bis_max"] if c in df_sj.columns), None)
-
-            perf_elite = safe_mean(df_elite, perf_target_col)
-            perf_kauf = safe_mean(df_kauf, perf_target_col)
 
             win_rate = 0.0
             if not df_filtered.empty and perf_target_col:
