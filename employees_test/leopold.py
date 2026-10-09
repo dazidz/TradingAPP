@@ -15,7 +15,7 @@ class LeopoldAnalyticsManager:
 
     def render_ui(self, api_key=None):
         st.subheader(f"⚙️ {self.name} - {self.description}")
-        st.markdown("Erweiterte Sweet-Spot-Kombinationsanalyse & Timing-Optimierung (MFE/MAE) des `signals_journal`.")
+        st.markdown("Exakte Kombinationen-Filterung (ADX x SMI) & Timing-Optimierung des `signals_journal`.")
         st.divider()
 
         # Daten aus signals_journal laden (mit Paginierung, um das 1000er-Limit zu umgehen)
@@ -74,21 +74,20 @@ class LeopoldAnalyticsManager:
             if smi_col:
                 df_sj[smi_col] = pd.to_numeric(df_sj[smi_col], errors="coerce")
 
-            # --- AUTOMATISCHE BINS (ZONEN) FÜR KOMBINATIONS-FILTER ---
+            # --- ZONEN DEFINIEREN (QUARTILE) ---
             if adx_col and not df_sj[adx_col].dropna().empty:
-                df_sj["ADX_Zone"] = pd.qcut(df_sj[adx_col], q=4, labels=["ADX: Niedrig (Q1)", "ADX: Mittel-Tief (Q2)", "ADX: Mittel-Hoch (Q3)", "ADX: Stark (Q4)"], duplicates="drop")
+                df_sj["ADX_Zone"] = pd.qcut(df_sj[adx_col], q=4, labels=["ADX: Q1 (Tief)", "ADX: Q2 (Med-Tief)", "ADX: Q3 (Med-Hoch)", "ADX: Q4 (Stark)"], duplicates="drop")
             else:
                 df_sj["ADX_Zone"] = "Kein ADX"
 
             if smi_col and not df_sj[smi_col].dropna().empty:
-                df_sj["SMI_Zone"] = pd.qcut(df_sj[smi_col], q=4, labels=["SMI: Tief (Q1)", "SMI: Neutral-Tief (Q2)", "SMI: Neutral-Hoch (Q3)", "SMI: Hoch (Q4)"], duplicates="drop")
+                df_sj["SMI_Zone"] = pd.qcut(df_sj[smi_col], q=4, labels=["SMI: Q1 (Tief)", "SMI: Q2 (Med-Tief)", "SMI: Q3 (Med-Hoch)", "SMI: Q4 (Hoch)"], duplicates="drop")
             else:
                 df_sj["SMI_Zone"] = "Kein SMI"
 
-            # --- UI: MEHRFACH-FILTER (KOMBINATIONSANALYSE) ---
-            st.markdown("### 🎛️ Multi-Zonen & Kombinations-Filter")
-            col_f1, col_f2, col_f3 = st.columns(3)
-
+            # --- UI: SIGNAL-TYP FILTER ---
+            st.markdown("### 🎛️ 1. Grundfilter")
+            col_f1, _ = st.columns([2, 2])
             with col_f1:
                 if type_col:
                     unique_types = ["Alle"] + sorted(list(df_sj[type_col].dropna().unique()))
@@ -96,26 +95,58 @@ class LeopoldAnalyticsManager:
                 else:
                     sel_type = "Alle"
 
-            with col_f2:
-                available_adx_zones = list(df_sj["ADX_Zone"].astype(str).unique())
-                sel_adx_zones = st.multiselect("Erlaubte ADX-Zonen (Sweet Spots wählen)", options=available_adx_zones, default=available_adx_zones, key="leopold_adx_zones")
+            # Grundfilter anwenden für die Zonen-Ermittlung
+            df_base = df_sj.copy()
+            if type_col and sel_type != "Alle":
+                df_base = df_base[df_base[type_col] == sel_type]
 
-            with col_f3:
-                available_smi_zones = list(df_sj["SMI_Zone"].astype(str).unique())
-                sel_smi_zones = st.multiselect("Erlaubte SMI-Zonen (Sweet Spots wählen)", options=available_smi_zones, default=available_smi_zones, key="leopold_smi_zones")
+            st.markdown("### 🧬 2. Exakte Kombinations-Auswahl (ADX x SMI Matrix)")
+            st.markdown("Wähle hier per Checkbox aus, **welche konkreten Kombinationen** (Schnittmengen aus ADX- und SMI-Zone) in die Auswertung einfließen sollen:")
+
+            # Erstelle eine Matrix aller möglichen Kombinationen
+            adx_labels = sorted(list(df_base["ADX_Zone"].astype(str).unique()))
+            smi_labels = sorted(list(df_base["SMI_Zone"].astype(str).unique()))
+
+            # Initialsierung der Session State für Kombinationen, falls noch nicht geschehen
+            if "combo_selections" not in st.session_state:
+                st.session_state.combo_selections = {}
+
+            # UI-Matrix als Tabelle / Checkbox-Raster
+            cols_matrix = st.columns(len(smi_labels) + 1)
+            with cols_matrix[0]:
+                st.markdown("**ADX \\ SMI**")
+            for idx, smi_lbl in enumerate(smi_labels):
+                with cols_matrix[idx + 1]:
+                    st.markdown(f"**{smi_lbl.split(' ')[-1]}**")
+
+            active_combinations = []
+            for adx_lbl in adx_labels:
+                row_cols = st.columns(len(smi_labels) + 1)
+                with row_cols[0]:
+                    st.markdown(f"**{adx_lbl}**")
+                
+                for idx, smi_lbl in enumerate(smi_labels):
+                    combo_key = f"{adx_lbl}__AND__{smi_lbl}"
+                    # Standardmäßig auf True (oder False) setzen
+                    if combo_key not in st.session_state.combo_selections:
+                        st.session_state.combo_selections[combo_key] = True
+                    
+                    with row_cols[idx + 1]:
+                        is_checked = st.checkbox("", value=st.session_state.combo_selections[combo_key], key=f"cb_{combo_key}", label_visibility="collapsed")
+                        st.session_state.combo_selections[combo_key] = is_checked
+                        if is_checked:
+                            active_combinations.append((adx_lbl, smi_lbl))
 
             st.divider()
 
-            # --- FILTER ANWENDEN ---
-            df_filtered = df_sj.copy()
-            if type_col and sel_type != "Alle":
-                df_filtered = df_filtered[df_filtered[type_col] == sel_type]
-
-            if sel_adx_zones:
-                df_filtered = df_filtered[df_filtered["ADX_Zone"].astype(str).isin(sel_adx_zones)]
-
-            if sel_smi_zones:
-                df_filtered = df_filtered[df_filtered["SMI_Zone"].astype(str).isin(sel_smi_zones)]
+            # --- FILTER ANWENDEN AUF BASIS DER GEWÄHLTEN KOMBINATIONEN ---
+            df_filtered = df_base.copy()
+            if active_combinations:
+                # Filtere Zeilen, deren (ADX_Zone, SMI_Zone) Tupel in den aktiven Kombinationen enthalten ist
+                mask = df_filtered.apply(lambda row: (str(row["ADX_Zone"]), str(row["SMI_Zone"])) in active_combinations, axis=1)
+                df_filtered = df_filtered[mask]
+            else:
+                df_filtered = pd.DataFrame(columns=df_base.columns) # Nichts ausgewählt
 
             # Teilmengen für Elite vs. Kauf
             if type_col:
@@ -152,42 +183,13 @@ class LeopoldAnalyticsManager:
             avg_drawdown = safe_mean(df_filtered, drawdown_col)
 
             # --- KPI METRIKEN (INKL. TIMING) ---
-            st.markdown("### 📊 Performance- & Timing-Kennzahlen (Gefiltert)")
+            st.markdown("### 📊 Performance- & Timing-Kennzahlen (für gewählte Kombinationen)")
             
             r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
             with r1_c1: st.metric("Win-Rate (Quote)", f"{win_rate:.1f}%")
             with r1_c2: st.metric("Ø Max. Performance (MFE)", f"{avg_max_perf:+.2f}%")
             with r1_c3: st.metric("Ø Max. Drawdown (MAE)", f"{avg_drawdown:+.2f}%")
             with r1_c4: st.metric("Ø Tage bis Peak-Perf.", f"{avg_days_to_max:.1f} Tage")
-
-            st.divider()
-
-            # --- VISUELLE HEATMAP FÜR OPTIMALE KOBINATIONEN ---
-            if adx_col and smi_col and perf_target_col:
-                st.markdown("### 🎯 Sweet-Spot Matrix (Performance nach ADX- & SMI-Zonen)")
-                st.markdown("Hier siehst du im Kreuzvergleich, welche **Zonenkombinationen** historisch die besten Erträge liefern (nicht nur ein einzelner Schieberegler).")
-
-                df_hm = df_filtered.dropna(subset=["ADX_Zone", "SMI_Zone", perf_target_col]).copy()
-                if not df_hm.empty:
-                    pivot_hm = df_hm.pivot_table(
-                        values=perf_target_col, 
-                        index="ADX_Zone", 
-                        columns="SMI_Zone", 
-                        aggfunc="mean"
-                    ).reset_index()
-
-                    df_melted = pivot_hm.melt(id_vars="ADX_Zone", var_name="SMI_Zone", value_name="Avg_Performance")
-
-                    heatmap = alt.Chart(df_melted).mark_rect().encode(
-                        x=alt.X("SMI_Zone:N", title="SMI Zone"),
-                        y=alt.Y("ADX_Zone:N", title="ADX Zone"),
-                        color=alt.Color("Avg_Performance:Q", title="Ø Perf (%)", scale=alt.Scale(scheme="greens")),
-                        tooltip=["ADX_Zone", "SMI_Zone", alt.Tooltip("Avg_Performance:Q", format=".2f")]
-                    ).properties(height=280)
-
-                    st.altair_chart(heatmap, use_container_width=True)
-                else:
-                    st.info("Nicht genügend Daten für die Kombinations-Heatmap.")
 
             st.divider()
 
@@ -199,7 +201,7 @@ class LeopoldAnalyticsManager:
             st.download_button(
                 label="📥 Gefiltertes Signals Journal als CSV herunterladen",
                 data=csv_data,
-                file_name="signals_journal_multizone_export.csv",
+                file_name="signals_journal_combinations_export.csv",
                 mime="text/csv",
             )
 
