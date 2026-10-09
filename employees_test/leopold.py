@@ -15,7 +15,7 @@ class LeopoldAnalyticsManager:
 
     def render_ui(self, api_key=None):
         st.subheader(f"⚙️ {self.name} - {self.description}")
-        st.markdown("Vollständige Auswertung, Indikatoren-Analyse (ADX & SMI) und Sweet-Spot-Identifikation des `signals_journal`.")
+        st.markdown("Erweiterte Sweet-Spot-Kombinationsanalyse & Timing-Optimierung (MFE/MAE) des `signals_journal`.")
         st.divider()
 
         # Daten aus signals_journal laden (mit Paginierung, um das 1000er-Limit zu umgehen)
@@ -41,7 +41,7 @@ class LeopoldAnalyticsManager:
         else:
             df_sj = pd.DataFrame(sj_data)
 
-            # Meta-Data entpacken, falls ADX/SMI darin gespeichert sind
+            # Meta-Data entpacken, falls ADX/SMI/Timing darin gespeichert sind
             if "meta_data" in df_sj.columns:
                 def parse_meta(x):
                     if isinstance(x, dict):
@@ -74,31 +74,35 @@ class LeopoldAnalyticsManager:
             if smi_col:
                 df_sj[smi_col] = pd.to_numeric(df_sj[smi_col], errors="coerce")
 
-            # --- FILTER-OPTIONEN IN DER UI ---
-            st.markdown("### 🎛️ Filter & Analyse-Parameter")
+            # --- AUTOMATISCHE BINS (ZONEN) FÜR KOMBINATIONS-FILTER ---
+            if adx_col and not df_sj[adx_col].dropna().empty:
+                df_sj["ADX_Zone"] = pd.qcut(df_sj[adx_col], q=4, labels=["ADX: Niedrig (Q1)", "ADX: Mittel-Tief (Q2)", "ADX: Mittel-Hoch (Q3)", "ADX: Stark (Q4)"], duplicates="drop")
+            else:
+                df_sj["ADX_Zone"] = "Kein ADX"
+
+            if smi_col and not df_sj[smi_col].dropna().empty:
+                df_sj["SMI_Zone"] = pd.qcut(df_sj[smi_col], q=4, labels=["SMI: Tief (Q1)", "SMI: Neutral-Tief (Q2)", "SMI: Neutral-Hoch (Q3)", "SMI: Hoch (Q4)"], duplicates="drop")
+            else:
+                df_sj["SMI_Zone"] = "Kein SMI"
+
+            # --- UI: MEHRFACH-FILTER (KOMBINATIONSANALYSE) ---
+            st.markdown("### 🎛️ Multi-Zonen & Kombinations-Filter")
             col_f1, col_f2, col_f3 = st.columns(3)
 
             with col_f1:
                 if type_col:
                     unique_types = ["Alle"] + sorted(list(df_sj[type_col].dropna().unique()))
-                    sel_type = st.selectbox("Nach Signal-Typ filtern", unique_types, key="leopold_type_filter")
+                    sel_type = st.selectbox("Signal-Typ", unique_types, key="leopold_type_filter")
                 else:
                     sel_type = "Alle"
-                    st.info("ℹ️ Keine Signal-Typ-Spalte gefunden.")
 
             with col_f2:
-                if adx_col and not df_sj[adx_col].dropna().empty:
-                    min_adx, max_adx = float(df_sj[adx_col].min()), float(df_sj[adx_col].max())
-                    adx_range = st.slider("ADX Bereich", min_value=min_adx, max_value=max_adx, value=(min_adx, max_adx), key="leopold_adx_slider") if min_adx < max_adx else (min_adx, max_adx)
-                else:
-                    adx_range = None
+                available_adx_zones = list(df_sj["ADX_Zone"].astype(str).unique())
+                sel_adx_zones = st.multiselect("Erlaubte ADX-Zonen (Sweet Spots wählen)", options=available_adx_zones, default=available_adx_zones, key="leopold_adx_zones")
 
             with col_f3:
-                if smi_col and not df_sj[smi_col].dropna().empty:
-                    min_smi, max_smi = float(df_sj[smi_col].min()), float(df_sj[smi_col].max())
-                    smi_range = st.slider("SMI Bereich", min_value=min_smi, max_value=max_smi, value=(min_smi, max_smi), key="leopold_smi_slider") if min_smi < max_smi else (min_smi, max_smi)
-                else:
-                    smi_range = None
+                available_smi_zones = list(df_sj["SMI_Zone"].astype(str).unique())
+                sel_smi_zones = st.multiselect("Erlaubte SMI-Zonen (Sweet Spots wählen)", options=available_smi_zones, default=available_smi_zones, key="leopold_smi_zones")
 
             st.divider()
 
@@ -107,11 +111,11 @@ class LeopoldAnalyticsManager:
             if type_col and sel_type != "Alle":
                 df_filtered = df_filtered[df_filtered[type_col] == sel_type]
 
-            if adx_col and adx_range:
-                df_filtered = df_filtered[df_filtered[adx_col].between(adx_range[0], adx_range[1]) | df_filtered[adx_col].isna()]
+            if sel_adx_zones:
+                df_filtered = df_filtered[df_filtered["ADX_Zone"].astype(str).isin(sel_adx_zones)]
 
-            if smi_col and smi_range:
-                df_filtered = df_filtered[df_filtered[smi_col].between(smi_range[0], smi_range[1]) | df_filtered[smi_col].isna()]
+            if sel_smi_zones:
+                df_filtered = df_filtered[df_filtered["SMI_Zone"].astype(str).isin(sel_smi_zones)]
 
             # Teilmengen für Elite vs. Kauf
             if type_col:
@@ -128,6 +132,10 @@ class LeopoldAnalyticsManager:
                 return 0.0
 
             perf_target_col = next((c for c in ["end_performance_5_tage", "performance", "end_performance"] if c in df_sj.columns), None)
+            max_perf_col = next((c for c in ["max_performance_5_tage", "mfe", "max_performance"] if c in df_sj.columns), None)
+            drawdown_col = next((c for c in ["max_drawdown", "mae", "drawdown"] if c in df_sj.columns), None)
+            days_col = next((c for c in ["tage_bis_max_perf", "days_to_max", "max_perf_tage", "tage_bis_max"] if c in df_sj.columns), None)
+
             perf_elite = safe_mean(df_elite, perf_target_col)
             perf_kauf = safe_mean(df_kauf, perf_target_col)
 
@@ -139,53 +147,47 @@ class LeopoldAnalyticsManager:
                 if total_valid_trades > 0:
                     win_rate = (winning_trades / total_valid_trades) * 100
 
-            days_col = next((c for c in ["tage_bis_max_perf", "days_to_max", "max_perf_tage", "tage_bis_max"] if c in df_filtered.columns), None)
             avg_days_to_max = safe_mean(df_filtered, days_col)
+            avg_max_perf = safe_mean(df_filtered, max_perf_col)
+            avg_drawdown = safe_mean(df_filtered, drawdown_col)
 
-            # KPI Metriken anzeigen
-            st.markdown("### 📊 Performance-Kennzahlen (Gefiltert)")
+            # --- KPI METRIKEN (INKL. TIMING) ---
+            st.markdown("### 📊 Performance- & Timing-Kennzahlen (Gefiltert)")
+            
             r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
-            with r1_c1: st.metric("Performance Elite-Signale", f"{perf_elite:+.2f}%")
-            with r1_c2: st.metric("Performance Kaufsignale", f"{perf_kauf:+.2f}%")
-            with r1_c3: st.metric("Gewinntrades (Quote)", f"{win_rate:.1f}%")
-            with r1_c4: st.metric("Ø Tage bis Max-Perf.", f"{avg_days_to_max:.1f} Tage")
+            with r1_c1: st.metric("Win-Rate (Quote)", f"{win_rate:.1f}%")
+            with r1_c2: st.metric("Ø Max. Performance (MFE)", f"{avg_max_perf:+.2f}%")
+            with r1_c3: st.metric("Ø Max. Drawdown (MAE)", f"{avg_drawdown:+.2f}%")
+            with r1_c4: st.metric("Ø Tage bis Peak-Perf.", f"{avg_days_to_max:.1f} Tage")
 
             st.divider()
 
-            # --- SWEET-SPOT ANALYSE (ADX & SMI BINS) ---
+            # --- VISUELLE HEATMAP FÜR OPTIMALE KOBINATIONEN ---
             if adx_col and smi_col and perf_target_col:
-                st.markdown("### 🎯 Indikatoren-Sweet-Spot (ADX & SMI Matrix)")
-                st.markdown("Hier siehst du aggregiert, in welchen Bereichen von ADX und SMI die durchschnittliche Performance am höchsten ist.")
+                st.markdown("### 🎯 Sweet-Spot Matrix (Performance nach ADX- & SMI-Zonen)")
+                st.markdown("Hier siehst du im Kreuzvergleich, welche **Zonenkombinationen** historisch die besten Erträge liefern (nicht nur ein einzelner Schieberegler).")
 
-                df_heatmap = df_filtered.dropna(subset=[adx_col, smi_col, perf_target_col]).copy()
-                if not df_heatmap.empty:
-                    # Bins (Intervalle) für ADX und SMI erstellen
-                    df_heatmap["ADX_Bin"] = pd.cut(df_heatmap[adx_col], bins=5, precision=0)
-                    df_heatmap["SMI_Bin"] = pd.cut(df_heatmap[smi_col], bins=5, precision=0)
-
-                    # Pivot-Tabelle für die Durchschnitts-Performance
-                    pivot_perf = df_heatmap.pivot_table(
+                df_hm = df_filtered.dropna(subset=["ADX_Zone", "SMI_Zone", perf_target_col]).copy()
+                if not df_hm.empty:
+                    pivot_hm = df_hm.pivot_table(
                         values=perf_target_col, 
-                        index="ADX_Bin", 
-                        columns="SMI_Bin", 
+                        index="ADX_Zone", 
+                        columns="SMI_Zone", 
                         aggfunc="mean"
                     ).reset_index()
 
-                    df_melted = pivot_perf.melt(id_vars="ADX_Bin", var_name="SMI_Bin", value_name="Avg_Performance")
-                    df_melted["ADX_Bin"] = df_melted["ADX_Bin"].astype(str)
-                    df_melted["SMI_Bin"] = df_melted["SMI_Bin"].astype(str)
+                    df_melted = pivot_hm.melt(id_vars="ADX_Zone", var_name="SMI_Zone", value_name="Avg_Performance")
 
-                    # Altair Heatmap
                     heatmap = alt.Chart(df_melted).mark_rect().encode(
-                        x=alt.X("SMI_Bin:N", title="SMI Bereich"),
-                        y=alt.Y("ADX_Bin:N", title="ADX Bereich", sort="descending"),
+                        x=alt.X("SMI_Zone:N", title="SMI Zone"),
+                        y=alt.Y("ADX_Zone:N", title="ADX Zone"),
                         color=alt.Color("Avg_Performance:Q", title="Ø Perf (%)", scale=alt.Scale(scheme="greens")),
-                        tooltip=["ADX_Bin", "SMI_Bin", alt.Tooltip("Avg_Performance:Q", format=".2f")]
-                    ).properties(height=300)
+                        tooltip=["ADX_Zone", "SMI_Zone", alt.Tooltip("Avg_Performance:Q", format=".2f")]
+                    ).properties(height=280)
 
                     st.altair_chart(heatmap, use_container_width=True)
                 else:
-                    st.info("Nicht genügend Daten mit validen ADX/SMI-Werten für die Heatmap vorhanden.")
+                    st.info("Nicht genügend Daten für die Kombinations-Heatmap.")
 
             st.divider()
 
@@ -197,7 +199,7 @@ class LeopoldAnalyticsManager:
             st.download_button(
                 label="📥 Gefiltertes Signals Journal als CSV herunterladen",
                 data=csv_data,
-                file_name="signals_journal_filtered_export.csv",
+                file_name="signals_journal_multizone_export.csv",
                 mime="text/csv",
             )
 
