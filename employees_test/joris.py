@@ -203,9 +203,10 @@ class JorisPortfolioManager:
             3. Konkrete Handlungsanweisungen und Top-Empfehlungen auf Basis der Daten.
             
             ZUSATZ-FORMAT FÜR DAS JOURNAL (NUR BEI SWING):
+            Lies für die ausgewählten Signale aus den Screener-Daten bzw. der Watchlist auch den ADX- und SMI-Wert (falls in den Meta-Daten vorhanden) mit aus.
             ===JOURNAL_DATA_START===
             [
-              {{"ticker": "AAPL", "setup_reason": "Ausbruch", "target": 220.0, "stop_loss": 175.0}}
+              {{"ticker": "AAPL", "setup_reason": "Ausbruch", "target": 220.0, "stop_loss": 175.0, "smi": 0.45, "adx": 28.5}}
             ]
             ===JOURNAL_DATA_END===
             """
@@ -231,7 +232,7 @@ class JorisPortfolioManager:
                     "id", rep_id
                 ).execute()
 
-            # 7. Journal befüllen bei Swing
+            # 7. Journal befüllen bei Swing (inklusive ADX und SMI)
             if depot_focus.lower() == "swing":
                 match = re.search(
                     r"===JOURNAL_DATA_START===\s*(.*?)\s*===JOURNAL_DATA_END===",
@@ -246,6 +247,8 @@ class JorisPortfolioManager:
                             "setup_reason": pick.get("setup_reason", ""),
                             "target": float(pick.get("target", 0.0)),
                             "stop_loss": float(pick.get("stop_loss", 0.0)),
+                            "smi": float(pick.get("smi")) if pick.get("smi") is not None else None,
+                            "adx": float(pick.get("adx")) if pick.get("adx") is not None else None,
                             "status": "active",
                             "created_at": datetime.now().isoformat(),
                         }).execute()
@@ -277,7 +280,6 @@ class JorisPortfolioManager:
             "Fokus-Mandat wählen:", ["invest", "swing", "high_risk"], key=f"sel_depot_{self.name}"
         )
 
-        # Versuche die DNA zu laden – wenn etwas in Supabase fehlt, wird es direkt in der UI angezeigt
         try:
             core, active_rules = self._fetch_dna_from_supabase(depot_focus)
             dna_loaded_successfully = True
