@@ -200,4 +200,310 @@ class NinoSignalsAssistant:
                     sig_date = pd.to_datetime(sig_date_str).date()
                     days_passed = (today - sig_date).days
                     if days_passed < 5:
-                        print(f"
+                        print(f"Skippe {ticker_upper}: Erst {days_passed} Tage vergangen (weniger als 5).")
+                        continue
+
+                    sig_type = sig.get("signal_type") or sig.get("signal_typ") or sig.get("typ") or None
+                    sig_price_raw = sig.get("entry_price") or sig.get("preis") or sig.get("kurs") or sig.get("einstiegspreis") or 0
+                    sig_price = self._safe_float(sig_price_raw, default=0.0)
+                    
+                    smi_val, adx_val, above_ema = self._parse_meta_data(sig)
+                    is_fav = ticker_upper in favorite_tickers
+
+                    perf_data = self._fetch_5d_performance(ticker_upper, sig_date, sig_price)
+                    if not perf_data:
+                        print(f"Keine Performance-Daten für {ticker_upper} erhalten.")
+                        continue
+
+                    journal_entry = {
+                        "ticker": ticker_upper,
+                        "company_name": company_name,
+                        "candle_time": pd.to_datetime(sig_date_str).isoformat(),
+                        "signal_typ": sig_type,
+                        "status": True,
+                        "smi": smi_val,
+                        "adx": adx_val,
+                        "is_favorite": is_fav,
+                        "above_ema20": above_ema,
+                        "max_performance_5_tage": perf_data["max_performance_5_tage"],
+                        "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
+                        "end_performance_5_tage": perf_data["end_performance_5_tage"],
+                    }
+                    self.supabase.table(self.table_signals_journal).insert(journal_entry).execute()
+
+                    arbeitsspeicher_entry = {
+                        "ticker": ticker_upper,
+                        "company_name": company_name,
+                        "candle_time": pd.to_datetime(sig_date_str).isoformat(),
+                        "signal_typ": sig_type,
+                        "smi": smi_val,
+                        "adx": adx_val,
+                        "is_favorite": is_fav,
+                        "above_ema20": above_ema,
+                        "max_performance_5_tage": perf_data["max_performance_5_tage"],
+                        "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
+                        "end_performance_5_tage": perf_data["end_performance_5_tage"],
+                        "quelle": "signals_journal",
+                    }
+                    self.supabase.table(self.table_aris_arbeitsspeicher).insert(arbeitsspeicher_entry).execute()
+
+                    sig_id = sig.get("id")
+                    if sig_id:
+                        self.supabase.table(self.table_active_signals).delete().eq("id", sig_id).execute()
+
+                    print(f"✅ Signal für {ticker_upper} erfolgreich ausgewertet, übergeben und aus Active Signals gelöscht.")
+                except Exception as inner_e:
+                    print(f"❌ Fehler bei Signal {sig.get('ticker')}: {inner_e}")
+                    continue
+        except Exception as e:
+            print(f"❌ Globaler Fehler in process_signals_to_journal: {e}")
+
+    def process_joris_journal(self):
+        print("Nino verarbeitet joris_journal...")
+        try:
+            today = datetime.now().date()
+            
+            # WICHTIGE ANPASSUNG: Hole alle Einträge, wo status = 'active' ODER null/leer ist
+            joris_res = self.supabase.table(self.table_joris_journal).select("*").or_("status.eq.active,status.is.null").execute()
+            joris_items = joris_res.data or []
+            print(f"Gefundene unbearbeitete Joris-Signale: {len(joris_items)}")
+
+            for item in joris_items:
+                try:
+                    # Sicherheits-Check für Freitext "5d ausgewertet"
+                    current_status = str(item.get("status", "")).strip().lower()
+                    if "ausgewertet" in current_status or "5d" in current_status:
+                        continue
+
+                    ticker = item.get("ticker")
+                    if not ticker or not self.is_valid_ticker(ticker):
+                        continue
+
+                    ticker_upper = ticker.upper()
+                    company_name = item.get("company_name") or ticker_upper
+
+                    date_str = item.get("candle_time") or item.get("signal_datum") or item.get("created_at") or item.get("datum")
+                    if not date_str:
+                        continue
+
+                    sig_date = pd.to_datetime(date_str).date()
+                    if (today - sig_date).days < 5:
+                        continue
+
+                    base_price = self._safe_float(item.get("preis") or item.get("kurs") or item.get("einstiegspreis_zum_signal") or 0, default=0.0)
+                    perf_data = self._fetch_5d_performance(ticker_upper, sig_date, base_price)
+                    if not perf_data:
+                        continue
+
+                    sig_type = item.get("signal_type") or item.get("signal_typ") or item.get("typ") or None
+                    smi_val, adx_val, above_ema = self._parse_meta_data(item)
+
+                    # WICHTIG: status explizit auf '5d ausgewertet' als String setzen!
+                    updated_joris_data = {
+                        "status": "5d ausgewertet",
+                        "company_name": company_name,
+                        "max_performance_5_tage": perf_data["max_performance_5_tage"],
+                        "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
+                        "end_performance_5_tage": perf_data["end_performance_5_tage"],
+                    }
+
+                    item_id = item.get("id")
+                    if item_id:
+                        self.supabase.table(self.table_joris_journal).update(updated_joris_data).eq("id", item_id).execute()
+
+                    arbeitsspeicher_entry = {
+                        "ticker": ticker_upper,
+                        "company_name": company_name,
+                        "candle_time": pd.to_datetime(date_str).isoformat(),
+                        "signal_typ": sig_type,
+                        "smi": smi_val,
+                        "adx": adx_val,
+                        "above_ema20": above_ema,
+                        "max_performance_5_tage": perf_data["max_performance_5_tage"],
+                        "candle_time_max_5_tage": perf_data.get("candle_time_max_5_tage"),
+                        "end_performance_5_tage": perf_data["end_performance_5_tage"],
+                        "quelle": "joris_journal",
+                    }
+                    self.supabase.table(self.table_aris_arbeitsspeicher).insert(arbeitsspeicher_entry).execute()
+                    print(f"✅ Joris-Journal Eintrag für {ticker_upper} ausgewertet und auf '5d ausgewertet' gesetzt.")
+                except Exception as inner_e:
+                    print(f"❌ Fehler bei Joris-Signal: {inner_e}")
+                    continue
+        except Exception as e:
+            print(f"❌ Fehler in process_joris_journal: {e}")
+
+    def process_top_flop_list(self):
+        print("Nino verarbeitet Top 5 Watchlist...")
+        try:
+            today = datetime.now().date()
+            today_iso = today.strftime("%Y-%m-%d")
+
+            res = self.supabase.table("watchlist").select("*").execute()
+            watchlist_items = res.data or []
+
+            performance_results = []
+            for item in watchlist_items:
+                if not item or not item.get("ticker"):
+                    continue
+                ticker = item["ticker"].upper()
+                if not self.is_valid_ticker(ticker):
+                    continue
+
+                try:
+                    clean_ticker = self._clean_ticker_for_yf(ticker)
+                    company_name = item.get("company_name") or ticker
+
+                    # Exaktes Startdatum der Watchlist bzw. Kerze ermitteln
+                    sig_date_str = item.get("candle_time") or item.get("datum") or item.get("signal_datum") or item.get("created_at")
+                    if sig_date_str:
+                        sig_date = pd.to_datetime(sig_date_str).date()
+                    else:
+                        sig_date = today - timedelta(days=7)
+
+                    end_fetch = sig_date + timedelta(days=15)
+                    df_hist = yf.download(
+                        clean_ticker,
+                        start=sig_date.strftime("%Y-%m-%d"),
+                        end=end_fetch.strftime("%Y-%m-%d"),
+                        progress=False,
+                        auto_adjust=True,
+                    )
+
+                    if df_hist.empty or len(df_hist) < 2:
+                        continue
+
+                    def get_col(df, col_name):
+                        if col_name not in df:
+                            return None
+                        c = df[col_name]
+                        if isinstance(c, pd.DataFrame):
+                            c = c.iloc[:, 0]
+                        return c
+
+                    close_s = get_col(df_hist, "Close")
+                    if close_s is None or close_s.empty:
+                        continue
+
+                    df_5d = df_hist.iloc[1:6] if len(df_hist) >= 6 else df_hist.iloc[1:]
+                    if df_5d.empty:
+                        continue
+
+                    close_5d = get_col(df_5d, "Close")
+                    base_kurs = self._safe_float(close_s.iloc[0], default=1.0)
+                    end_kurs = self._safe_float(close_5d.iloc[-1], default=base_kurs)
+                    
+                    perf = round(((end_kurs - base_kurs) / base_kurs) * 100, 2) if base_kurs > 0 else 0
+                    perf = self._safe_float(perf, 0.0)
+
+                    # ADX & SMI zum Startzeitpunkt der Kerze auslesen
+                    smi_val, adx_val, above_ema = self._parse_meta_data(item)
+                    if smi_val is None and "smi" in item:
+                        smi_val = self._safe_float(item.get("smi"), None)
+                    if adx_val is None and "adx" in item:
+                        adx_val = self._safe_float(item.get("adx"), None)
+
+                    performance_results.append({
+                        "ticker": ticker,
+                        "company_name": company_name,
+                        "signal_typ": item.get("signal_typ") or item.get("typ") or item.get("signal_type"),
+                        "smi": smi_val,
+                        "adx": adx_val,
+                        "above_ema20": above_ema,
+                        "end_performance_5_tage": perf,
+                        "candle_time": pd.to_datetime(sig_date_str if sig_date_str else today_iso).isoformat(),
+                    })
+                except Exception as e:
+                    print(f"Warnung bei Watchlist-Ticker {ticker}: {e}")
+
+            if not performance_results:
+                return
+
+            performance_results.sort(
+                key=lambda x: self._safe_float(x.get("end_performance_5_tage", 0)), reverse=True
+            )
+            top_5 = performance_results[:5]
+
+            for entry in top_5:
+                ticker = entry.get("ticker")
+                perf = self._safe_float(entry.get("end_performance_5_tage"), 0.0)
+
+                payload = {
+                    "datum": today_iso,
+                    "kategorie": "TOP",
+                    "ticker": ticker,
+                    "company_name": entry.get("company_name"),
+                    "signal_typ": entry.get("signal_typ"),
+                    "performance": perf,
+                    "quelle": "top_flop_watchlist",
+                }
+                self.supabase.table("top_flop_journal").insert(payload).execute()
+
+                arbeitsspeicher_entry = {
+                    "ticker": ticker,
+                    "company_name": entry.get("company_name"),
+                    "candle_time": entry.get("candle_time"),
+                    "signal_typ": entry.get("signal_typ"),
+                    "smi": entry.get("smi"),
+                    "adx": entry.get("adx"),
+                    "end_performance_5_tage": perf,
+                    "quelle": "top_flop_watchlist",
+                }
+                self.supabase.table(self.table_aris_arbeitsspeicher).insert(
+                    arbeitsspeicher_entry
+                ).execute()
+
+            print("✅ Top 5 Watchlist verarbeitet und gespeichert.")
+
+        except Exception as e:
+            print(f"❌ Fehler in process_top_flop_list: {e}")
+
+    def run_all(self):
+        self.process_signals_to_journal()
+        self.process_joris_journal()
+        self.process_top_flop_list()
+
+
+# --- MODUL-FUNKTIONEN FÜR STREAMLIT & GH ACTIONS ---
+
+def run_nino(supabase_client):
+    assistant = NinoSignalsAssistant(supabase_client)
+    assistant.run_all()
+
+def render_ui(supabase_client=None, *args, **kwargs):
+    st.subheader("🧠 Aris Arbeitsspeicher (Nino)")
+    st.write("Übersicht aller verarbeiteten Signale und Zwischenstände im Arbeitsspeicher.")
+
+    if supabase_client is None:
+        st.error("Supabase-Client nicht verfügbar.")
+        return
+
+    try:
+        res = supabase_client.table("aris_arbeitsspeicher").select("*").order("candle_time", desc=True).execute()
+        data = res.data or []
+
+        if not data:
+            st.info("Keine Daten im Aris Arbeitsspeicher vorhanden.")
+            return
+
+        df = pd.DataFrame(data)
+        search_ticker = st.text_input("Nach Ticker filtern:", "").strip().upper()
+        if search_ticker:
+            df = df[df["ticker"].str.contains(search_ticker, na=False)]
+
+        st.dataframe(df, use_container_width=True)
+
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Arbeitsspeicher als CSV herunterladen",
+            data=csv,
+            file_name="aris_arbeitsspeicher.csv",
+            mime="text/csv",
+        )
+    except Exception as e:
+        st.error(f"Fehler beim Laden des Arbeitsspeichers: {e}")
+
+
+if __name__ == "__main__":
+    print("🚀 Starte Nino Routine (GitHub Action)...")
+    try:
+        supabase_client = get
