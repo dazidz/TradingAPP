@@ -506,4 +506,9 @@ def render_ui(supabase_client=None, *args, **kwargs):
 if __name__ == "__main__":
     print("🚀 Starte Nino Routine (GitHub Action)...")
     try:
-        supabase_client = get
+        supabase_client = get_db_client()
+        run_nino(supabase_client)
+        print("🏁 Nino Routine erfolgreich beendet.")
+    except Exception as e:
+        print(f"❌ Fehler beim Starten der Nino Routine: {e}")
+        exit(1)
