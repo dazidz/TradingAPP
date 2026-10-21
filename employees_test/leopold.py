@@ -89,7 +89,7 @@ class LeopoldAnalyticsManager:
             if type_col and sel_type != "Alle":
                 df_base = df_base[df_base[type_col] == sel_type]
 
-            # --- ZONEN SICHER DEFINIEREN ---
+            # --- ECHTE WERTBEREICHE STATT Q1-Q4 DEFINIEREN ---
             df_base["ADX_Zone"] = "ADX: N/A"
             df_base["SMI_Zone"] = "SMI: N/A"
 
@@ -97,9 +97,14 @@ class LeopoldAnalyticsManager:
                 valid_adx = df_base[adx_col].dropna()
                 if len(valid_adx) >= 4:
                     try:
-                        df_base.loc[valid_adx.index, "ADX_Zone"] = pd.qcut(
-                            valid_adx, q=4, labels=["ADX: Q1 (Tief)", "ADX: Q2 (Med-Tief)", "ADX: Q3 (Med-Hoch)", "ADX: Q4 (Stark)"], duplicates="drop"
-                        ).astype(str)
+                        # nutze qcut, aber mit sprechenden Bereichs-Labels basierend auf Quantil-Grenzen
+                        categories, bins = pd.qcut(valid_adx, q=4, retbins=True, duplicates="drop")
+                        labels = [f"ADX: {bins[i]:.1f} bis {bins[i+1]:.1f}" for i in range(len(bins)-1)]
+                        # Falls weniger als 4 Bins wegen duplicates="drop" herauskommen, fangen wir es ab
+                        if len(labels) == 4:
+                            df_base.loc[valid_adx.index, "ADX_Zone"] = pd.qcut(valid_adx, q=4, labels=labels, duplicates="drop").astype(str)
+                        else:
+                            df_base.loc[valid_adx.index, "ADX_Zone"] = pd.cut(valid_adx, bins=bins, include_lowest=True, labels=labels[:len(bins)-1]).astype(str)
                     except Exception:
                         df_base.loc[valid_adx.index, "ADX_Zone"] = "ADX: Standard"
 
@@ -107,14 +112,17 @@ class LeopoldAnalyticsManager:
                 valid_smi = df_base[smi_col].dropna()
                 if len(valid_smi) >= 4:
                     try:
-                        df_base.loc[valid_smi.index, "SMI_Zone"] = pd.qcut(
-                            valid_smi, q=4, labels=["SMI: Q1 (Tief)", "SMI: Q2 (Med-Tief)", "SMI: Q3 (Med-Hoch)", "SMI: Q4 (Hoch)"], duplicates="drop"
-                        ).astype(str)
+                        categories, bins = pd.qcut(valid_smi, q=4, retbins=True, duplicates="drop")
+                        labels = [f"SMI: {bins[i]:.2f} bis {bins[i+1]:.2f}" for i in range(len(bins)-1)]
+                        if len(labels) == 4:
+                            df_base.loc[valid_smi.index, "SMI_Zone"] = pd.qcut(valid_smi, q=4, labels=labels, duplicates="drop").astype(str)
+                        else:
+                            df_base.loc[valid_smi.index, "SMI_Zone"] = pd.cut(valid_smi, bins=bins, include_lowest=True, labels=labels[:len(bins)-1]).astype(str)
                     except Exception:
                         df_base.loc[valid_smi.index, "SMI_Zone"] = "SMI: Standard"
 
             st.markdown("### 🧬 2. Exakte Kombinations-Auswahl (ADX x SMI Matrix)")
-            st.markdown("Wähle hier per Checkbox aus, **welche konkreten Kombinationen** (Schnittmengen aus ADX- und SMI-Zone) in die Auswertung einfließen sollen:")
+            st.markdown("Wähle hier per Checkbox aus, **welche konkreten Bereiche** in die Auswertung einfließen sollen:")
 
             adx_labels = sorted(list(df_base["ADX_Zone"].astype(str).unique()))
             smi_labels = sorted(list(df_base["SMI_Zone"].astype(str).unique()))
@@ -128,7 +136,7 @@ class LeopoldAnalyticsManager:
                 st.markdown("**ADX \\ SMI**")
             for idx, smi_lbl in enumerate(smi_labels):
                 with cols_matrix[idx + 1]:
-                    st.markdown(f"**{smi_lbl.split(' ')[-1]}**")
+                    st.markdown(f"**{smi_lbl}**")
 
             active_combinations = []
             for adx_lbl in adx_labels:
@@ -182,7 +190,7 @@ class LeopoldAnalyticsManager:
             avg_drawdown = safe_mean(df_filtered, drawdown_col)
 
             # --- KPI METRIKEN (INKL. TIMING) ---
-            st.markdown("### 📊 Performance- & Timing-Kennzahlen (für gewählte Kombinationen)")
+            st.markdown("### 📊 Performance- & Timing-Kennzahlen (für gewählte Bereiche)")
             
             r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
             with r1_c1: st.metric("Win-Rate (Quote)", f"{win_rate:.1f}%")
@@ -194,8 +202,8 @@ class LeopoldAnalyticsManager:
 
             # --- VISUELLE HEATMAP FÜR SWEET-SPOTS ---
             if adx_col and smi_col and perf_target_col and not df_base.empty:
-                st.markdown("### 🎯 Sweet-Spot Heatmap (Ø Performance nach Zonen)")
-                st.markdown("Die Heatmap zeigt dir sofort, in welchen Zonen-Kombinationen die durchschnittliche Performance am höchsten ist.")
+                st.markdown("### 🎯 Sweet-Spot Heatmap (Ø Performance nach Bereichen)")
+                st.markdown("Die Heatmap zeigt dir sofort, in welchen Indikator-Bereichen die durchschnittliche Performance am höchsten ist.")
 
                 df_hm = df_base.dropna(subset=["ADX_Zone", "SMI_Zone", perf_target_col]).copy()
                 if not df_hm.empty:
@@ -209,11 +217,11 @@ class LeopoldAnalyticsManager:
                     df_melted = pivot_hm.melt(id_vars="ADX_Zone", var_name="SMI_Zone", value_name="Avg_Performance")
 
                     heatmap = alt.Chart(df_melted).mark_rect().encode(
-                        x=alt.X("SMI_Zone:N", title="SMI Zone"),
-                        y=alt.Y("ADX_Zone:N", title="ADX Zone"),
+                        x=alt.X("SMI_Zone:N", title="SMI Bereich"),
+                        y=alt.Y("ADX_Zone:N", title="ADX Bereich"),
                         color=alt.Color("Avg_Performance:Q", title="Ø Perf (%)", scale=alt.Scale(scheme="greens")),
                         tooltip=["ADX_Zone", "SMI_Zone", alt.Tooltip("Avg_Performance:Q", format=".2f")]
-                    ).properties(height=280)
+                    ).properties(height=320)
 
                     st.altair_chart(heatmap, use_container_width=True)
                 else:
