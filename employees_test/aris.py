@@ -11,7 +11,6 @@ class ArisAgent:
         self.name = "Aris"
         self.model_name = "openai/gpt-oss-120b"
         self.description = "Performance Manager"
-        # Hier wird der Key sofort beim Initialisieren aufgelöst und gespeichert:
         self.api_key, self.provider = self._resolve_api_key(api_key)
 
     def _resolve_api_key(self, passed_key: str = None) -> tuple[str, str]:
@@ -23,7 +22,6 @@ class ArisAgent:
 
         possible_keys = ["GROQ_API_KEY", "groq_api_key", "GROQ_KEY", "groq_key", "OPENROUTER_API_KEY", "openrouter_api_key"]
 
-        # 1. Umgebungsvariablen prüfen
         for env_name in possible_keys:
             val = os.getenv(env_name)
             if val and isinstance(val, str) and val.strip():
@@ -31,10 +29,8 @@ class ArisAgent:
                 provider = "groq" if "groq" in env_name.lower() or k.startswith("gsk") else "openrouter"
                 return k, provider
 
-        # 2. Streamlit Secrets prüfen (flexible Suche wie im alten Code)
         try:
             if hasattr(st, "secrets") and st.secrets:
-                # Direkte Keys in st.secrets
                 for key_name in possible_keys:
                     if key_name in st.secrets and st.secrets[key_name]:
                         k = str(st.secrets[key_name]).strip()
@@ -42,7 +38,6 @@ class ArisAgent:
                             provider = "groq" if "groq" in key_name.lower() or k.startswith("gsk") else "openrouter"
                             return k, provider
 
-                # Sektionen in st.secrets durchsuchen
                 for section in st.secrets:
                     try:
                         sec_val = st.secrets[section]
@@ -61,13 +56,11 @@ class ArisAgent:
         return "", ""
 
     def run_analysis(self, api_key: str = None):
-        # Falls ein neuer Key übergeben wird, direkt auflösen, sonst den Instanz-Key nutzen
         active_key, provider = self._resolve_api_key(api_key) if api_key else (self.api_key, self.provider)
         if not active_key:
             return False, "Kein API-Key gefunden! Bitte prüfe, ob GROQ_API_KEY in deinen Streamlit Secrets korrekt hinterlegt ist."
         
         try:
-            # 1. Daten aus dem Arbeitsspeicher abrufen
             memory_res = (
                 self.supabase.table("aris_arbeitsspeicher").select("*").execute()
             )
@@ -76,14 +69,13 @@ class ArisAgent:
             if not memory_data:
                 return False, "Keine Einträge im Arbeitsspeicher vorhanden."
 
-            # Kompakte Formatierung der Einträge
+            # WICHTIG: Hier wurden max_performance_5_tage und candle_time_max_5_tage ergänzt!
             context_lines = [
-                f"- Ticker: {item.get('ticker')}, Typ: {item.get('signal_typ')}, SMI: {item.get('smi')}, ADX: {item.get('adx')}, EMA20: {item.get('above_ema20')}, Perf 5T: {item.get('end_performance_5_tage')}%"
+                f"- Ticker: {item.get('ticker')}, Typ: {item.get('signal_typ')}, SMI: {item.get('smi')}, ADX: {item.get('adx')}, EMA20: {item.get('above_ema20')}, Perf 5T (Ende): {item.get('end_performance_5_tage')}%, Max Perf (5T MFE): {item.get('max_performance_5_tage')}% (Erreicht am: {item.get('candle_time_max_5_tage')}), Quelle: {item.get('quelle')}"
                 for item in memory_data
             ]
             memory_context = "\n".join(context_lines)
 
-            # 2. Prompt aufbauen
             prompt = f"""
             Du bist Aris, der Performance Manager. 
             Deine Aufgabe ist es, die folgenden Rohdaten aus dem Arbeitsspeicher ('aris_arbeitsspeicher') tiefgehend zu analysieren, datenbasierte Erkenntnisse abzuleiten und diese als klare **Principals** (Prinzipien) zu formulieren.
@@ -93,16 +85,16 @@ class ArisAgent:
 
             Führe folgende Analysen durch:
             - **ADX & SMI Mustererkennung**: Gibt es besonders starke Kombinationen?
-            - **Haltedauer**: Laufen 5-Tage-End-Trades oder Max-Trades besser? Wenn Max-Trades besser, gibt es eine optimale Haltezeit?
+            - **Haltedauer & MFE**: Vergleiche die End-Performance nach 5 Tagen ('Perf 5T') mit der maximalen Intraday/5-Tage-Performance ('Max Perf'). Laufen Trades deutlich weiter, bevor sie gedreht haben? Gibt es Hinweise darauf, ob man Gewinne früher sichern sollte?
             - **Signal-Performance**: Welche Signale laufen besser? Gibt es eine optimale Signal + ADX + SMI Kombi?
-            - **Top 5 des Tages**: Hier wird von der gesamten Watchliste ausgewertet, welche in den letzten 5 Tagen die beste performance hatten. Welche Indikatoren und Merkmale weisen die Top 5 des Tages auf?
+            - **Top 5 des Tages**: Hier wird von der gesamten Watchliste ausgewertet, welche in den letzten 5 Tagen die beste Performance hatten. Welche Indikatoren und Merkmale weisen die Top 5 des Tages auf?
             - **Sonstige Muster**: Was funktioniert am besten?
             - **Verbesserungstipps**: Konkrete Handlungsempfehlungen.
+            - **Joris Empfehlungen**: Wie funktionieren die Empfehlungen von Joris?
 
             Schreibe die zentralen Erkenntnisse strukturiert als 'Principals' nieder.
             """
 
-            # 3. API-Aufruf je nach Provider (Groq oder OpenRouter) konfigurieren
             if provider == "groq":
                 api_url = "https://api.groq.com/openai/v1/chat/completions"
                 headers = {
@@ -140,7 +132,6 @@ class ArisAgent:
             res_json = response.json()
             report_content = res_json["choices"][0]["message"]["content"]
 
-            # 4. Bericht in agent_reports speichern
             self.supabase.table("agent_reports").insert({
                 "agent_name": self.name,
                 "report_content": report_content,
@@ -148,7 +139,6 @@ class ArisAgent:
                 "created_at": datetime.now().isoformat(),
             }).execute()
 
-            # 5. Arbeitsspeicher leeren
             for item in memory_data:
                 item_id = item.get("id")
                 if item_id:
