@@ -137,9 +137,9 @@ class JorisPortfolioManager:
             favorites_res = self.supabase.table("favorites").select("*").execute()
             favorites_data_text = str(favorites_res.data) if favorites_res.data else "Keine Favoriten."
 
-            # Irma Sektor-Quoten laden (nur bei swing und high_risk)
+            # Irma Sektor-Quoten laden (REIN FÜR SWING MIT ELITE-SIGNALEN & >= 70% QUOTE)
             irma_sectors_text = ""
-            if depot_focus.lower() in ["swing", "high_risk"]:
+            if depot_focus.lower() == "swing":
                 try:
                     wl_res = self.supabase.table("watchlist").select("ticker, sector").execute()
                     wl_data = wl_res.data if wl_res.data else []
@@ -153,28 +153,47 @@ class JorisPortfolioManager:
                             sector_stats[sec] = set()
                         sector_stats[sec].add(tick)
 
-                    sig_res = self.supabase.table("signals").select("ticker").execute()
+                    # Nur Elite-Signale aus der Signals-Tabelle laden
+                    sig_res = self.supabase.table("signals").select("*").execute()
                     sig_data = sig_res.data if sig_res.data else []
-                    active_signals = {item.get("ticker") for item in sig_data if item.get("ticker")}
+                    
+                    elite_signals = set()
+                    for item in sig_data:
+                        tick = item.get("ticker")
+                        if not tick:
+                            continue
+                        is_elite = (
+                            item.get("is_elite") is True or 
+                            item.get("elite") is True or 
+                            str(item.get("signal_typ", "")).strip().lower() == "elite" or
+                            str(item.get("typ", "")).strip().lower() == "elite"
+                        )
+                        if is_elite:
+                            elite_signals.add(tick)
 
                     rows = []
                     for sec, tickers in sector_stats.items():
                         total = len(tickers)
                         if total == 0:
                             continue
-                        signaled = len(tickers.intersection(active_signals))
+                        signaled = len(tickers.intersection(elite_signals))
                         quota = (signaled / total) * 100
-                        rows.append({
-                            "sector": sec,
-                            "total_tickers": total,
-                            "signal_tickers": signaled,
-                            "signal_quota_percent": round(quota, 2)
-                        })
+                        
+                        # HARD FILTER: Nur Sektoren mit mindestens 70% Elite-Signal-Quote
+                        if quota >= 70.0:
+                            rows.append({
+                                "sector": sec,
+                                "total_tickers": total,
+                                "elite_signal_tickers": signaled,
+                                "signal_quota_percent": round(quota, 2)
+                            })
 
                     df_sec = pd.DataFrame(rows)
                     if not df_sec.empty:
                         df_sec = df_sec.sort_values(by="signal_quota_percent", ascending=False).head(10)
-                        irma_sectors_text = f"\n            E) IRMA SEKTOR-QUOTEN (Top 10):\n{df_sec.to_string(index=False)}"
+                        irma_sectors_text = f"\n            E) IRMA SEKTOR-QUOTEN SWING (Strikte Auswahl: Nur Sektoren mit >= 70% Elite-Signal-Quote):\n{df_sec.to_string(index=False)}"
+                    else:
+                        irma_sectors_text = "\n            E) IRMA SEKTOR-QUOTEN SWING: Aktuell erreicht kein Sektor die geforderte 70% Elite-Signal-Quote."
                 except Exception:
                     pass
 
@@ -203,7 +222,7 @@ class JorisPortfolioManager:
             3. Konkrete Handlungsanweisungen und Top-Empfehlungen auf Basis der Daten.
             
             ZUSATZ-FORMAT FÜR DAS JOURNAL (NUR BEI SWING):
-            Lies für die ausgewählten Signale aus den Screener-Daten bzw. der Watchlist auch den ADX- und SMI-Wert (falls in den Meta-Daten vorhanden) mit aus.
+            Lies für die ausgewählten Swing-Empfehlungen aus den Screener-Daten bzw. der Watchlist auch den ADX- und SMI-Wert (falls vorhanden) mit aus.
             ===JOURNAL_DATA_START===
             [
               {{"ticker": "AAPL", "setup_reason": "Ausbruch", "target": 220.0, "stop_loss": 175.0, "smi": 0.45, "adx": 28.5}}
