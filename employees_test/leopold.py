@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import pandas as pd
 import json
+import io
 import altair as alt
 import streamlit as st
 
@@ -227,22 +228,20 @@ class LeopoldAnalyticsManager:
 
             st.divider()
 
-            # --- TABELLE & EXCEL-OPTIMIERTER DOWNLOAD ---
+            # --- TABELLE & ECHTER EXCEL-DOWNLOAD (.xlsx) ---
             st.subheader(f"📋 Gefiltertes Signals Journal ({len(df_filtered)} Einträge)")
             st.dataframe(df_filtered, use_container_width=True, hide_index=True)
 
-            # Export-Vorbereitung für deutsches Excel (Dezimalpunkt zu Komma & Semikolon-Trennzeichen)
-            df_export = df_filtered.copy()
-            float_cols = df_export.select_dtypes(include=['float', 'float64']).columns
-            for col in float_cols:
-                df_export[col] = df_export[col].apply(lambda x: f"{x:.2f}".replace('.', ',') if pd.notnull(x) else "")
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_filtered.to_excel(writer, index=False, sheet_name='Signals Journal')
+            excel_data = output.getvalue()
 
-            csv_data = df_export.to_csv(index=False, sep=";").encode('utf-8-sig')
             st.download_button(
-                label="📥 Signals Journal als Excel-CSV herunterladen",
-                data=csv_data,
-                file_name="signals_journal_excel_export.csv",
-                mime="text/csv",
+                label="📥 Signals Journal als echte Excel-Datei (.xlsx) herunterladen",
+                data=excel_data,
+                file_name="signals_journal_export.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
 
 
