@@ -97,10 +97,8 @@ class LeopoldAnalyticsManager:
                 valid_adx = df_base[adx_col].dropna()
                 if len(valid_adx) >= 4:
                     try:
-                        # nutze qcut, aber mit sprechenden Bereichs-Labels basierend auf Quantil-Grenzen
                         categories, bins = pd.qcut(valid_adx, q=4, retbins=True, duplicates="drop")
                         labels = [f"ADX: {bins[i]:.1f} bis {bins[i+1]:.1f}" for i in range(len(bins)-1)]
-                        # Falls weniger als 4 Bins wegen duplicates="drop" herauskommen, fangen wir es ab
                         if len(labels) == 4:
                             df_base.loc[valid_adx.index, "ADX_Zone"] = pd.qcut(valid_adx, q=4, labels=labels, duplicates="drop").astype(str)
                         else:
@@ -229,15 +227,21 @@ class LeopoldAnalyticsManager:
 
             st.divider()
 
-            # --- TABELLE & DOWNLOAD ---
+            # --- TABELLE & EXCEL-OPTIMIERTER DOWNLOAD ---
             st.subheader(f"📋 Gefiltertes Signals Journal ({len(df_filtered)} Einträge)")
             st.dataframe(df_filtered, use_container_width=True, hide_index=True)
 
-            csv_data = df_filtered.to_csv(index=False).encode('utf-8')
+            # Export-Vorbereitung für deutsches Excel (Dezimalpunkt zu Komma & Semikolon-Trennzeichen)
+            df_export = df_filtered.copy()
+            float_cols = df_export.select_dtypes(include=['float', 'float64']).columns
+            for col in float_cols:
+                df_export[col] = df_export[col].apply(lambda x: f"{x:.2f}".replace('.', ',') if pd.notnull(x) else "")
+
+            csv_data = df_export.to_csv(index=False, sep=";").encode('utf-8-sig')
             st.download_button(
-                label="📥 Signals Journal als CSV herunterladen",
+                label="📥 Signals Journal als Excel-CSV herunterladen",
                 data=csv_data,
-                file_name="signals_journal_combinations_export.csv",
+                file_name="signals_journal_excel_export.csv",
                 mime="text/csv",
             )
 
