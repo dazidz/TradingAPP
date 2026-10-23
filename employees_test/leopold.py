@@ -19,7 +19,7 @@ class LeopoldAnalyticsManager:
         st.markdown("Interaktive Streudiagramm-Analyse (ADX vs. SMI), Timing-Optimierung & Filterung des `signals_journal` (basierend auf Max-Performance / MFE).")
         st.divider()
 
-        # Daten aus signals_journal laden (mit Paginierung, um das 1000er-Limit zu umgehen)
+        # 1. Daten aus signals_journal laden (mit Paginierung)
         sj_data = []
         load_error = None
         try:
@@ -34,6 +34,19 @@ class LeopoldAnalyticsManager:
                 offset += page_size
         except Exception as e:
             load_error = str(e)
+
+        # 2. strategy_kategorie aus der Watchlist laden (Lookup-Mapping über Ticker)
+        wl_mapping = {}
+        try:
+            wl_res = self.supabase.table("watchlist").select("ticker, strategy_kategorie").execute()
+            if wl_res and wl_res.data:
+                for row in wl_res.data:
+                    t = row.get("ticker") or row.get("symbol")
+                    kat = row.get("strategy_kategorie")
+                    if t and kat:
+                        wl_mapping[str(t).strip().upper()] = str(kat).strip()
+        except Exception as e:
+            st.warning(f"⚠️ Watchlist-Kategorien konnten nicht geladen werden: {e}")
 
         if load_error:
             st.error(f"⚠️ Supabase-Fehler beim Zugriff auf `signals_journal`: {load_error}")
@@ -60,52 +73,81 @@ class LeopoldAnalyticsManager:
                     meta_df = meta_df[[c for c in meta_df.columns if c not in df_sj.columns]]
                     df_sj = pd.concat([df_sj, meta_df], axis=1)
 
-            # Spalten-Erkennung absichern (Max-Performance hat jetzt Priorität!)
-            possible_type_cols = ["signal_typ", "typ", "signal_type", "type"]
-            type_col = next((c for c in possible_type_cols if c in df_sj.columns), None)
+            # Ticker-Spalte finden und Watchlist-Kategorie anheften
+            ticker_col = next((c for c in ["ticker", "symbol"] if c in df_sj.columns), None)
+            if ticker_col:
+                df_sj["strategy_kategorie"] = df_sj[ticker_col].astype(str).str.strip().str.upper().map(wl_mapping).fillna("Unbekannt")
+            else:
+                df_sj["strategy_kategorie"] = "Unbekannt"
 
+            # Weitere Spalten-Erkennung absichern
             adx_col = next((c for c in ["adx", "average_directional_index", "adx_value"] if c in df_sj.columns), None)
             smi_col = next((c for c in ["smi", "stochastic_momentum_index", "smi_value"] if c in df_sj.columns), None)
-            
-            # WICHTIG: Max-Performance (MFE) als primäre Zielgröße für Leopold
+            price_col = next((c for c in ["preis", "price", "einstiegspreis", "close"] if c in df_sj.columns), None)
             perf_target_col = next((c for c in ["max_performance_5_tage", "mfe", "max_performance", "end_performance_5_tage", "performance"] if c in df_sj.columns), None)
-
-            if type_col:
-                df_sj[type_col] = df_sj[type_col].astype(str).str.strip()
 
             if adx_col:
                 df_sj[adx_col] = pd.to_numeric(df_sj[adx_col], errors="coerce")
             if smi_col:
                 df_sj[smi_col] = pd.to_numeric(df_sj[smi_col], errors="coerce")
+            if price_col:
+                df_sj[price_col] = pd.to_numeric(df_sj[price_col], errors="coerce")
             if perf_target_col:
                 df_sj[perf_target_col] = pd.to_numeric(df_sj[perf_target_col], errors="coerce")
 
-            # --- UI: SIGNAL-TYP FILTER (VORAB) ---
-            st.markdown("### 🎛️ 1. Grundfilter")
-            col_f1, _ = st.columns([2, 2])
+            # --- UI: KATEGORIE-FILTER (AUS WATCHLIST) ---
+            st.markdown("### 🎛️ 1. Strategie-Filter (aus Watchlist)")
+            col_f1, col_f2 = st.columns(2)
+            
             with col_f1:
-                if type_col:
-                    unique_types = ["Alle"] + sorted(list(df_sj[type_col].dropna().unique()))
-                    sel_type = st.selectbox("Signal-Typ", unique_types, key="leopold_type_filter")
-                else:
-                    sel_type = "Alle"
+                unique_categories = sorted(list(df_sj["strategy_kategorie"].dropna().unique()))
+                # Standardmäßig alles auswählen, wo "RISK" nicht vorkommt (z. B. Swing)
+                default_categories = [k for k in unique_categories if "RISK" not in k.upper()]
+                sel_categories = st.multiselect(
+                    "Strategie-Kategorien (aus Watchlist)", 
+                    unique_categories, 
+                    default=default_categories if default_categories else unique_categories, 
+                    key="leopold_kat_filter"
+                )
 
-            # Grundfilter anwenden
+            with col_f2:
+                if price_col and not df_sj[price_col].dropna().empty:
+                    max_price = float(df_sj[price_col].max())
+                    selected_min_price = st.number_input(
+                        "Zusätzlicher Mindestpreis (€/$)", 
+                        min_value=0.0, 
+                        max_value=max_price, 
+                        value=5.0, 
+                        step=1.0,
+                        help="Trennt zusätzlich Penny Stocks (< 5 €) ab."
+                    )
+                else:
+                    selected_min_price = 0.0
+
+            # Filter anwenden
             df_base = df_sj.copy()
-            if type_col and sel_type != "Alle":
-                df_base = df_base[df_base[type_col] == sel_type]
+            if sel_categories:
+                df_base = df_base[df_base["strategy_kategorie"].isin(sel_categories)]
+            if price_col and selected_min_price > 0:
+                df_base = df_base[df_base[price_col] >= selected_min_price]
+
+            st.caption(f"🛡️ **Aktiver Filter:** {len(df_base)} von {len(df_sj)} Trades fließen in die Auswertung ein.")
 
             st.divider()
 
-            # --- INTERAKTIVES ALTAIR-STREUDIAGRAMM (ADX vs. SMI - Gefärbt nach Max-Performance) ---
+            # --- INTERAKTIVES ALTAIR-STREUDIAGRAMM ---
             if adx_col and smi_col and perf_target_col and not df_base.empty:
-                st.markdown("### 🎯 ADX vs. SMI Streudiagramm (Eingefärbt nach Max-Performance / MFE)")
-                st.markdown("Jeder Punkt repräsentiert einen Trade. Die Farbe zeigt die maximale Intraday/5-Tage-Performance (Grün = starker Peak, Rot = schlechter Verlauf).")
+                st.markdown("### 🎯 ADX vs. SMI Streudiagramm (Exklusiv Swing-Trades)")
+                st.markdown("Jeder Punkt repräsentiert einen Trade. Die Farbe zeigt die maximale Performance (MFE).")
 
                 df_scatter = df_base.dropna(subset=[adx_col, smi_col, perf_target_col]).copy()
                 
                 if not df_scatter.empty:
-                    tooltip_fields = ["ticker" if "ticker" in df_scatter.columns else None, type_col if type_col in df_scatter.columns else None]
+                    tooltip_fields = [
+                        ticker_col if ticker_col in df_scatter.columns else None, 
+                        "strategy_kategorie", 
+                        price_col if price_col in df_scatter.columns else None
+                    ]
                     tooltip_fields = [t for t in tooltip_fields if t is not None]
                     
                     tooltip_fields.extend([
@@ -133,7 +175,7 @@ class LeopoldAnalyticsManager:
 
             st.divider()
 
-            # --- KPI METRIKEN (Basiert auf Max-Performance) ---
+            # --- KPI METRIKEN ---
             def safe_mean(dataframe, column_name):
                 if not dataframe.empty and column_name in dataframe.columns:
                     val = pd.to_numeric(dataframe[column_name], errors='coerce').mean()
@@ -155,7 +197,7 @@ class LeopoldAnalyticsManager:
             avg_max_perf = safe_mean(df_base, perf_target_col)
             avg_drawdown = safe_mean(df_base, drawdown_col)
 
-            st.markdown(f"### 📊 Gesamt-Kennzahlen (Basiert auf Max-Performance / {len(df_base)} Trades)")
+            st.markdown(f"### 📊 Bereinigte Gesamt-Kennzahlen ({len(df_base)} Trades)")
             r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
             with r1_c1: st.metric("Win-Rate (Max > 0%)", f"{win_rate:.1f}%")
             with r1_c2: st.metric("Ø Max. Performance (MFE)", f"{avg_max_perf:+.2f}%")
@@ -164,7 +206,7 @@ class LeopoldAnalyticsManager:
 
             st.divider()
 
-            # --- TABELLE & ECHTER EXCEL-DOWNLOAD (.xlsx) ---
+            # --- TABELLE & EXCEL-DOWNLOAD (.xlsx) ---
             st.subheader(f"📋 Signals Journal ({len(df_base)} Einträge)")
             st.dataframe(df_base, use_container_width=True, hide_index=True)
 
