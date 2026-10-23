@@ -16,7 +16,7 @@ class LeopoldAnalyticsManager:
 
     def render_ui(self, api_key=None):
         st.subheader(f"⚙️ {self.name} - {self.description}")
-        st.markdown("Exakte Kombinationen-Filterung (ADX x SMI), Timing-Optimierung & Heatmap des `signals_journal`.")
+        st.markdown("Interaktive Streudiagramm-Analyse (ADX vs. SMI), Timing-Optimierung & Filterung des `signals_journal` (basierend auf Max-Performance / MFE).")
         st.divider()
 
         # Daten aus signals_journal laden (mit Paginierung, um das 1000er-Limit zu umgehen)
@@ -60,12 +60,15 @@ class LeopoldAnalyticsManager:
                     meta_df = meta_df[[c for c in meta_df.columns if c not in df_sj.columns]]
                     df_sj = pd.concat([df_sj, meta_df], axis=1)
 
-            # Spalten-Erkennung absichern
+            # Spalten-Erkennung absichern (Max-Performance hat jetzt Priorität!)
             possible_type_cols = ["signal_typ", "typ", "signal_type", "type"]
             type_col = next((c for c in possible_type_cols if c in df_sj.columns), None)
 
             adx_col = next((c for c in ["adx", "average_directional_index", "adx_value"] if c in df_sj.columns), None)
             smi_col = next((c for c in ["smi", "stochastic_momentum_index", "smi_value"] if c in df_sj.columns), None)
+            
+            # WICHTIG: Max-Performance (MFE) als primäre Zielgröße für Leopold
+            perf_target_col = next((c for c in ["max_performance_5_tage", "mfe", "max_performance", "end_performance_5_tage", "performance"] if c in df_sj.columns), None)
 
             if type_col:
                 df_sj[type_col] = df_sj[type_col].astype(str).str.strip()
@@ -74,6 +77,8 @@ class LeopoldAnalyticsManager:
                 df_sj[adx_col] = pd.to_numeric(df_sj[adx_col], errors="coerce")
             if smi_col:
                 df_sj[smi_col] = pd.to_numeric(df_sj[smi_col], errors="coerce")
+            if perf_target_col:
+                df_sj[perf_target_col] = pd.to_numeric(df_sj[perf_target_col], errors="coerce")
 
             # --- UI: SIGNAL-TYP FILTER (VORAB) ---
             st.markdown("### 🎛️ 1. Grundfilter")
@@ -90,151 +95,82 @@ class LeopoldAnalyticsManager:
             if type_col and sel_type != "Alle":
                 df_base = df_base[df_base[type_col] == sel_type]
 
-            # --- ECHTE WERTBEREICHE STATT Q1-Q4 DEFINIEREN ---
-            df_base["ADX_Zone"] = "ADX: N/A"
-            df_base["SMI_Zone"] = "SMI: N/A"
+            st.divider()
 
-            if adx_col and not df_base.empty:
-                valid_adx = df_base[adx_col].dropna()
-                if len(valid_adx) >= 4:
-                    try:
-                        categories, bins = pd.qcut(valid_adx, q=4, retbins=True, duplicates="drop")
-                        labels = [f"ADX: {bins[i]:.1f} bis {bins[i+1]:.1f}" for i in range(len(bins)-1)]
-                        if len(labels) == 4:
-                            df_base.loc[valid_adx.index, "ADX_Zone"] = pd.qcut(valid_adx, q=4, labels=labels, duplicates="drop").astype(str)
-                        else:
-                            df_base.loc[valid_adx.index, "ADX_Zone"] = pd.cut(valid_adx, bins=bins, include_lowest=True, labels=labels[:len(bins)-1]).astype(str)
-                    except Exception:
-                        df_base.loc[valid_adx.index, "ADX_Zone"] = "ADX: Standard"
+            # --- INTERAKTIVES ALTAIR-STREUDIAGRAMM (ADX vs. SMI - Gefärbt nach Max-Performance) ---
+            if adx_col and smi_col and perf_target_col and not df_base.empty:
+                st.markdown("### 🎯 ADX vs. SMI Streudiagramm (Eingefärbt nach Max-Performance / MFE)")
+                st.markdown("Jeder Punkt repräsentiert einen Trade. Die Farbe zeigt die maximale Intraday/5-Tage-Performance (Grün = starker Peak, Rot = schlechter Verlauf).")
 
-            if smi_col and not df_base.empty:
-                valid_smi = df_base[smi_col].dropna()
-                if len(valid_smi) >= 4:
-                    try:
-                        categories, bins = pd.qcut(valid_smi, q=4, retbins=True, duplicates="drop")
-                        labels = [f"SMI: {bins[i]:.2f} bis {bins[i+1]:.2f}" for i in range(len(bins)-1)]
-                        if len(labels) == 4:
-                            df_base.loc[valid_smi.index, "SMI_Zone"] = pd.qcut(valid_smi, q=4, labels=labels, duplicates="drop").astype(str)
-                        else:
-                            df_base.loc[valid_smi.index, "SMI_Zone"] = pd.cut(valid_smi, bins=bins, include_lowest=True, labels=labels[:len(bins)-1]).astype(str)
-                    except Exception:
-                        df_base.loc[valid_smi.index, "SMI_Zone"] = "SMI: Standard"
-
-            st.markdown("### 🧬 2. Exakte Kombinations-Auswahl (ADX x SMI Matrix)")
-            st.markdown("Wähle hier per Checkbox aus, **welche konkreten Bereiche** in die Auswertung einfließen sollen:")
-
-            adx_labels = sorted(list(df_base["ADX_Zone"].astype(str).unique()))
-            smi_labels = sorted(list(df_base["SMI_Zone"].astype(str).unique()))
-
-            if "combo_selections" not in st.session_state:
-                st.session_state.combo_selections = {}
-
-            # UI-Matrix als Checkbox-Raster
-            cols_matrix = st.columns(len(smi_labels) + 1)
-            with cols_matrix[0]:
-                st.markdown("**ADX \\ SMI**")
-            for idx, smi_lbl in enumerate(smi_labels):
-                with cols_matrix[idx + 1]:
-                    st.markdown(f"**{smi_lbl}**")
-
-            active_combinations = []
-            for adx_lbl in adx_labels:
-                row_cols = st.columns(len(smi_labels) + 1)
-                with row_cols[0]:
-                    st.markdown(f"**{adx_lbl}**")
+                df_scatter = df_base.dropna(subset=[adx_col, smi_col, perf_target_col]).copy()
                 
-                for idx, smi_lbl in enumerate(smi_labels):
-                    combo_key = f"{adx_lbl}__AND__{smi_lbl}"
-                    if combo_key not in st.session_state.combo_selections:
-                        st.session_state.combo_selections[combo_key] = True
+                if not df_scatter.empty:
+                    tooltip_fields = ["ticker" if "ticker" in df_scatter.columns else None, type_col if type_col in df_scatter.columns else None]
+                    tooltip_fields = [t for t in tooltip_fields if t is not None]
                     
-                    with row_cols[idx + 1]:
-                        is_checked = st.checkbox("", value=st.session_state.combo_selections[combo_key], key=f"cb_{combo_key}", label_visibility="collapsed")
-                        st.session_state.combo_selections[combo_key] = is_checked
-                        if is_checked:
-                            active_combinations.append((adx_lbl, smi_lbl))
+                    tooltip_fields.extend([
+                        alt.Tooltip(f"{adx_col}:Q", format=".1f", title="ADX"),
+                        alt.Tooltip(f"{smi_col}:Q", format=".2f", title="SMI"),
+                        alt.Tooltip(f"{perf_target_col}:Q", format=".2f", title="Max. Perf. (%)")
+                    ])
+
+                    scatter_chart = alt.Chart(df_scatter).mark_circle(size=80, opacity=0.85).encode(
+                        x=alt.X(f"{adx_col}:Q", title="ADX (Trendstärke)"),
+                        y=alt.Y(f"{smi_col}:Q", title="SMI (Momentum)"),
+                        color=alt.Color(
+                            f"{perf_target_col}:Q", 
+                            title="Max. Perf. (%)", 
+                            scale=alt.Scale(scheme="redyellowgreen", domainMid=0)
+                        ),
+                        tooltip=tooltip_fields
+                    ).interactive().properties(height=420)
+
+                    st.altair_chart(scatter_chart, use_container_width=True)
+                else:
+                    st.info("Nicht genügend gültige Datenpunkte für das Streudiagramm vorhanden.")
+            else:
+                st.warning("Für das Streudiagramm werden gültige ADX-, SMI- und Performance-Spalten benötigt.")
 
             st.divider()
 
-            # --- FILTER ANWENDEN AUF BASIS DER GEWÄHLTEN KOMBINATIONEN ---
-            df_filtered = df_base.copy()
-            if active_combinations and not df_base.empty:
-                mask = df_filtered.apply(lambda row: (str(row["ADX_Zone"]), str(row["SMI_Zone"])) in active_combinations, axis=1)
-                df_filtered = df_filtered[mask]
-            else:
-                df_filtered = pd.DataFrame(columns=df_base.columns)
-
-            # Hilfsfunktion für sichere Mittelwert-Berechnung
+            # --- KPI METRIKEN (Basiert auf Max-Performance) ---
             def safe_mean(dataframe, column_name):
                 if not dataframe.empty and column_name in dataframe.columns:
                     val = pd.to_numeric(dataframe[column_name], errors='coerce').mean()
                     return val if pd.notnull(val) else 0.0
                 return 0.0
 
-            perf_target_col = next((c for c in ["end_performance_5_tage", "performance", "end_performance"] if c in df_sj.columns), None)
-            max_perf_col = next((c for c in ["max_performance_5_tage", "mfe", "max_performance"] if c in df_sj.columns), None)
             drawdown_col = next((c for c in ["max_drawdown", "mae", "drawdown"] if c in df_sj.columns), None)
-            days_col = next((c for c in ["tage_bis_max_perf", "days_to_max", "max_perf_tage", "tage_bis_max"] if c in df_filtered.columns), None)
+            days_col = next((c for c in ["tage_bis_max_perf", "days_to_max", "max_perf_tage", "tage_bis_max"] if c in df_base.columns), None)
 
             win_rate = 0.0
-            if not df_filtered.empty and perf_target_col:
-                numeric_perf = pd.to_numeric(df_filtered[perf_target_col], errors='coerce')
+            if not df_base.empty and perf_target_col:
+                numeric_perf = pd.to_numeric(df_base[perf_target_col], errors='coerce')
                 winning_trades = (numeric_perf > 0).sum()
                 total_valid_trades = numeric_perf.dropna().count()
                 if total_valid_trades > 0:
                     win_rate = (winning_trades / total_valid_trades) * 100
 
-            avg_days_to_max = safe_mean(df_filtered, days_col)
-            avg_max_perf = safe_mean(df_filtered, max_perf_col)
-            avg_drawdown = safe_mean(df_filtered, drawdown_col)
+            avg_days_to_max = safe_mean(df_base, days_col)
+            avg_max_perf = safe_mean(df_base, perf_target_col)
+            avg_drawdown = safe_mean(df_base, drawdown_col)
 
-            # --- KPI METRIKEN (INKL. TIMING) ---
-            st.markdown("### 📊 Performance- & Timing-Kennzahlen (für gewählte Bereiche)")
-            
+            st.markdown(f"### 📊 Gesamt-Kennzahlen (Basiert auf Max-Performance / {len(df_base)} Trades)")
             r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
-            with r1_c1: st.metric("Win-Rate (Quote)", f"{win_rate:.1f}%")
+            with r1_c1: st.metric("Win-Rate (Max > 0%)", f"{win_rate:.1f}%")
             with r1_c2: st.metric("Ø Max. Performance (MFE)", f"{avg_max_perf:+.2f}%")
             with r1_c3: st.metric("Ø Max. Drawdown (MAE)", f"{avg_drawdown:+.2f}%")
             with r1_c4: st.metric("Ø Tage bis Peak-Perf.", f"{avg_days_to_max:.1f} Tage")
 
             st.divider()
 
-            # --- VISUELLE HEATMAP FÜR SWEET-SPOTS ---
-            if adx_col and smi_col and perf_target_col and not df_base.empty:
-                st.markdown("### 🎯 Sweet-Spot Heatmap (Ø Performance nach Bereichen)")
-                st.markdown("Die Heatmap zeigt dir sofort, in welchen Indikator-Bereichen die durchschnittliche Performance am höchsten ist.")
-
-                df_hm = df_base.dropna(subset=["ADX_Zone", "SMI_Zone", perf_target_col]).copy()
-                if not df_hm.empty:
-                    pivot_hm = df_hm.pivot_table(
-                        values=perf_target_col, 
-                        index="ADX_Zone", 
-                        columns="SMI_Zone", 
-                        aggfunc="mean"
-                    ).reset_index()
-
-                    df_melted = pivot_hm.melt(id_vars="ADX_Zone", var_name="SMI_Zone", value_name="Avg_Performance")
-
-                    heatmap = alt.Chart(df_melted).mark_rect().encode(
-                        x=alt.X("SMI_Zone:N", title="SMI Bereich"),
-                        y=alt.Y("ADX_Zone:N", title="ADX Bereich"),
-                        color=alt.Color("Avg_Performance:Q", title="Ø Perf (%)", scale=alt.Scale(scheme="greens")),
-                        tooltip=["ADX_Zone", "SMI_Zone", alt.Tooltip("Avg_Performance:Q", format=".2f")]
-                    ).properties(height=320)
-
-                    st.altair_chart(heatmap, use_container_width=True)
-                else:
-                    st.info("Nicht genügend Daten für die Heatmap vorhanden.")
-
-            st.divider()
-
             # --- TABELLE & ECHTER EXCEL-DOWNLOAD (.xlsx) ---
-            st.subheader(f"📋 Gefiltertes Signals Journal ({len(df_filtered)} Einträge)")
-            st.dataframe(df_filtered, use_container_width=True, hide_index=True)
+            st.subheader(f"📋 Signals Journal ({len(df_base)} Einträge)")
+            st.dataframe(df_base, use_container_width=True, hide_index=True)
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_filtered.to_excel(writer, index=False, sheet_name='Signals Journal')
+                df_base.to_excel(writer, index=False, sheet_name='Signals Journal')
             excel_data = output.getvalue()
 
             st.download_button(
