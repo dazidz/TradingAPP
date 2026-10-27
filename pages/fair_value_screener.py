@@ -1,7 +1,6 @@
 from datetime import datetime
 import numpy as np
 import pandas as pd
-import streamlit as st
 
 
 class FairValueScreener:
@@ -18,15 +17,9 @@ class FairValueScreener:
             # 1. Watchlist aus Supabase laden
             response = self.supabase.table("watchlist").select("*").execute()
             if not response.data:
-                st.warning(
-                    "⚠️ Die Tabelle `watchlist` in Supabase ist leer oder nicht erreichbar."
-                )
                 return pd.DataFrame(), False
 
             df = pd.DataFrame(response.data)
-
-            # Debug-Hilfe: Falls Spalten fehlen, zeigen wir an, was da ist
-            available_cols = df.columns.tolist()
 
             results = []
             for _, row in df.iterrows():
@@ -43,7 +36,7 @@ class FairValueScreener:
                     row.get("sektor", row.get("kategorie", "Standard")),
                 )
 
-                # Flexible Spaltensuche für Finanzdaten (prüft verschiedene gängige Schreibweisen)
+                # Flexible Spaltensuche für Finanzdaten
                 preis = float(
                     row.get("aktueller_preis")
                     or row.get("preis")
@@ -76,12 +69,10 @@ class FairValueScreener:
                     or 5.0
                 )
 
-                # Wenn kein Preis vorhanden ist, überspringen oder mit 0 listen
                 if preis <= 0:
                     continue
 
                 # --- 1. BENJAMIN GRAHAM FORMEL ---
-                # V = EPS * (8.5 + 2 * g)
                 graham_val = (
                     eps * (8.5 + (2 * max(0.0, wachstum_g)))
                     if eps > 0
@@ -102,7 +93,6 @@ class FairValueScreener:
                 elif len(valid_vals) == 1:
                     fair_value = valid_vals[0]
                 else:
-                    # Fallback auf Buchwert oder aktuellen Preis
                     fair_value = bvps * 1.2 if bvps > 0 else preis
 
                 # --- 4. MARGIN OF SAFETY & STATUS ---
@@ -137,15 +127,9 @@ class FairValueScreener:
                 df_result = df_result.sort_values(
                     by="Potential (%)", ascending=False
                 )
-            else:
-                st.info(
-                    f"ℹ️ Watchlist enthält Daten, aber keine Zeilen mit gültigem Preis (`aktueller_preis`/`preis`/`price`). Vorhandene Spalten in Supabase: {available_cols}"
-                )
 
             return df_result, True
 
         except Exception as e:
-            st.error(
-                f"⚠️ Fehler bei der Fair-Value-Berechnung: {str(e)}"
-            )
+            print(f"Fehler bei Fair-Value-Berechnung: {e}")
             return pd.DataFrame(), False
