@@ -1,135 +1,123 @@
-from datetime import datetime
-import numpy as np
+from pathlib import Path
+import sys
 import pandas as pd
+import streamlit as st
+from supabase import create_client
 
+st.set_page_config(
+    layout="wide",
+    page_title="VisionDZ - Fair Value Screener",
+    page_icon="📐",
+)
 
-class FairValueScreener:
+if not st.session_state.get("password_correct", False):
+    st.warning("Bitte melde dich zuerst auf der Hauptseite an.")
+    st.stop()
 
-    def __init__(self, supabase_client):
-        self.supabase = supabase_client
+# Supabase Verbindung aufbauen
+try:
+    URL = st.secrets["SUPABASE_URL"]
+    KEY = st.secrets["SUPABASE_KEY"]
+    supabase = create_client(URL, KEY)
+except Exception as e:
+    st.error(f"Fehler beim Verbinden mit Supabase: {e}")
+    st.stop()
 
-    def get_or_calculate_fair_values(self, force_refresh=False):
-        """Lädt die Watchlist aus Supabase, gleicht Spalten flexibel ab
+st.title("📐 Autonomer Fair Value Screener")
+st.markdown("Tagesaktuelle Bewertung des inneren Wertes nach Benjamin Graham & Warren Buffett für alle Watchlist-Titel.")
 
-        und berechnet den inneren Wert nach Graham & Buffett.
-        """
-        try:
-            # 1. Watchlist aus Supabase laden
-            response = self.supabase.table("watchlist").select("*").execute()
-            if not response.data:
-                return pd.DataFrame(), False
+st.divider()
 
-            df = pd.DataFrame(response.data)
+# Daten direkt laden und nach Value-Modellen berechnen
+try:
+    with st.spinner("Lade Watchlist und berechne Fair Values..."):
+        response = supabase.table("watchlist").select("*").execute()
+        
+        if not response.data:
+            st.warning("⚠️ Die Tabelle `watchlist` in Supabase ist leer.")
+            st.stop()
+            
+        df_raw = pd.DataFrame(response.data)
+        
+        results = []
+        for _, row in df_raw.iterrows():
+            ticker = row.get("ticker") or row.get("symbol") or "UNBEKANNT"
+            name = row.get("name", ticker)
+            sektor = row.get("strategy_kategorie", row.get("sektor", "Standard"))
+            
+            # Rohdaten sicher auslesen
+            preis = float(row.get("aktueller_preis") or row.get("preis") or row.get("price") or 0.0)
+            eps = float(row.get("eps") or row.get("gewinn_je_aktie") or 0.0)
+            fcf = float(row.get("fcf_je_aktie") or row.get("fcf") or 0.0)
+            wachstum = float(row.get("erwartetes_wachstum") or 5.0)
+            
+            if preis <= 0:
+                continue
+                
+            # --- Graham-Formel & Buffett Owner Earnings ---
+            graham = eps * (8.5 + (2 * max(0.0, wachstum))) if eps > 0 else preis
+            buffett = (fcf / 0.10) if fcf > 0 else graham
+            
+            # Blended Fair Value (60% Graham, 40% Buffett)
+            fair_value = (graham * 0.6) + (buffett * 0.4)
+            
+            # Margin of Safety / Potenzial
+            potential = ((fair_value - preis) / preis) * 100 if preis > 0 else 0.0
+            
+            if potential >= 30:
+                status = "🟢 Stark Unterbewertet"
+            elif potential >= 10:
+                status = "🟢 Unterbewertet"
+            elif potential >= -15:
+                status = "🟡 Fair Bewertet"
+            else:
+                status = "🔴 Überbewertet"
+                
+            results.append({
+                "Ticker": ticker,
+                "Name": name,
+                "Sektor": sektor,
+                "Aktueller Preis": round(preis, 2),
+                "Fair Value (Est.)": round(fair_value, 2),
+                "Potential (%)": round(potential, 1),
+                "Status": status,
+                "Graham Value": round(graham, 2),
+                "Owner Earnings Val": round(buffett, 2)
+            })
+            
+        df = pd.DataFrame(results)
+        if not df.empty:
+            df = df.sort_values(by="Potential (%)", ascending=False)
+            
+except Exception as e:
+    st.error(f"Kritischer Fehler bei der Datenverarbeitung: {e}")
+    df = pd.DataFrame()
 
-            results = []
-            for _, row in df.iterrows():
-                # Flexible Spaltensuche für Ticker & Name
-                ticker = (
-                    row.get("ticker")
-                    or row.get("symbol")
-                    or row.get("aktie")
-                    or "UNBEKANNT"
-                )
-                name = row.get("name", ticker)
-                sektor = row.get(
-                    "strategy_kategorie",
-                    row.get("sektor", row.get("kategorie", "Standard")),
-                )
+# UI-Oberfläche rendern
+if not df.empty:
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        status_filter = st.multiselect(
+            "Nach Status filtern:",
+            options=df["Status"].unique().tolist(),
+            default=df["Status"].unique().tolist(),
+        )
+    
+    filtered_df = df[df["Status"].isin(status_filter)]
+    
+    st.markdown("### 📊 Bewertungsübersicht")
+    st.dataframe(filtered_df, use_container_width=True, hide_index=True)
 
-                # Flexible Spaltensuche für Finanzdaten
-                preis = float(
-                    row.get("aktueller_preis")
-                    or row.get("preis")
-                    or row.get("price")
-                    or row.get("kurs")
-                    or 0.0
-                )
-                eps = float(
-                    row.get("eps")
-                    or row.get("gewinn_je_aktie")
-                    or row.get("earnings_per_share")
-                    or 0.0
-                )
-                bvps = float(
-                    row.get("buchwert_je_aktie")
-                    or row.get("book_value")
-                    or row.get("bvps")
-                    or 0.0
-                )
-                fcf_je_aktie = float(
-                    row.get("fcf_je_aktie")
-                    or row.get("free_cash_flow_per_share")
-                    or row.get("fcf")
-                    or 0.0
-                )
-                wachstum_g = float(
-                    row.get("erwartetes_wachstum")
-                    or row.get("growth_rate")
-                    or row.get("wachstum")
-                    or 5.0
-                )
-
-                if preis <= 0:
-                    continue
-
-                # --- 1. BENJAMIN GRAHAM FORMEL ---
-                graham_val = (
-                    eps * (8.5 + (2 * max(0.0, wachstum_g)))
-                    if eps > 0
-                    else 0.0
-                )
-
-                # --- 2. WARREN BUFFETT / OWNER EARNINGS MODELL ---
-                owner_earnings_val = (
-                    (fcf_je_aktie / 0.10) if fcf_je_aktie > 0 else 0.0
-                )
-
-                # --- 3. BLENDED FAIR VALUE ---
-                valid_vals = [v for v in [graham_val, owner_earnings_val] if v > 0]
-                if len(valid_vals) == 2:
-                    fair_value = (graham_val * 0.6) + (
-                        owner_earnings_val * 0.4
-                    )
-                elif len(valid_vals) == 1:
-                    fair_value = valid_vals[0]
-                else:
-                    fair_value = bvps * 1.2 if bvps > 0 else preis
-
-                # --- 4. MARGIN OF SAFETY & STATUS ---
-                if fair_value > 0:
-                    potential_pct = ((fair_value - preis) / preis) * 100
-                else:
-                    potential_pct = 0.0
-
-                if potential_pct >= 30:
-                    status = "🟢 Stark Unterbewertet"
-                elif potential_pct >= 10:
-                    status = "🟢 Unterbewertet"
-                elif potential_pct >= -15:
-                    status = "🟡 Fair Bewertet"
-                else:
-                    status = "🔴 Überbewertet"
-
-                results.append({
-                    "Ticker": ticker,
-                    "Name": name,
-                    "Sektor": sektor,
-                    "Aktueller Preis": round(preis, 2),
-                    "Fair Value (Est.)": round(fair_value, 2),
-                    "Potential (%)": round(potential_pct, 1),
-                    "Status": status,
-                    "Graham Value": round(graham_val, 2),
-                    "Owner Earnings Val": round(owner_earnings_val, 2),
-                })
-
-            df_result = pd.DataFrame(results)
-            if not df_result.empty:
-                df_result = df_result.sort_values(
-                    by="Potential (%)", ascending=False
-                )
-
-            return df_result, True
-
-        except Exception as e:
-            print(f"Fehler bei Fair-Value-Berechnung: {e}")
-            return pd.DataFrame(), False
+    st.markdown("### 🚀 Top Unterbewertete Chancen (Margin of Safety)")
+    undervalued = filtered_df[filtered_df["Status"].str.contains("Stark Unterbewertet", na=False)]
+    if not undervalued.empty:
+        for _, row in undervalued.iterrows():
+            st.success(
+                f"**{row['Ticker']} ({row['Name']})** | Sektor: {row['Sektor']} | "
+                f"Aktuell: **${row['Aktueller Preis']}** | Fair Value: **${row['Fair Value (Est.)']}** | "
+                f"Potential: **{row['Potential (%)']}%**"
+            )
+    else:
+        st.info("Aktuell befinden sich keine Titel mit 'Stark Unterbewertet' im Filterbereich.")
+else:
+    st.warning("Keine bewertbaren Titel in der Watchlist gefunden.")
