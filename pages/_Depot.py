@@ -27,7 +27,7 @@ st.markdown(
 tab_depot, tab_journal, tab_new_trade = st.tabs([
     "💼 Offene Depots",
     "📖 Trade Journal (Geschlossen)",
-    "➕ Position eröffnen / schließen",
+    "➕ Position öffnen / schließen",
 ])
 
 depot_tables = {
@@ -37,7 +37,7 @@ depot_tables = {
 }
 
 # ==========================================
-# TAB 1: DIE AKTIVEN DEPOTS
+# TAB 1: DIE AKTIVEN DEPOTS (MIT FAIR VALUE)
 # ==========================================
 with tab_depot:
   st.subheader("Aktive, offene Positionen & Live-Marktwerte")
@@ -67,6 +67,15 @@ with tab_depot:
     except Exception:
       ticker_to_name = {}
 
+    # Fair Value Cache laden
+    try:
+      fv_res = supabase.table("fair_value_cache").select("ticker, fair_value, potential_pct, status").execute()
+      df_fv = pd.DataFrame(fv_res.data) if fv_res.data else pd.DataFrame()
+      if not df_fv.empty:
+        df_fv.columns = [str(c).lower() for c in df_fv.columns]
+    except Exception:
+      df_fv = pd.DataFrame()
+
     response = supabase.table(target_table).select("*").execute()
     positions = response.data
 
@@ -94,7 +103,6 @@ with tab_depot:
 
       for _, row in df_pos.iterrows():
         ticker = row["ticker"]
-        # Fallback auf Watchlist/yfinance, falls das Feld in Supabase mal leer sein sollte
         db_unternehmen = row.get("unternehmen", None)
         if not db_unternehmen or pd.isna(db_unternehmen):
           company_name = ticker_to_name.get(ticker, ticker)
@@ -152,14 +160,27 @@ with tab_depot:
       st.divider()
 
       df_display = pd.DataFrame(portfolio_data)
+      
+      # Fair Value Daten über den Ticker mergen
+      if not df_fv.empty and "Ticker" in df_display.columns:
+        df_display = pd.merge(
+            df_display, 
+            df_fv.rename(columns={"ticker": "Ticker"}), 
+            on="Ticker", 
+            how="left"
+        )
+
       st.dataframe(
-          df_display.drop(columns=["ID"]),
+          df_display.drop(columns=["ID"], errors="ignore"),
           column_config={
               "Kaufpreis (€)": st.column_config.NumberColumn(format="%.2f €"),
               "Live-Kurs (€)": st.column_config.NumberColumn(format="%.2f €"),
               "Gesamtwert (€)": st.column_config.NumberColumn(format="%.2f €"),
               "Performance (%)": st.column_config.NumberColumn(format="%.2f%%"),
               "Anzahl": st.column_config.NumberColumn(format="%.4f"),
+              "fair_value": st.column_config.NumberColumn("Fair Value", format="%.2f €"),
+              "potential_pct": st.column_config.NumberColumn("Potenzial", format="%.1f %%"),
+              "status": st.column_config.TextColumn("Bewertung"),
           },
           use_container_width=True,
       )
@@ -186,7 +207,6 @@ with tab_journal:
     if journal_data:
       df_j = pd.DataFrame(journal_data)
 
-      # Watchlist für Fallback-Firmennamen im Journal laden
       try:
         wl_res = (
             supabase.table("watchlist").select("ticker, company_name").execute()
@@ -202,7 +222,6 @@ with tab_journal:
       except Exception:
         j_ticker_to_name = {}
 
-      # Unternehmen aus der DB holen, falls leer per Map ergänzen
       def resolve_journal_name(row):
         val = row.get("unternehmen", None)
         if val and pd.notna(val):
@@ -212,7 +231,6 @@ with tab_journal:
 
       df_j["Unternehmen"] = df_j.apply(resolve_journal_name, axis=1)
 
-      # Filter für Mandate im Journal
       filter_options = ["Alle Mandate"] + list(depot_tables.keys())
       selected_journal_filter = st.selectbox(
           "Journal filtern nach Mandat:", filter_options
@@ -342,7 +360,6 @@ with tab_new_trade:
     except Exception:
       watchlist_items = []
 
-    # Map von Anzeigetext zu Ticker & Unternehmensnamen
     ticker_options = {}
     for item in watchlist_items:
       c_name = item.get("company_name", "N/A")
@@ -402,7 +419,6 @@ with tab_new_trade:
             target_tbl = depot_tables[b_depot]
             initial_val = b_shares * b_price
 
-            # Firmenname direkt über yfinance absichern, falls nicht aus Watchlist
             if not b_company_name or b_company_name == b_ticker:
               try:
                 info = yf.Ticker(b_ticker).info
@@ -412,7 +428,6 @@ with tab_new_trade:
               except Exception:
                 b_company_name = b_ticker
 
-            # Schreiben in Supabase inklusive des Unternehmensnamens
             supabase.table(target_tbl).insert({
                 "ticker": b_ticker,
                 "unternehmen": b_company_name,
@@ -456,102 +471,4 @@ with tab_new_trade:
           comp = p.get("unternehmen", p["ticker"])
           label = (
               f"{comp} ({p['ticker']}) - {p['anzahl']} Stk. @"
-              f" {p['buy_price']}€ [ID: {p['id']}]"
-          )
-          pos_options[label] = p
-
-        selected_pos_label = st.selectbox(
-            "Wähle die Position:", list(pos_options.keys())
-        )
-        chosen_pos = pos_options[selected_pos_label]
-
-        with st.form("sell_form"):
-          col_s1, col_s2 = st.columns(2)
-          with col_s1:
-            s_price = st.number_input(
-                "Ausstiegspreis pro Einheit (€)",
-                min_value=0.01,
-                value=float(chosen_pos["buy_price"]),
-                format="%.2f",
-            )
-            s_shares_to_sell = st.number_input(
-                "Anzahl Anteile zum Verkaufen",
-                min_value=0.0001,
-                max_value=float(chosen_pos["anzahl"]),
-                value=float(chosen_pos["anzahl"]),
-                format="%.4f",
-            )
-          with col_s2:
-            s_date = st.date_input("Ausstiegsdatum", value="today")
-            s_time = st.time_input(
-                "Ausstiegszeit", value=datetime.now().time()
-            )
-
-          s_note = st.text_area(
-              "Notiz / Lernkurve (Warum wurde verkauft?):",
-              placeholder=(
-                  "Z.B.: 'Teilgewinnmitnahme nach starkem Anstieg.'"
-              ),
-          )
-
-          submitted_sell = st.form_submit_button(
-              "Verkauf ausführen & ins Journal schreiben"
-          )
-
-          if submitted_sell:
-            s_timestamp = datetime.combine(s_date, s_time).isoformat()
-            buy_p = float(chosen_pos["buy_price"])
-            total_shares_owned = float(chosen_pos["anzahl"])
-
-            exit_gesamtwert = s_shares_to_sell * s_price
-            performance_pct = (
-                ((s_price - buy_p) / buy_p) * 100 if buy_p > 0 else 0
-            )
-            trade_g_v = (s_price - buy_p) * s_shares_to_sell
-
-            # Unternehmensnamen für das Journal übernehmen
-            position_unternehmen = chosen_pos.get("unternehmen", chosen_pos["ticker"])
-
-            supabase.table("trade_journal").insert({
-                "ticker": chosen_pos["ticker"],
-                "unternehmen": position_unternehmen,
-                "einstieg_datum_zeit": chosen_pos["datum_einstieg"],
-                "ausstieg_datum_zeit": s_timestamp,
-                "anzahl": s_shares_to_sell,
-                "einstiegskurs": buy_p,
-                "ausstiegskurs": s_price,
-                "gesamtwert": exit_gesamtwert,
-                "signaltype": sell_depot,
-                "performance": performance_pct,
-                "g_v": round(trade_g_v, 2),
-                "notiz": s_note,
-            }).execute()
-
-            if s_shares_to_sell >= total_shares_owned:
-              supabase.table(sell_tbl).delete().eq(
-                  "id", chosen_pos["id"]
-              ).execute()
-              st.success(
-                  f"Position für {position_unternehmen} ({chosen_pos['ticker']}) komplett geschlossen und"
-                  " ins Journal übertragen!"
-              )
-            else:
-              remaining_shares = total_shares_owned - s_shares_to_sell
-              remaining_gesamtwert = remaining_shares * buy_p
-
-              supabase.table(sell_tbl).update({
-                  "anzahl": remaining_shares,
-                  "gesamtwert": remaining_gesamtwert,
-              }).eq("id", chosen_pos["id"]).execute()
-              st.success(
-                  f"Teilverkauf von {s_shares_to_sell} Anteilen"
-                  f" {position_unternehmen} verbucht. Rest im Depot:"
-                  f" {remaining_shares} Anteile."
-              )
-
-            st.rerun()
-      else:
-        st.info(f"Keine offenen Positionen in `{sell_depot}` vorhanden.")
-
-    except Exception as e:
-      st.error(f"Fehler beim Verarbeiten des Verkaufs: {e}")
+              f" {p['buy_price']}€ [ID: {p['id']}]
