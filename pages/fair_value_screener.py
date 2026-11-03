@@ -65,7 +65,7 @@ if not df.empty:
     else:
         df["unternehmen"] = df["ticker"]
 
-    # 2. Echten Sektor isolieren (verhindert Vermischung mit strategy_kategorie)
+    # 2. Echten Sektor isolieren
     sector_col = None
     for col in ["sector_watchlist", "sector", "sektor"]:
         if col in df.columns:
@@ -123,9 +123,9 @@ if not df.empty:
         "sector_cache",
         "gettex_ticker",
     ]
-    df_display = df_filtered.drop(columns=[col for col in cols_to_drop if col in df_filtered.columns])
+    df_display = df_filtered.drop(columns=[col for col in cols_to_drop if col in df_display.columns])
 
-    # 5. Saubere Reihenfolge festlegen
+    # 5. Saubere Reihenfolge (distance_from_ath direkt nach status platziert)
     preferred_order = [
         "unternehmen",
         "branchen_sektor",
@@ -133,6 +133,7 @@ if not df.empty:
         "fair_value",
         "potential_pct",
         "status",
+        "distance_from_ath",
         "eps",
         "fcf_aktie",
         "tradingview",
@@ -155,10 +156,11 @@ if not df.empty:
             "fair_value": st.column_config.NumberColumn("Fair Value", format="€ %.2f"),
             "potential_pct": st.column_config.NumberColumn("Potenzial", format="%.1f %%"),
             "status": st.column_config.TextColumn("Bewertung"),
+            "distance_from_ath": st.column_config.NumberColumn("Abstand ATH", format="%.1f %%"),
             "eps": st.column_config.NumberColumn("EPS", format="€ %.2f"),
             "fcf_aktie": st.column_config.NumberColumn("FCF / Aktie", format="€ %.2f"),
             "tradingview": st.column_config.LinkColumn("Chart", display_text="📈 TradingView"),
         },
     )
 else:
-    st.warning("Keine Daten zur Anzeige verfügbar.")
+    st.warning("No data available.")
