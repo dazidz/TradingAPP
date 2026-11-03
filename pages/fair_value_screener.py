@@ -1,5 +1,3 @@
-from pathlib import Path
-import sys
 import pandas as pd
 import streamlit as st
 from supabase import create_client
@@ -14,7 +12,7 @@ if not st.session_state.get("password_correct", False):
     st.warning("Bitte melde dich zuerst auf der Hauptseite an.")
     st.stop()
 
-# Supabase Verbindung aufbauen
+# Supabase Verbindung
 try:
     URL = st.secrets["SUPABASE_URL"]
     KEY = st.secrets["SUPABASE_KEY"]
@@ -24,100 +22,55 @@ except Exception as e:
     st.stop()
 
 st.title("📐 Autonomer Fair Value Screener")
-st.markdown("Tagesaktuelle Bewertung des inneren Wertes nach Benjamin Graham & Warren Buffett für alle Watchlist-Titel.")
+st.markdown("Tagesaktuelle Bewertung des inneren Wertes (Graham & Buffett) – von Fritz im Hintergrund aufbereitet.")
 
 st.divider()
 
-# Daten direkt laden und nach Value-Modellen berechnen
+# Daten laden und via Pandas-Merge zusammenführen
 try:
-    with st.spinner("Lade Watchlist und berechne Fair Values..."):
-        response = supabase.table("watchlist").select("*").execute()
+    with st.spinner("Lade aufbereitete Daten..."):
+        res_watchlist = supabase.table("watchlist").select("*").execute()
+        res_cache = supabase.table("fair_value_cache").select("*").execute()
         
-        if not response.data:
-            st.warning("⚠️ Die Tabelle `watchlist` in Supabase ist leer.")
+        df_watchlist = pd.DataFrame(res_watchlist.data) if res_watchlist.data else pd.DataFrame()
+        df_cache = pd.DataFrame(res_cache.data) if res_cache.data else pd.DataFrame()
+        
+        if df_watchlist.empty:
+            st.warning("⚠️ Die Watchlist ist leer.")
             st.stop()
             
-        df_raw = pd.DataFrame(response.data)
-        
-        results = []
-        for _, row in df_raw.iterrows():
-            ticker = row.get("ticker") or row.get("symbol") or "UNBEKANNT"
-            name = row.get("name", ticker)
-            sektor = row.get("strategy_kategorie", row.get("sektor", "Standard"))
-            
-            # Rohdaten sicher auslesen
-            preis = float(row.get("aktueller_preis") or row.get("preis") or row.get("price") or 0.0)
-            eps = float(row.get("eps") or row.get("gewinn_je_aktie") or 0.0)
-            fcf = float(row.get("fcf_je_aktie") or row.get("fcf") or 0.0)
-            wachstum = float(row.get("erwartetes_wachstum") or 5.0)
-            
-            if preis <= 0:
-                continue
-                
-            # --- Graham-Formel & Buffett Owner Earnings ---
-            graham = eps * (8.5 + (2 * max(0.0, wachstum))) if eps > 0 else preis
-            buffett = (fcf / 0.10) if fcf > 0 else graham
-            
-            # Blended Fair Value (60% Graham, 40% Buffett)
-            fair_value = (graham * 0.6) + (buffett * 0.4)
-            
-            # Margin of Safety / Potenzial
-            potential = ((fair_value - preis) / preis) * 100 if preis > 0 else 0.0
-            
-            if potential >= 30:
-                status = "🟢 Stark Unterbewertet"
-            elif potential >= 10:
-                status = "🟢 Unterbewertet"
-            elif potential >= -15:
-                status = "🟡 Fair Bewertet"
-            else:
-                status = "🔴 Überbewertet"
-                
-            results.append({
-                "Ticker": ticker,
-                "Name": name,
-                "Sektor": sektor,
-                "Aktueller Preis": round(preis, 2),
-                "Fair Value (Est.)": round(fair_value, 2),
-                "Potential (%)": round(potential, 1),
-                "Status": status,
-                "Graham Value": round(graham, 2),
-                "Owner Earnings Val": round(buffett, 2)
-            })
-            
-        df = pd.DataFrame(results)
-        if not df.empty:
-            df = df.sort_values(by="Potential (%)", ascending=False)
-            
+        # Merge über den Ticker
+        if not df_cache.empty:
+            df_cache = df_cache.rename(columns=lambda x: x.lower())
+            df_watchlist = df_watchlist.rename(columns=lambda x: x.lower())
+            df = pd.merge(df_watchlist, df_cache, on="ticker", how="left", suffixes=('', '_cache'))
+        else:
+            df = df_watchlist
+            st.info("ℹ️ Fritz hat noch keine Cache-Daten hinterlegt. Führe einmal `python employees_test/fritz.py` aus.")
+
 except Exception as e:
-    st.error(f"Kritischer Fehler bei der Datenverarbeitung: {e}")
+    st.error(f"Fehler beim Laden der Daten: {e}")
     df = pd.DataFrame()
 
-# UI-Oberfläche rendern
+# UI rendern
 if not df.empty:
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        status_filter = st.multiselect(
-            "Nach Status filtern:",
-            options=df["Status"].unique().tolist(),
-            default=df["Status"].unique().tolist(),
-        )
+    status_col = "status" if "status" in df.columns else None
     
-    filtered_df = df[df["Status"].isin(status_filter)]
-    
-    st.markdown("### 📊 Bewertungsübersicht")
-    st.dataframe(filtered_df, use_container_width=True, hide_index=True)
-
-    st.markdown("### 🚀 Top Unterbewertete Chancen (Margin of Safety)")
-    undervalued = filtered_df[filtered_df["Status"].str.contains("Stark Unterbewertet", na=False)]
-    if not undervalued.empty:
-        for _, row in undervalued.iterrows():
-            st.success(
-                f"**{row['Ticker']} ({row['Name']})** | Sektor: {row['Sektor']} | "
-                f"Aktuell: **${row['Aktueller Preis']}** | Fair Value: **${row['Fair Value (Est.)']}** | "
-                f"Potential: **{row['Potential (%)']}%**"
+    if status_col:
+        statuses = df[status_col].dropna().unique().tolist()
+        if statuses:
+            selected_status = st.multiselect(
+                "Nach Status filtern:",
+                options=statuses,
+                default=statuses,
             )
+            df_filtered = df[df[status_col].isin(selected_status)]
+        else:
+            df_filtered = df
     else:
-        st.info("Aktuell befinden sich keine Titel mit 'Stark Unterbewertet' im Filterbereich.")
+        df_filtered = df
+        
+    st.markdown("### 📊 Bewertungsübersicht")
+    st.dataframe(df_filtered, use_container_width=True, hide_index=True)
 else:
-    st.warning("Keine bewertbaren Titel in der Watchlist gefunden.")
+    st.warning("Keine Daten zur Anzeige verfügbar.")
