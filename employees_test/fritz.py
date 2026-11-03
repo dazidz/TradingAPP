@@ -1,22 +1,23 @@
 from datetime import datetime
 import os
 import pandas as pd
-from supabase import create_client
+from db import get_db_client  # <--- Exakt wie im Screener
 import yfinance as yf
 
-# Verbindung zu Supabase (Nutzt Secrets oder Umgebungsvariablen)
-URL = os.environ.get("SUPABASE_URL")
-KEY = os.environ.get("SUPABASE_KEY")
-supabase = create_client(URL, KEY)
+# Zentrale Supabase-Verbindung via db.py nutzen
+supabase = get_db_client()
 
 
 def fritz_run_daily_prep():
     print("🤖 Fritz übernimmt die Schicht und bereitet die Daten auf...")
-    print(f"DEBUG URL: {URL}")
 
-    # 1. Watchlist aus Supabase laden (mit explizitem public-Schema gegen PGRST125)
+    # 1. Watchlist aus Supabase laden (identisch zum Screener)
     try:
-        response = supabase.schema("public").table("watchlist").select("*").execute()
+        response = (
+            supabase.table("watchlist")
+            .select("*")
+            .execute()
+        )
     except Exception as e:
         print(f"❌ Fehler beim Laden der Watchlist: {e}")
         return
@@ -113,13 +114,13 @@ def fritz_run_daily_prep():
             "updated_at": datetime.now().isoformat(),
         })
 
-    # 2. In die separate Cache-Tabelle schreiben (ebenfalls mit explizitem public-Schema)
+    # 2. In die separate Cache-Tabelle schreiben
     if processed_results:
         try:
-            supabase.schema("public").table("fair_value_cache").delete().neq(
+            supabase.table("fair_value_cache").delete().neq(
                 "ticker", "DUMMY"
             ).execute()
-            supabase.schema("public").table("fair_value_cache").insert(processed_results).execute()
+            supabase.table("fair_value_cache").insert(processed_results).execute()
             print(
                 f"✅ Fritz hat {len(processed_results)} Titel erfolgreich aufbereitet und in Supabase hinterlegt!"
             )
