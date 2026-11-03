@@ -26,18 +26,17 @@ st.markdown("Dein Live-Depot kombiniert mit den tagesaktuellen Bewertungen von F
 
 st.divider()
 
-# Daten laden (Depot und der Fair Value Cache)
+# Daten laden (risk_depot und der Fair Value Cache)
 try:
     with st.spinner("Lade Depot- und Bewertungsdaten..."):
-        # Passe den Tabellennamen für das Depot hier an, falls deine Tabelle anders heißt (z.B. "depot" oder "portfolio")
-        res_depot = supabase.table("depot").select("*").execute()
+        res_depot = supabase.table("risk_depot").select("*").execute()
         res_cache = supabase.table("fair_value_cache").select("*").execute()
         
         df_depot = pd.DataFrame(res_depot.data) if res_depot.data else pd.DataFrame()
         df_cache = pd.DataFrame(res_cache.data) if res_cache.data else pd.DataFrame()
         
         if df_depot.empty:
-            st.warning("⚠️ Keine Depot-Einträge gefunden.")
+            st.warning("⚠️ Keine Depot-Einträge in 'risk_depot' gefunden.")
             st.stop()
             
         # Spaltennamen normalisieren
@@ -45,13 +44,12 @@ try:
         if not df_cache.empty:
             df_cache = df_cache.rename(columns=lambda x: x.lower())
             
-        # Cache-Spalten bereinigen, um Konflikte (wie doppelte Namen oder Kurs-Spalten) beim Mergen zu vermeiden
+        # Cache-Spalten selektieren, um Konflikte zu vermeiden
         if not df_cache.empty:
-            # Wir behalten vom Cache nur das Nötigste für das Depot
             cache_cols_to_keep = ["ticker", "fair_value", "potential_pct", "status", "eps", "fcf_aktie"]
             df_cache_filtered = df_cache[[c for c in cache_cols_to_keep if c in df_cache.columns]]
             
-            # Über den Ticker mit dem Depot mergen (Left Join, damit Depot-Positionen erhalten bleiben)
+            # Über den Ticker mit dem Depot mergen
             df = pd.merge(df_depot, df_cache_filtered, on="ticker", how="left")
         else:
             df = df_depot
@@ -65,7 +63,6 @@ except Exception as e:
 if not df.empty:
     st.markdown("### 📊 Depot-Übersicht mit Fair-Value-Bewertung")
     
-    # Interaktive Streamlit-Tabelle anzeigen mit angepasster Formatierung
     st.dataframe(
         df,
         use_container_width=True,
