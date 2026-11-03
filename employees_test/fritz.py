@@ -10,6 +10,15 @@ KEY = os.environ.get("SUPABASE_KEY")
 supabase = create_client(URL, KEY)
 
 
+# Diagnose: Verbindung und verfügbare Tabellen prüfen
+    print(f"DEBUG URL: {URL}")
+    try:
+        # Testet, ob wir überhaupt einen Befehl absetzen können
+        test_res = supabase.table("watchlist").select("count", count="exact").execute()
+        print(f"DEBUG Watchlist Count: {test_res}")
+    except Exception as e:
+        print(f"❌ DIAGNOSE-FEHLER: {e}")
+
 def fritz_run_daily_prep():
     print("🤖 Fritz übernimmt die Schicht und bereitet die Daten auf...")
 
