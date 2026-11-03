@@ -13,8 +13,13 @@ supabase = create_client(URL, KEY)
 def fritz_run_daily_prep():
     print("🤖 Fritz übernimmt die Schicht und bereitet die Daten auf...")
 
-    # 1. Watchlist aus Supabase laden
-    response = supabase.table("watchlist").select("*").execute()
+    # 1. Watchlist aus Supabase laden (mit explizitem public-Schema gegen PGRST125)
+    try:
+        response = supabase.schema("public").table("watchlist").select("*").execute()
+    except Exception as e:
+        print(f"❌ Fehler beim Laden der Watchlist: {e}")
+        return
+
     if not response.data:
         print("⚠️ Keine Watchlist-Einträge gefunden.")
         return
@@ -107,13 +112,13 @@ def fritz_run_daily_prep():
             "updated_at": datetime.now().isoformat(),
         })
 
-    # 2. In die separate Cache-Tabelle schreiben
+    # 2. In die separate Cache-Tabelle schreiben (ebenfalls mit explizitem public-Schema)
     if processed_results:
         try:
-            supabase.table("fair_value_cache").delete().neq(
+            supabase.schema("public").table("fair_value_cache").delete().neq(
                 "ticker", "DUMMY"
             ).execute()
-            supabase.table("fair_value_cache").insert(processed_results).execute()
+            supabase.schema("public").table("fair_value_cache").insert(processed_results).execute()
             print(
                 f"✅ Fritz hat {len(processed_results)} Titel erfolgreich aufbereitet und in Supabase hinterlegt!"
             )
