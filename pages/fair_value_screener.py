@@ -73,7 +73,7 @@ if not df.empty:
     else:
         df_filtered = df
         
-    # Unerwünschte Spalten entfernen (id, ticker, added_at, strategy, id_cache etc.)
+    # Unerwünschte Spalten entfernen (inkl. IDs, Namen, Sektoren und Timestamps)
     cols_to_drop = [
         "id",
         "id_watchlist",
@@ -83,14 +83,14 @@ if not df.empty:
         "strategy",
         "strategy_type",
         "strategy_kategorie",
-    ]
-    df_display = df_filtered.drop(columns=[col for col in cols_to_drop if col in df_filtered.columns])
-
-    # Sinnvolle Spaltenreihenfolge festlegen
-    preferred_order = [
         "name",
         "company_name",
         "sektor",
+    ]
+    df_display = df_filtered.drop(columns=[col for col in cols_to_drop if col in df_filtered.columns])
+
+    # Sinnvolle Spaltenreihenfolge für die Kennzahlen festlegen
+    preferred_order = [
         "aktueller_preis",
         "fair_value",
         "potential_pct",
@@ -115,9 +115,6 @@ if not df.empty:
             "potential_pct": st.column_config.NumberColumn("Potenzial", format="%.1f %%"),
             "eps": st.column_config.NumberColumn("EPS", format="€ %.2f"),
             "fcf_aktie": st.column_config.NumberColumn("FCF / Aktie", format="€ %.2f"),
-            "name": st.column_config.TextColumn("Unternehmen"),
-            "company_name": st.column_config.TextColumn("Name"),
-            "sektor": st.column_config.TextColumn("Sektor"),
             "status": st.column_config.TextColumn("Bewertung"),
         },
     )
