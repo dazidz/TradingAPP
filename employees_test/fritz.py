@@ -1,23 +1,19 @@
 from datetime import datetime
 import os
 import pandas as pd
-from db import get_db_client  # <--- Exakt wie im Screener
+from db import get_db_client
 import yfinance as yf
 
-# Zentrale Supabase-Verbindung via db.py nutzen
+# Verbindung zu Supabase via zentralem db-Modul
 supabase = get_db_client()
 
 
 def fritz_run_daily_prep():
     print("🤖 Fritz übernimmt die Schicht und bereitet die Daten auf...")
 
-    # 1. Watchlist aus Supabase laden (identisch zum Screener)
+    # 1. Watchlist aus Supabase laden
     try:
-        response = (
-            supabase.table("watchlist")
-            .select("*")
-            .execute()
-        )
+        response = supabase.table("watchlist").select("*").execute()
     except Exception as e:
         print(f"❌ Fehler beim Laden der Watchlist: {e}")
         return
@@ -27,32 +23,55 @@ def fritz_run_daily_prep():
         return
 
     df_watchlist = pd.DataFrame(response.data)
+    
+    # Alle Spaltennamen in lowercase umwandeln, um Case-Sensitivity-Probleme auszuschließen
+    df_watchlist.columns = [str(c).lower() for c in df_watchlist.columns]
+    print(f"📊 {len(df_watchlist)} Zeilen aus watchlist geladen. Spalten: {df_watchlist.columns.tolist()}")
+
     processed_results = []
 
     for _, row in df_watchlist.iterrows():
         ticker = (
-            row.get("ticker") or row.get("symbol") or row.get("aktie")
+            row.get("ticker") 
+            or row.get("symbol") 
+            or row.get("aktie")
         )
         if not ticker:
+            print(f"⚠️ Überspringe Zeile: Kein Ticker gefunden in {dict(row)}")
             continue
 
-        name = row.get("name", ticker)
-        sektor = row.get("strategy_kategorie", row.get("sektor", "Standard"))
+        name = row.get("name") or row.get("company_name") or ticker
+        sektor = row.get("strategy_kategorie") or row.get("sector") or row.get("sektor") or "Standard"
+
+        # Robuste Fallbacks aus der Datenbank holen, falls yfinance streikt
+        db_preis = float(
+            row.get("current_price")
+            or row.get("aktueller_preis")
+            or 0.0
+        )
+        eps = float(row.get("eps", 0.0))
+        fcf_per_share = float(row.get("fcf_je_aktie", 0.0))
+
+        preis = db_preis
+        wachstum = 5.0
 
         try:
-            stock = yf.Ticker(ticker)
+            stock = yf.Ticker(str(ticker).strip())
             info = stock.info
 
-            preis = float(
+            live_preis = float(
                 info.get("currentPrice")
                 or info.get("regularMarketPrice")
-                or row.get("aktueller_preis")
                 or 0.0
             )
-            eps = float(info.get("trailingEps") or info.get("forwardEps") or 0.0)
+            if live_preis > 0:
+                preis = live_preis
+
+            live_eps = float(info.get("trailingEps") or info.get("forwardEps") or 0.0)
+            if live_eps != 0:
+                eps = live_eps
 
             # Free Cash Flow je Aktie berechnen
-            fcf_per_share = 0.0
             try:
                 cf_stmt = stock.cashflow
                 if cf_stmt is not None and not cf_stmt.empty:
@@ -66,24 +85,17 @@ def fritz_run_daily_prep():
                     if shares > 0:
                         fcf_per_share = (op_cf - capex) / shares
             except Exception:
-                fcf_per_share = float(info.get("freeCashflow", 0.0)) / float(
-                    info.get("sharesOutstanding", 1.0)
-                )
+                if info.get("freeCashflow") and info.get("sharesOutstanding"):
+                    fcf_per_share = float(info.get("freeCashflow")) / float(info.get("sharesOutstanding"))
 
-            wachstum = float(
-                info.get("earningsGrowth", 0.08) * 100
-                if info.get("earningsGrowth")
-                else 5.0
-            )
+            if info.get("earningsGrowth"):
+                wachstum = float(info.get("earningsGrowth")) * 100
 
         except Exception as e:
-            print(f"Fehler bei {ticker} durch Fritz: {e}")
-            preis = float(row.get("aktueller_preis", 0.0))
-            eps = float(row.get("eps", 0.0))
-            fcf_per_share = float(row.get("fcf_je_aktie", 0.0))
-            wachstum = 5.0
+            print(f"⚠️ Hinweis bei Ticker {ticker} (Nutze DB-Fallbacks): {e}")
 
         if preis <= 0:
+            print(f"⏭️ Überspringe {ticker}: Kein gültiger Preis (0.0 oder ungültig).")
             continue
 
         # Graham-Formel & Buffett Owner Earnings berechnen
@@ -102,7 +114,7 @@ def fritz_run_daily_prep():
             status = "🔴 Überbewertet"
 
         processed_results.append({
-            "ticker": ticker,
+            "ticker": str(ticker).strip().upper(),
             "name": name,
             "sektor": sektor,
             "aktueller_preis": round(preis, 2),
@@ -126,6 +138,8 @@ def fritz_run_daily_prep():
             )
         except Exception as e:
             print(f"❌ Fehler beim Speichern durch Fritz in Supabase: {e}")
+    else:
+        print("⚠️ Keine berechneten Ergebnisse zum Speichern vorhanden.")
 
 
 if __name__ == "__main__":
