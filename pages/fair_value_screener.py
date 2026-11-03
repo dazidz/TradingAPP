@@ -39,11 +39,14 @@ try:
             st.warning("⚠️ Die Watchlist ist leer.")
             st.stop()
             
-        # Merge über den Ticker
+        # Spaltennamen normalisieren
         if not df_cache.empty:
             df_cache = df_cache.rename(columns=lambda x: x.lower())
-            df_watchlist = df_watchlist.rename(columns=lambda x: x.lower())
-            df = pd.merge(df_watchlist, df_cache, on="ticker", how="left", suffixes=('', '_cache'))
+        df_watchlist = df_watchlist.rename(columns=lambda x: x.lower())
+        
+        # Merge über den Ticker
+        if not df_cache.empty:
+            df = pd.merge(df_watchlist, df_cache, on="ticker", how="left", suffixes=('_watchlist', '_cache'))
         else:
             df = df_watchlist
             st.info("ℹ️ Fritz hat noch keine Cache-Daten hinterlegt. Führe einmal `python employees_test/fritz.py` aus.")
@@ -52,7 +55,7 @@ except Exception as e:
     st.error(f"Fehler beim Laden der Daten: {e}")
     df = pd.DataFrame()
 
-# UI rendern
+# UI rendern & Spalten filtern
 if not df.empty:
     status_col = "status" if "status" in df.columns else None
     
@@ -70,7 +73,53 @@ if not df.empty:
     else:
         df_filtered = df
         
+    # Unerwünschte Spalten entfernen (id, ticker, added_at, strategy, id_cache etc.)
+    cols_to_drop = [
+        "id",
+        "id_watchlist",
+        "id_cache",
+        "ticker",
+        "added_at",
+        "strategy",
+        "strategy_type",
+        "strategy_kategorie",
+    ]
+    df_display = df_filtered.drop(columns=[col for col in cols_to_drop if col in df_filtered.columns])
+
+    # Sinnvolle Spaltenreihenfolge festlegen
+    preferred_order = [
+        "name",
+        "company_name",
+        "sektor",
+        "aktueller_preis",
+        "fair_value",
+        "potential_pct",
+        "status",
+        "eps",
+        "fcf_aktie",
+    ]
+    existing_cols = [col for col in preferred_order if col in df_display.columns]
+    other_cols = [col for col in df_display.columns if col not in existing_cols]
+    df_display = df_display[existing_cols + other_cols]
+
     st.markdown("### 📊 Bewertungsübersicht")
-    st.dataframe(df_filtered, use_container_width=True, hide_index=True)
+    
+    # Interaktive Streamlit-Tabelle mit Währungs- und Prozentformatierung
+    st.dataframe(
+        df_display,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "aktueller_preis": st.column_config.NumberColumn("Kurs", format="€ %.2f"),
+            "fair_value": st.column_config.NumberColumn("Fair Value", format="€ %.2f"),
+            "potential_pct": st.column_config.NumberColumn("Potenzial", format="%.1f %%"),
+            "eps": st.column_config.NumberColumn("EPS", format="€ %.2f"),
+            "fcf_aktie": st.column_config.NumberColumn("FCF / Aktie", format="€ %.2f"),
+            "name": st.column_config.TextColumn("Unternehmen"),
+            "company_name": st.column_config.TextColumn("Name"),
+            "sektor": st.column_config.TextColumn("Sektor"),
+            "status": st.column_config.TextColumn("Bewertung"),
+        },
+    )
 else:
     st.warning("Keine Daten zur Anzeige verfügbar.")
