@@ -106,7 +106,7 @@ if not df.empty:
     else:
         df_filtered = df
         
-    # 4. Alle unerwünschten, doppelten oder rohen Spalten komplett entfernen
+    # 4. Alle unerwünschten, doppelten oder rohen Spalten komplett entfernen (Korrektur hier: df_filtered.columns)
     cols_to_drop = [
         "id",
         "id_watchlist",
@@ -123,7 +123,7 @@ if not df.empty:
         "sector_cache",
         "gettex_ticker",
     ]
-    df_display = df_filtered.drop(columns=[col for col in cols_to_drop if col in df_display.columns])
+    df_display = df_filtered.drop(columns=[col for col in cols_to_drop if col in df_filtered.columns])
 
     # 5. Saubere Reihenfolge (distance_from_ath direkt nach status platziert)
     preferred_order = [
@@ -163,4 +163,4 @@ if not df.empty:
         },
     )
 else:
-    st.warning("No data available.")
+    st.warning("Keine Daten zur Anzeige verfügbar.")
