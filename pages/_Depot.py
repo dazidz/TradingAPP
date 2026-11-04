@@ -3,6 +3,7 @@ from supabase import create_client
 import pandas as pd
 import streamlit as st
 import yfinance as yf
+import plotly.express as px
 
 st.set_page_config(
     layout="wide",
@@ -36,7 +37,7 @@ depot_tables = {
 }
 
 # ==========================================
-# TAB 1: DIE AKTIVEN DEPOTS (MIT FAIR VALUE)
+# TAB 1: DIE AKTIVEN DEPOTS (MIT FAIR VALUE & SEKTOR-DIAGRAMM)
 # ==========================================
 with tab_depot:
     st.subheader("Aktive, offene Positionen & Live-Marktwerte")
@@ -51,20 +52,22 @@ with tab_depot:
     target_table = depot_tables[selected_depot_ui]
 
     try:
+        # Watchlist laden (für Namen und Sektoren)
         try:
             wl_res = (
-                supabase.table("watchlist").select("ticker, company_name").execute()
+                supabase.table("watchlist").select("ticker, company_name, sector").execute()
             )
-            ticker_to_name = (
-                {
-                    item["ticker"]: item.get("company_name", item["ticker"])
-                    for item in wl_res.data
-                }
-                if wl_res.data
-                else {}
-            )
+            watchlist_data = wl_res.data if wl_res.data else []
+            ticker_to_name = {item["ticker"]: item.get("company_name", item["ticker"]) for item in watchlist_data}
+            
+            # Sektor-Mapping aufbauen (unterstützt verschiedene Spaltennamen wie sector oder sektor)
+            ticker_to_sector = {}
+            for item in watchlist_data:
+                s = item.get("sector") or item.get("sektor") or "Unbekannt"
+                ticker_to_sector[item["ticker"]] = s
         except Exception:
             ticker_to_name = {}
+            ticker_to_sector = {}
 
         # Fair Value Cache laden
         try:
@@ -108,6 +111,9 @@ with tab_depot:
                 else:
                     company_name = db_unternehmen
 
+                # Sektor ermitteln (Fallback auf row oder Watchlist)
+                sector = row.get("sector") or row.get("sektor") or ticker_to_sector.get(ticker, "Unbekannt")
+
                 shares = float(row["anzahl"])
                 buy_price = float(row["buy_price"])
                 curr_price = live_prices.get(ticker, buy_price)
@@ -136,6 +142,7 @@ with tab_depot:
                     "ID": row["id"],
                     "Unternehmen": company_name,
                     "Ticker": ticker,
+                    "Sektor": sector,
                     "Datum Einstieg": row.get("datum_einstieg", "N/A"),
                     "Anzahl": shares,
                     "Kaufpreis (€)": buy_price,
@@ -159,6 +166,25 @@ with tab_depot:
             st.divider()
 
             df_display = pd.DataFrame(portfolio_data)
+
+            # Sektor-Verteilung & Kreisdiagramm anzeigen
+            if not df_display.empty and "Sektor" in df_display.columns and "Gesamtwert (€)" in df_display.columns:
+                sector_df = df_display.groupby("Sektor")["Gesamtwert (€)"].sum().reset_index()
+                
+                col_chart, col_empty = st.columns([1.2, 1])
+                with col_chart:
+                    st.markdown("#### 🥧 Sektorenverteilung (nach Gesamtwert)")
+                    fig = px.pie(
+                        sector_df, 
+                        names="Sektor", 
+                        values="Gesamtwert (€)", 
+                        hole=0.4, # Macht ein modernes Donut-Chart daraus
+                        color_discrete_sequence=px.colors.qualitative.Prism
+                    )
+                    fig.update_layout(margin=dict(t=10, b=10, l=10, r=10), height=300)
+                    st.plotly_chart(fig, use_container_width=True)
+
+            st.divider()
             
             # Fair Value Daten über den Ticker mergen
             if not df_fv.empty and "Ticker" in df_display.columns:
