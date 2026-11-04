@@ -7,7 +7,7 @@ import yfinance as yf
 # Seiteneinstellungen
 st.set_page_config(layout="wide", page_title="VisionDZ - Terminal", page_icon="⚡")
 
-# --- ULTRA-KOMPAKTES TERMINAL CSS & RAHMEN-BOXEN ---
+# --- ULTRA-KOMPAKTES TERMINAL CSS MIT AUTO-GRID ---
 st.markdown("""
     <style>
     .block-container {
@@ -25,15 +25,20 @@ st.markdown("""
         margin-bottom: 0.8rem;
         height: 100%;
     }
+    /* Auto-Grid erzwingt genau 2 Spalten mit minimaler Breite, die exakt reinpasst */
+    .card-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+    }
     .t-card {
         background-color: #0d1117;
         border: 1px solid #21262d;
         border-radius: 4px;
-        padding: 6px 10px;
-        margin-bottom: 6px;
+        padding: 6px 8px;
     }
     .t-title {
-        font-size: 0.65rem;
+        font-size: 0.62rem;
         color: #8b949e;
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -42,19 +47,19 @@ st.markdown("""
         text-overflow: ellipsis;
     }
     .t-value {
-        font-size: 0.95rem;
+        font-size: 0.9rem;
         font-weight: 600;
         color: #f0f6fc;
     }
     .t-pos {
         color: #3fb950;
         font-weight: 600;
-        font-size: 0.7rem;
+        font-size: 0.68rem;
     }
     .t-neg {
         color: #da3633;
         font-weight: 600;
-        font-size: 0.7rem;
+        font-size: 0.68rem;
     }
     .section-header {
         font-size: 0.8rem;
@@ -117,15 +122,15 @@ def check_password():
                 st.error("Passwort falsch.")
     return False
 
-# --- Sichere Einzel-Karten-Komponente ---
-def render_terminal_card(title, value, pct=None, unit=""):
+# --- HTML Renderer für die Grid-Karten ---
+def get_terminal_card_html(title, value, pct=None, unit=""):
     pct_html = ""
     if pct is not None:
         cls = "t-pos" if pct >= 0 else "t-neg"
         sign = "+" if pct > 0 else ""
         pct_html = f'<span class="{cls}">{sign}{pct:.2f}%</span>'
     
-    html = f"""
+    return f"""
         <div class="t-card">
             <div class="t-title">{title}</div>
             <div style="display: flex; justify-content: space-between; align-items: baseline;">
@@ -134,7 +139,6 @@ def render_terminal_card(title, value, pct=None, unit=""):
             </div>
         </div>
     """
-    st.markdown(html, unsafe_allow_html=True)
 
 # --- Datenabrufe ---
 @st.cache_data(ttl=60)
@@ -338,58 +342,35 @@ if check_password():
     except Exception:
         pass
 
-    # --- ZWEI GROSSE HAUPTBOXEN NEBENEINANDER (2 Reihen intern aufgeteilt) ---
+    # --- ZWEI GROSSE HAUPTBOXEN NEBENEINANDER (Mit kompaktem Grid für 2 Reihen) ---
     col_box1, col_box2 = st.columns(2)
     
-    # --- LINKE BOX: MAKRO, ROHSTOFFE & CRYPTO (2 Reihen: Gold/Rohöl & Zins/Bitcoin) ---
+    # --- LINKE BOX: MAKRO, ROHSTOFFE & CRYPTO ---
     with col_box1:
         st.markdown('<div class="terminal-box">', unsafe_allow_html=True)
         st.markdown('<div class="box-title">🌍 Makro, Rohstoffe & Crypto</div>', unsafe_allow_html=True)
         
         macro_data = get_macro_commodities()
-        items = list(macro_data.items()) # [("Gold", ...), ("Rohöl (WTI)", ...), ("US 10Y Zins", ...), ("Bitcoin", ...)]
+        grid_html = '<div class="card-grid">'
+        for m_name, m_val in macro_data.items():
+            grid_html += get_terminal_card_html(m_name, f"{m_val['price']:,.2f}", m_val['pct'], m_val['unit'])
+        grid_html += '</div>'
+        st.markdown(grid_html, unsafe_allow_html=True)
         
-        # Reihe 1: Gold & Rohöl
-        r1_c1, r1_c2 = st.columns(2)
-        if len(items) > 0:
-            with r1_c1:
-                render_terminal_card(items[0][0], f"{items[0][1]['price']:,.2f}", items[0][1]['pct'], items[0][1]['unit'])
-        if len(items) > 1:
-            with r1_c2:
-                render_terminal_card(items[1][0], f"{items[1][1]['price']:,.2f}", items[1][1]['pct'], items[1][1]['unit'])
-                
-        # Reihe 2: US 10Y Zins & Bitcoin
-        r2_c1, r2_c2 = st.columns(2)
-        if len(items) > 2:
-            with r2_c1:
-                render_terminal_card(items[2][0], f"{items[2][1]['price']:,.2f}", items[2][1]['pct'], items[2][1]['unit'])
-        if len(items) > 3:
-            with r2_c2:
-                render_terminal_card(items[3][0], f"{items[3][1]['price']:,.2f}", items[3][1]['pct'], items[3][1]['unit'])
-                
         st.markdown('</div>', unsafe_allow_html=True)
         
-    # --- RECHTE BOX: GLOBALE MÄRKTE & INDIZES (2er-Spalten in Reihen aufgeteilt) ---
+    # --- RECHTE BOX: GLOBALE MÄRKTE & INDIZES ---
     with col_box2:
         st.markdown('<div class="terminal-box">', unsafe_allow_html=True)
         st.markdown('<div class="box-title">📊 Globale Märkte & Indizes</div>', unsafe_allow_html=True)
         
         index_data = get_index_performance()
-        idx_items = list(index_data.items()) # Alle Indizes
+        grid_html = '<div class="card-grid">'
+        for idx_name, val in index_data.items():
+            grid_html += get_terminal_card_html(idx_name, f"{val['price']:,.2f}", val['pct'])
+        grid_html += '</div>'
+        st.markdown(grid_html, unsafe_allow_html=True)
         
-        # Indizes paarweise (in Reihen zu je 2 Elementen) durchgehen
-        for i in range(0, len(idx_items), 2):
-            row_c1, row_c2 = st.columns(2)
-            
-            with row_c1:
-                name, val = idx_items[i]
-                render_terminal_card(name, f"{val['price']:,.2f}", val['pct'])
-                
-            if i + 1 < len(idx_items):
-                with row_c2:
-                    name, val = idx_items[i + 1]
-                    render_terminal_card(name, f"{val['price']:,.2f}", val['pct'])
-                    
         st.markdown('</div>', unsafe_allow_html=True)
 
     # --- SEKTOR-PERFORMANCE ---
@@ -402,7 +383,7 @@ if check_password():
         for idx, (sec_name, sec_val) in enumerate(sectors):
             col_idx = idx % len(cols_sec)
             with cols_sec[col_idx]:
-                render_terminal_card(sec_name, f"{sec_val:.2f}%", sec_val)
+                st.markdown(get_terminal_card_html(sec_name, f"{sec_val:.2f}%", sec_val), unsafe_allow_html=True)
     else:
         st.info("Keine Sektor-Daten verfügbar.")
 
