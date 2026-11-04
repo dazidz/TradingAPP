@@ -7,29 +7,42 @@ import yfinance as yf
 # Seiteneinstellungen
 st.set_page_config(layout="wide", page_title="VisionDZ - Terminal", page_icon="⚡")
 
-# --- HYPER-MODERNES TERMINAL CSS ---
+# --- RADIKALES HYPER-MODERNES TERMINAL CSS ---
 st.markdown("""
     <style>
-    /* Globales Padding komprimieren für den Terminal-Look */
+    /* Globales Padding komprimieren */
     .block-container {
-        padding-top: 2rem;
+        padding-top: 1.5rem;
         padding-bottom: 2rem;
-        padding-left: 2.5rem;
-        padding-right: 2.5rem;
+        padding-left: 2rem;
+        padding-right: 2rem;
     }
-    /* Metriken kompakter & moderner gestalten */
-    div[data-testid="metric-container"] {
-        background-color: #161b22;
+    /* Kompakte, moderne Karten-Optik */
+    .terminal-card {
+        background-color: #0d1117;
         border: 1px solid #30363d;
-        padding: 10px 14px;
-        border-radius: 8px;
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin-bottom: 8px;
+    }
+    /* Metriken extrem kompakt */
+    div[data-testid="metric-container"] {
+        background-color: #161b22 !important;
+        border: 1px solid #30363d !important;
+        padding: 8px 12px !important;
+        border-radius: 6px !important;
     }
     [data-testid="stMetricValue"] {
-        font-size: 1.35rem !important;
+        font-size: 1.25rem !important;
     }
     [data-testid="stMetricLabel"] {
-        font-size: 0.8rem !important;
+        font-size: 0.75rem !important;
         color: #8b949e !important;
+    }
+    /* Tabellen & Dataframes straffen */
+    .stDataFrame {
+        border: 1px solid #30363d;
+        border-radius: 6px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -98,7 +111,7 @@ def get_macro_commodities():
         results[name] = {"price": 0.0, "pct": 0.0, "unit": ""}
     return results
 
-# Robuste Index-Daten (MultiIndex-sicher)
+# Robuste Index-Daten
 @st.cache_data(ttl=60)
 def get_index_performance():
     indices = {
@@ -131,7 +144,7 @@ def get_index_performance():
             results[name] = {"price": 0.0, "pct": 0.0}
     return results
 
-# Sektor-Performance berechnen
+# Sektor-Performance
 @st.cache_data(ttl=60)
 def get_sector_performance():
     try:
@@ -204,18 +217,16 @@ def get_watchlist_performance():
 
 # --- HAUPTPROGRAMM ---
 if check_password():
-    # Header Bereich
+    # Header Bereich im modernen Minimal-Look
     col_head1, col_head2 = st.columns([3, 1])
     with col_head1:
-        st.title("⚡ VisionDZ Terminal")
-        st.markdown("Autonomes Portfolio-Management & Quantitative Marktüberwachung")
+        st.markdown("### ⚡ VisionDZ // Terminal")
     with col_head2:
-        st.markdown(f"<div style='text-align: right; color: #8b949e; font-size: 0.9rem; padding-top: 0.8rem;'>System: <span style='color: #3fb950;'>● Online</span><br>{date.today().strftime('%d.%m.%Y')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align: right; color: #8b949e; font-size: 0.8rem;'>STATUS: <span style='color: #3fb950;'>ONLINE</span> | {date.today().strftime('%d.%m.%Y')}</div>", unsafe_allow_html=True)
 
-    st.divider()
+    st.markdown("<hr style='margin: 0.5em 0px; border-color: #30363d;'>", unsafe_allow_html=True)
 
-    # --- EARNINGS WARNER FÜR DAS SWING DEPOT ---
-    st.markdown("### 🚨 Earnings Warner (Swing Depot)")
+    # --- EARNINGS WARNER FÜR DAS SWING DEPOT (2 Tage vorher bis zum Tag selbst) ---
     try:
         sup_client = _get_supabase_client()
         swing_res = sup_client.table("swing_depot").select("ticker, unternehmen").execute()
@@ -244,7 +255,8 @@ if check_password():
 
                     if earnings_date:
                         days_until = (earnings_date - date.today()).days
-                        if 0 <= days_until <= 14:
+                        # Exakter Filter: 2 Tage vorher bis zum Tag des Earnings (0, 1, 2)
+                        if 0 <= days_until <= 2:
                             upcoming_earnings.append({
                                 "Ticker": t,
                                 "Unternehmen": comp_name,
@@ -255,31 +267,35 @@ if check_password():
                     continue
 
             if upcoming_earnings:
+                st.markdown("##### 🚨 Earnings Warner (Swing Depot)")
                 for row in sorted(upcoming_earnings, key=lambda x: x["Tage bis Earnings"]):
-                    urgency_color = "#ff7b72" if row["Tage bis Earnings"] <= 3 else "#d29922"
+                    if row["Tage bis Earnings"] == 0:
+                        timing_text = "HEUTE!"
+                        badge_color = "#da3633"
+                    elif row["Tage bis Earnings"] == 1:
+                        timing_text = "Morgen"
+                        badge_color = "#d29922"
+                    else:
+                        timing_text = "in 2 Tagen"
+                        badge_color = "#d29922"
+
                     st.markdown(
-                        f"""<div style="padding: 10px 14px; border-radius: 6px; border: 1px solid {urgency_color}; background-color: #161b22; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                        f"""<div class="terminal-card" style="border-left: 4px solid {badge_color}; display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                             <div>
-                                <strong style="font-size: 1rem; color: #f0f6fc;">{row['Unternehmen']} ({row['Ticker']})</strong><br>
-                                <span style="color: #8b949e; font-size: 0.85rem;">Quartalszahlen: <b>{row['Earnings Datum'].strftime('%d.%m.%Y')}</b></span>
+                                <span style="font-weight: 600; color: #f0f6fc; font-size: 0.95rem;">{row['Unternehmen']} ({row['Ticker']})</span><br>
+                                <span style="color: #8b949e; font-size: 0.8rem;">Meldet Quartalszahlen am <b>{row['Earnings Datum'].strftime('%d.%m.%Y')}</b></span>
                             </div>
-                            <div style="background-color: {urgency_color}; color: #0d1117; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 0.8rem;">
-                                in {row['Tage bis Earnings']} Tag(en)
+                            <div style="background-color: {badge_color}; color: #ffffff; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.75rem;">
+                                {timing_text}
                             </div>
                         </div>""",
                         unsafe_allow_html=True
                     )
-            else:
-                st.success("✨ Keine anstehenden Earnings in den nächsten 14 Tagen für deine Swing-Positionen.")
-        else:
-            st.info("Keine offenen Positionen im Swing Depot vorhanden.")
     except Exception:
-        st.info("Earnings Warner konnte nicht geladen werden.")
-
-    st.divider()
+        pass
 
     # 1. Makro & Rohstoffe
-    st.markdown("### 🌍 Makro & Rohstoffe")
+    st.markdown("##### 🌍 Makro & Rohstoffe")
     macro_data = get_macro_commodities()
     if macro_data:
         cols_macro = st.columns(len(macro_data))
@@ -287,10 +303,10 @@ if check_password():
             val_str = f"{m_val['price']:,.2f} {m_val['unit']}"
             cols_macro[idx].metric(m_name, val_str, f"{m_val['pct']:.2f}%")
         
-    st.divider()
+    st.markdown("<hr style='margin: 0.8em 0px; border-color: #30363d;'>", unsafe_allow_html=True)
     
     # 2. Globale Indizes
-    st.markdown("### 📊 Globale Märkte")
+    st.markdown("##### 📊 Globale Märkte")
     index_data = get_index_performance()
     keys = list(index_data.keys())
     
@@ -302,10 +318,10 @@ if check_password():
                 val = index_data[idx_name]
                 cols[i].metric(idx_name, f"{val['price']:,.2f}", f"{val['pct']:.2f}%")
     
-    st.divider()
+    st.markdown("<hr style='margin: 0.8em 0px; border-color: #30363d;'>", unsafe_allow_html=True)
     
     # 3. Sektor-Performance
-    st.markdown("### 🏛️ Sektor-Übersicht (Tagesperformance)")
+    st.markdown("##### 🏛️ Sektor-Übersicht (Tagesperformance)")
     sector_perf = get_sector_performance()
     
     if not sector_perf.empty:
@@ -324,7 +340,7 @@ if check_password():
     else:
         st.info("Keine Sektor-Daten verfügbar.")
         
-    st.divider()
+    st.markdown("<hr style='margin: 0.8em 0px; border-color: #30363d;'>", unsafe_allow_html=True)
     
     # 4. Top Gewinner & Verlierer
     df_perf = get_watchlist_performance()
@@ -339,10 +355,10 @@ if check_password():
         }
         
         with col_win:
-            st.markdown("#### 🟢 Top Gewinner")
+            st.markdown("###### 🟢 Top Gewinner")
             st.dataframe(df_sorted.head(10), column_config=conf, hide_index=True, use_container_width=True)
         with col_loss:
-            st.markdown("#### 🔴 Top Verlierer")
+            st.markdown("###### 🔴 Top Verlierer")
             st.dataframe(df_sorted.tail(10).sort_values(by="Tageschange (%)"), column_config=conf, hide_index=True, use_container_width=True)
     else:
         st.info("Keine Watchlist-Daten verfügbar.")
