@@ -7,42 +7,62 @@ import yfinance as yf
 # Seiteneinstellungen
 st.set_page_config(layout="wide", page_title="VisionDZ - Terminal", page_icon="⚡")
 
-# --- RADIKALES HYPER-MODERNES TERMINAL CSS ---
+# --- KOMPROMISSLOSES HYPER-MODERNES TERMINAL CSS ---
 st.markdown("""
     <style>
-    /* Globales Padding komprimieren */
+    /* Globales Layout & Abstände straffen */
     .block-container {
-        padding-top: 1.5rem;
+        padding-top: 1.2rem;
         padding-bottom: 2rem;
         padding-left: 2rem;
         padding-right: 2rem;
-    }
-    /* Kompakte, moderne Karten-Optik */
-    .terminal-card {
         background-color: #0d1117;
+    }
+    /* Benutzerdefinierte Terminal-Karte */
+    .t-card {
+        background-color: #161b22;
         border: 1px solid #30363d;
-        padding: 12px 16px;
         border-radius: 6px;
+        padding: 10px 14px;
         margin-bottom: 8px;
+        transition: border-color 0.2s ease;
     }
-    /* Metriken extrem kompakt */
-    div[data-testid="metric-container"] {
-        background-color: #161b22 !important;
-        border: 1px solid #30363d !important;
-        padding: 8px 12px !important;
-        border-radius: 6px !important;
+    .t-card:hover {
+        border-color: #58a6ff;
     }
-    [data-testid="stMetricValue"] {
-        font-size: 1.25rem !important;
+    .t-title {
+        font-size: 0.72rem;
+        color: #8b949e;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 2px;
     }
-    [data-testid="stMetricLabel"] {
-        font-size: 0.75rem !important;
-        color: #8b949e !important;
+    .t-value {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #f0f6fc;
     }
-    /* Tabellen & Dataframes straffen */
-    .stDataFrame {
-        border: 1px solid #30363d;
-        border-radius: 6px;
+    .t-pos {
+        color: #3fb950;
+        font-weight: 600;
+        font-size: 0.85rem;
+    }
+    .t-neg {
+        color: #da3633;
+        font-weight: 600;
+        font-size: 0.85rem;
+    }
+    /* Sektions-Überschriften im Terminal-Stil */
+    .section-header {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #8b949e;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-top: 1.2rem;
+        margin-bottom: 0.6rem;
+        border-bottom: 1px solid #21262d;
+        padding-bottom: 4px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -84,14 +104,28 @@ def check_password():
                 st.error("Passwort falsch.")
     return False
 
+# --- Hilfsfunktion für Custom Terminal Cards ---
+def render_card(title, value, pct=None, unit=""):
+    pct_html = ""
+    if pct is not None:
+        cls = "t-pos" if pct >= 0 else "t-neg"
+        sign = "+" if pct > 0 else ""
+        pct_html = f'<span class="{cls}">{sign}{pct:.2f}%</span>'
+    
+    st.markdown(f"""
+        <div class="t-card">
+            <div class="t-title">{title}</div>
+            <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                <span class="t-value">{value} {unit}</span>
+                {pct_html}
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
 # --- Makro- & Rohstoff-Daten ---
 @st.cache_data(ttl=60)
 def get_macro_commodities():
-    symbols = {
-        "Gold": "GC=F",
-        "Rohöl (WTI)": "CL=F",
-        "US 10Y Zins": "^TNX"
-    }
+    symbols = {"Gold": "GC=F", "Rohöl (WTI)": "CL=F", "US 10Y Zins": "^TNX"}
     results = {}
     for name, symbol in symbols.items():
         try:
@@ -217,14 +251,14 @@ def get_watchlist_performance():
 
 # --- HAUPTPROGRAMM ---
 if check_password():
-    # Header Bereich im modernen Minimal-Look
+    # Header Bereich
     col_head1, col_head2 = st.columns([3, 1])
     with col_head1:
-        st.markdown("### ⚡ VisionDZ // Terminal")
+        st.markdown("<h2 style='color: #f0f6fc; margin: 0; font-family: monospace;'>⚡ V I S I O N D Z // TERMINAL</h2>", unsafe_allow_html=True)
     with col_head2:
-        st.markdown(f"<div style='text-align: right; color: #8b949e; font-size: 0.8rem;'>STATUS: <span style='color: #3fb950;'>ONLINE</span> | {date.today().strftime('%d.%m.%Y')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align: right; color: #8b949e; font-size: 0.75rem; font-family: monospace;'>SYS: <span style='color: #3fb950;'>ONLINE</span> | {date.today().strftime('%d.%m.%Y')}</div>", unsafe_allow_html=True)
 
-    st.markdown("<hr style='margin: 0.5em 0px; border-color: #30363d;'>", unsafe_allow_html=True)
+    st.markdown("<div style='height: 1px; background-color: #30363d; margin: 0.6rem 0 1rem 0;'></div>", unsafe_allow_html=True)
 
     # --- EARNINGS WARNER FÜR DAS SWING DEPOT (2 Tage vorher bis zum Tag selbst) ---
     try:
@@ -267,7 +301,7 @@ if check_password():
                     continue
 
             if upcoming_earnings:
-                st.markdown("##### 🚨 Earnings Warner (Swing Depot)")
+                st.markdown('<div class="section-header">🚨 Earnings Warner (Swing Depot)</div>', unsafe_allow_html=True)
                 for row in sorted(upcoming_earnings, key=lambda x: x["Tage bis Earnings"]):
                     if row["Tage bis Earnings"] == 0:
                         timing_text = "HEUTE!"
@@ -280,12 +314,12 @@ if check_password():
                         badge_color = "#d29922"
 
                     st.markdown(
-                        f"""<div class="terminal-card" style="border-left: 4px solid {badge_color}; display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        f"""<div class="t-card" style="border-left: 3px solid {badge_color}; display: flex; justify-content: space-between; align-items: center;">
                             <div>
-                                <span style="font-weight: 600; color: #f0f6fc; font-size: 0.95rem;">{row['Unternehmen']} ({row['Ticker']})</span><br>
-                                <span style="color: #8b949e; font-size: 0.8rem;">Meldet Quartalszahlen am <b>{row['Earnings Datum'].strftime('%d.%m.%Y')}</b></span>
+                                <span style="font-weight: 600; color: #f0f6fc; font-size: 0.9rem;">{row['Unternehmen']} ({row['Ticker']})</span><br>
+                                <span style="color: #8b949e; font-size: 0.75rem;">Quartalszahlen am <b>{row['Earnings Datum'].strftime('%d.%m.%Y')}</b></span>
                             </div>
-                            <div style="background-color: {badge_color}; color: #ffffff; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.75rem;">
+                            <div style="background-color: {badge_color}; color: #ffffff; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.7rem;">
                                 {timing_text}
                             </div>
                         </div>""",
@@ -295,33 +329,31 @@ if check_password():
         pass
 
     # 1. Makro & Rohstoffe
-    st.markdown("##### 🌍 Makro & Rohstoffe")
+    st.markdown('<div class="section-header">🌍 Makro & Rohstoffe</div>', unsafe_allow_html=True)
     macro_data = get_macro_commodities()
     if macro_data:
         cols_macro = st.columns(len(macro_data))
         for idx, (m_name, m_val) in enumerate(macro_data.items()):
-            val_str = f"{m_val['price']:,.2f} {m_val['unit']}"
-            cols_macro[idx].metric(m_name, val_str, f"{m_val['pct']:.2f}%")
+            with cols_macro[idx]:
+                render_card(m_name, f"{m_val['price']:,.2f}", m_val['pct'], m_val['unit'])
         
-    st.markdown("<hr style='margin: 0.8em 0px; border-color: #30363d;'>", unsafe_allow_html=True)
-    
     # 2. Globale Indizes
-    st.markdown("##### 📊 Globale Märkte")
+    st.markdown('<div class="section-header">📊 Globale Märkte</div>', unsafe_allow_html=True)
     index_data = get_index_performance()
     keys = list(index_data.keys())
     
     for r in range(2):
         cols = st.columns(4)
         for i in range(4):
-            if r*4 + i < len(keys):
-                idx_name = keys[r*4 + i]
+            idx_idx = r * 4 + i
+            if idx_idx < len(keys):
+                idx_name = keys[idx_idx]
                 val = index_data[idx_name]
-                cols[i].metric(idx_name, f"{val['price']:,.2f}", f"{val['pct']:.2f}%")
-    
-    st.markdown("<hr style='margin: 0.8em 0px; border-color: #30363d;'>", unsafe_allow_html=True)
+                with cols[i]:
+                    render_card(idx_name, f"{val['price']:,.2f}", val['pct'])
     
     # 3. Sektor-Performance
-    st.markdown("##### 🏛️ Sektor-Übersicht (Tagesperformance)")
+    st.markdown('<div class="section-header">🏛️ Sektor-Übersicht (Tagesperformance)</div>', unsafe_allow_html=True)
     sector_perf = get_sector_performance()
     
     if not sector_perf.empty:
@@ -332,17 +364,13 @@ if check_password():
             row_sectors = sectors[i:i + cols_per_row]
             cols = st.columns(len(row_sectors))
             for col_idx, (sec_name, sec_val) in enumerate(row_sectors):
-                cols[col_idx].metric(
-                    label=sec_name, 
-                    value=f"{sec_val:.2f}%", 
-                    delta=f"{sec_val:.2f}%"
-                )
+                with cols[col_idx]:
+                    render_card(sec_name, f"{sec_val:.2f}%", sec_val)
     else:
         st.info("Keine Sektor-Daten verfügbar.")
         
-    st.markdown("<hr style='margin: 0.8em 0px; border-color: #30363d;'>", unsafe_allow_html=True)
-    
     # 4. Top Gewinner & Verlierer
+    st.markdown('<div class="section-header">⚡ Top Performance Watchlist</div>', unsafe_allow_html=True)
     df_perf = get_watchlist_performance()
 
     if not df_perf.empty and "Tageschange (%)" in df_perf.columns:
@@ -355,10 +383,10 @@ if check_password():
         }
         
         with col_win:
-            st.markdown("###### 🟢 Top Gewinner")
+            st.markdown("<span style='color: #3fb950; font-weight: 600; font-size: 0.8rem;'>🟢 TOP GEWINNER</span>", unsafe_allow_html=True)
             st.dataframe(df_sorted.head(10), column_config=conf, hide_index=True, use_container_width=True)
         with col_loss:
-            st.markdown("###### 🔴 Top Verlierer")
+            st.markdown("<span style='color: #da3633; font-weight: 600; font-size: 0.8rem;'>🔴 TOP VERLIERER</span>", unsafe_allow_html=True)
             st.dataframe(df_sorted.tail(10).sort_values(by="Tageschange (%)"), column_config=conf, hide_index=True, use_container_width=True)
     else:
         st.info("Keine Watchlist-Daten verfügbar.")
