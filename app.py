@@ -1,20 +1,35 @@
+from datetime import datetime, date
 import os
-import streamlit as st
-from supabase import create_client
 import pandas as pd
+import streamlit as st
 import yfinance as yf
 
 # Seiteneinstellungen
-st.set_page_config(layout="wide", page_title="VisionDZ - Dashboard", page_icon="📈")
+st.set_page_config(layout="wide", page_title="VisionDZ - Terminal", page_icon="⚡")
 
-# --- CUSTOM CSS ---
+# --- HYPER-MODERNES TERMINAL CSS ---
 st.markdown("""
     <style>
+    /* Globales Padding komprimieren für den Terminal-Look */
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        padding-left: 2.5rem;
+        padding-right: 2.5rem;
+    }
+    /* Metriken kompakter & moderner gestalten */
     div[data-testid="metric-container"] {
-        background-color: #1e293b;
-        border: 1px solid #334155;
-        padding: 14px 18px;
-        border-radius: 10px;
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        padding: 10px 14px;
+        border-radius: 8px;
+    }
+    [data-testid="stMetricValue"] {
+        font-size: 1.35rem !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.8rem !important;
+        color: #8b949e !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -116,12 +131,11 @@ def get_index_performance():
             results[name] = {"price": 0.0, "pct": 0.0}
     return results
 
-# Sektor-Performance berechnen (Supabase intern initialisiert für Caching-Sicherheit)
+# Sektor-Performance berechnen
 @st.cache_data(ttl=60)
 def get_sector_performance():
     try:
         sup_client = _get_supabase_client()
-        
         response = sup_client.table("watchlist").select("ticker, sector").execute()
         df = pd.DataFrame(response.data)
         if df.empty or 'sector' not in df.columns or 'ticker' not in df.columns:
@@ -157,12 +171,11 @@ def get_sector_performance():
     except Exception:
         return pd.Series(dtype=float)
 
-# Präzise Watchlist-Performance (Supabase intern initialisiert)
+# Watchlist-Performance
 @st.cache_data(ttl=60)
 def get_watchlist_performance():
     try:
         sup_client = _get_supabase_client()
-        
         response = sup_client.table("watchlist").select("ticker, company_name, gettex_ticker, sector").execute()
         df = pd.DataFrame(response.data)
         if df.empty: return pd.DataFrame()
@@ -191,10 +204,82 @@ def get_watchlist_performance():
 
 # --- HAUPTPROGRAMM ---
 if check_password():
-    st.title("📈 VisionDZ - Dashboard")
-    
+    # Header Bereich
+    col_head1, col_head2 = st.columns([3, 1])
+    with col_head1:
+        st.title("⚡ VisionDZ Terminal")
+        st.markdown("Autonomes Portfolio-Management & Quantitative Marktüberwachung")
+    with col_head2:
+        st.markdown(f"<div style='text-align: right; color: #8b949e; font-size: 0.9rem; padding-top: 0.8rem;'>System: <span style='color: #3fb950;'>● Online</span><br>{date.today().strftime('%d.%m.%Y')}</div>", unsafe_allow_html=True)
+
+    st.divider()
+
+    # --- EARNINGS WARNER FÜR DAS SWING DEPOT ---
+    st.markdown("### 🚨 Earnings Warner (Swing Depot)")
+    try:
+        sup_client = _get_supabase_client()
+        swing_res = sup_client.table("swing_depot").select("ticker, unternehmen").execute()
+        swing_positions = swing_res.data if swing_res.data else []
+        
+        if swing_positions:
+            upcoming_earnings = []
+            for pos in swing_positions:
+                t = pos["ticker"]
+                comp_name = pos.get("unternehmen", t)
+                try:
+                    ticker_obj = yf.Ticker(t)
+                    cal = ticker_obj.calendar
+                    earnings_date = None
+                    if isinstance(cal, dict) and "Earnings Date" in cal:
+                        dates = cal["Earnings Date"]
+                        if isinstance(dates, list) and len(dates) > 0:
+                            earnings_date = pd.to_datetime(dates[0]).date()
+                    
+                    if not earnings_date:
+                        ed_df = ticker_obj.get_earnings_dates(limit=2)
+                        if ed_df is not None and not ed_df.empty:
+                            future_dates = ed_df.index[ed_df.index >= pd.Timestamp.today()]
+                            if len(future_dates) > 0:
+                                earnings_date = future_dates[0].date()
+
+                    if earnings_date:
+                        days_until = (earnings_date - date.today()).days
+                        if 0 <= days_until <= 14:
+                            upcoming_earnings.append({
+                                "Ticker": t,
+                                "Unternehmen": comp_name,
+                                "Earnings Datum": earnings_date,
+                                "Tage bis Earnings": days_until
+                            })
+                except Exception:
+                    continue
+
+            if upcoming_earnings:
+                for row in sorted(upcoming_earnings, key=lambda x: x["Tage bis Earnings"]):
+                    urgency_color = "#ff7b72" if row["Tage bis Earnings"] <= 3 else "#d29922"
+                    st.markdown(
+                        f"""<div style="padding: 10px 14px; border-radius: 6px; border: 1px solid {urgency_color}; background-color: #161b22; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <strong style="font-size: 1rem; color: #f0f6fc;">{row['Unternehmen']} ({row['Ticker']})</strong><br>
+                                <span style="color: #8b949e; font-size: 0.85rem;">Quartalszahlen: <b>{row['Earnings Datum'].strftime('%d.%m.%Y')}</b></span>
+                            </div>
+                            <div style="background-color: {urgency_color}; color: #0d1117; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 0.8rem;">
+                                in {row['Tage bis Earnings']} Tag(en)
+                            </div>
+                        </div>""",
+                        unsafe_allow_html=True
+                    )
+            else:
+                st.success("✨ Keine anstehenden Earnings in den nächsten 14 Tagen für deine Swing-Positionen.")
+        else:
+            st.info("Keine offenen Positionen im Swing Depot vorhanden.")
+    except Exception:
+        st.info("Earnings Warner konnte nicht geladen werden.")
+
+    st.divider()
+
     # 1. Makro & Rohstoffe
-    st.subheader("🌍 Makro & Rohstoffe")
+    st.markdown("### 🌍 Makro & Rohstoffe")
     macro_data = get_macro_commodities()
     if macro_data:
         cols_macro = st.columns(len(macro_data))
@@ -205,7 +290,7 @@ if check_password():
     st.divider()
     
     # 2. Globale Indizes
-    st.subheader("📊 Globale Märkte")
+    st.markdown("### 📊 Globale Märkte")
     index_data = get_index_performance()
     keys = list(index_data.keys())
     
@@ -220,7 +305,7 @@ if check_password():
     st.divider()
     
     # 3. Sektor-Performance
-    st.subheader("🏛️ Sektor-Übersicht (Tagesperformance)")
+    st.markdown("### 🏛️ Sektor-Übersicht (Tagesperformance)")
     sector_perf = get_sector_performance()
     
     if not sector_perf.empty:
