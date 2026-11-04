@@ -7,7 +7,7 @@ import yfinance as yf
 # Seiteneinstellungen
 st.set_page_config(layout="wide", page_title="VisionDZ - Terminal", page_icon="⚡")
 
-# --- ULTRA-KOMPAKTES TERMINAL CSS ---
+# --- ULTRA-KOMPAKTES TERMINAL CSS & RAHMEN-BOXEN ---
 st.markdown("""
     <style>
     .block-container {
@@ -17,15 +17,22 @@ st.markdown("""
         padding-right: 1.5rem;
         background-color: #0d1117;
     }
-    .t-card {
+    .terminal-box {
         background-color: #161b22;
         border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 12px;
+        margin-bottom: 0.8rem;
+    }
+    .t-card {
+        background-color: #0d1117;
+        border: 1px solid #21262d;
         border-radius: 4px;
         padding: 6px 10px;
-        margin-bottom: 4px;
+        margin-bottom: 6px;
     }
     .t-title {
-        font-size: 0.68rem;
+        font-size: 0.65rem;
         color: #8b949e;
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -34,19 +41,19 @@ st.markdown("""
         text-overflow: ellipsis;
     }
     .t-value {
-        font-size: 1.05rem;
+        font-size: 0.95rem;
         font-weight: 600;
         color: #f0f6fc;
     }
     .t-pos {
         color: #3fb950;
         font-weight: 600;
-        font-size: 0.75rem;
+        font-size: 0.7rem;
     }
     .t-neg {
         color: #da3633;
         font-weight: 600;
-        font-size: 0.75rem;
+        font-size: 0.7rem;
     }
     .section-header {
         font-size: 0.8rem;
@@ -58,6 +65,16 @@ st.markdown("""
         margin-bottom: 0.4rem;
         border-bottom: 1px solid #21262d;
         padding-bottom: 3px;
+    }
+    .box-title {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #8b949e;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 8px;
+        border-bottom: 1px solid #30363d;
+        padding-bottom: 4px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -121,7 +138,7 @@ def render_terminal_card(title, value, pct=None, unit=""):
 # --- Datenabrufe ---
 @st.cache_data(ttl=60)
 def get_macro_commodities():
-    symbols = {"Gold": "GC=F", "Rohöl (WTI)": "CL=F", "US 10Y Zins": "^TNX"}
+    symbols = {"Gold": "GC=F", "Rohöl (WTI)": "CL=F", "US 10Y Zins": "^TNX", "Bitcoin": "BTC-USD"}
     results = {}
     for name, symbol in symbols.items():
         try:
@@ -306,7 +323,7 @@ if check_password():
                         badge_color = "#d29922"
 
                     st.markdown(
-                        f"""<div class="t-card" style="border-left: 3px solid {badge_color}; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        f"""<div class="terminal-box" style="border-left: 3px solid {badge_color}; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; padding: 8px 12px;">
                             <div>
                                 <span style="font-weight: 600; color: #f0f6fc; font-size: 0.85rem;">{row['Unternehmen']} ({row['Ticker']})</span><br>
                                 <span style="color: #8b949e; font-size: 0.7rem;">Quartalszahlen am <b>{row['Earnings Datum'].strftime('%d.%m.%Y')}</b></span>
@@ -320,25 +337,24 @@ if check_password():
     except Exception:
         pass
 
-    # --- MÄRKTE, INDIZES & ROHSTOFFE (Saubere 6-Spalten Matrix) ---
-    st.markdown('<div class="section-header">🌍 Märkte, Indizes & Rohstoffe</div>', unsafe_allow_html=True)
+    # --- GETRENNTE RAHMEN-BOXEN: MAKRO & ROHSTOFFE / GLOBALE INDIZES ---
+    col_box1, col_box2 = st.columns(2)
     
-    macro_data = get_macro_commodities()
-    index_data = get_index_performance()
-    
-    # Alle Elemente in eine Liste zusammenführen
-    all_market_items = []
-    for name, m_val in macro_data.items():
-        all_market_items.append((name, f"{m_val['price']:,.2f}", m_val['pct'], m_val['unit']))
-    for name, val in index_data.items():
-        all_market_items.append((name, f"{val['price']:,.2f}", val['pct'], ""))
+    with col_box1:
+        st.markdown('<div class="terminal-box">', unsafe_allow_html=True)
+        st.markdown('<div class="box-title">🌍 Makro, Rohstoffe & Crypto</div>', unsafe_allow_html=True)
+        macro_data = get_macro_commodities()
+        for m_name, m_val in macro_data.items():
+            render_terminal_card(m_name, f"{m_val['price']:,.2f}", m_val['pct'], m_val['unit'])
+        st.markdown('</div>', unsafe_allow_html=True)
         
-    # In 6 schmalen Spalten rendern
-    cols_market = st.columns(6)
-    for idx, item in enumerate(all_market_items):
-        col_idx = idx % 6
-        with cols_market[col_idx]:
-            render_terminal_card(item[0], item[1], item[2], item[3])
+    with col_box2:
+        st.markdown('<div class="terminal-box">', unsafe_allow_html=True)
+        st.markdown('<div class="box-title">📊 Globale Märkte & Indizes</div>', unsafe_allow_html=True)
+        index_data = get_index_performance()
+        for idx_name, val in index_data.items():
+            render_terminal_card(idx_name, f"{val['price']:,.2f}", val['pct'])
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # --- SEKTOR-PERFORMANCE ---
     st.markdown('<div class="section-header">🏛️ Sektor-Übersicht (Tagesperformance)</div>', unsafe_allow_html=True)
@@ -346,9 +362,9 @@ if check_password():
     
     if not sector_perf.empty:
         sectors = list(sector_perf.items())
-        cols_sec = st.columns(6)
+        cols_sec = st.columns(min(len(sectors), 6))
         for idx, (sec_name, sec_val) in enumerate(sectors):
-            col_idx = idx % 6
+            col_idx = idx % len(cols_sec)
             with cols_sec[col_idx]:
                 render_terminal_card(sec_name, f"{sec_val:.2f}%", sec_val)
     else:
