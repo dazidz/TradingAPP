@@ -23,6 +23,7 @@ st.markdown("""
         border-radius: 6px;
         padding: 12px;
         margin-bottom: 0.8rem;
+        height: 100%;
     }
     .t-card {
         background-color: #0d1117;
@@ -337,23 +338,58 @@ if check_password():
     except Exception:
         pass
 
-    # --- GETRENNTE RAHMEN-BOXEN: MAKRO & ROHSTOFFE / GLOBALE INDIZES ---
+    # --- ZWEI GROSSE HAUPTBOXEN NEBENEINANDER (2 Reihen intern aufgeteilt) ---
     col_box1, col_box2 = st.columns(2)
     
+    # --- LINKE BOX: MAKRO, ROHSTOFFE & CRYPTO (2 Reihen: Gold/Rohöl & Zins/Bitcoin) ---
     with col_box1:
         st.markdown('<div class="terminal-box">', unsafe_allow_html=True)
         st.markdown('<div class="box-title">🌍 Makro, Rohstoffe & Crypto</div>', unsafe_allow_html=True)
+        
         macro_data = get_macro_commodities()
-        for m_name, m_val in macro_data.items():
-            render_terminal_card(m_name, f"{m_val['price']:,.2f}", m_val['pct'], m_val['unit'])
+        items = list(macro_data.items()) # [("Gold", ...), ("Rohöl (WTI)", ...), ("US 10Y Zins", ...), ("Bitcoin", ...)]
+        
+        # Reihe 1: Gold & Rohöl
+        r1_c1, r1_c2 = st.columns(2)
+        if len(items) > 0:
+            with r1_c1:
+                render_terminal_card(items[0][0], f"{items[0][1]['price']:,.2f}", items[0][1]['pct'], items[0][1]['unit'])
+        if len(items) > 1:
+            with r1_c2:
+                render_terminal_card(items[1][0], f"{items[1][1]['price']:,.2f}", items[1][1]['pct'], items[1][1]['unit'])
+                
+        # Reihe 2: US 10Y Zins & Bitcoin
+        r2_c1, r2_c2 = st.columns(2)
+        if len(items) > 2:
+            with r2_c1:
+                render_terminal_card(items[2][0], f"{items[2][1]['price']:,.2f}", items[2][1]['pct'], items[2][1]['unit'])
+        if len(items) > 3:
+            with r2_c2:
+                render_terminal_card(items[3][0], f"{items[3][1]['price']:,.2f}", items[3][1]['pct'], items[3][1]['unit'])
+                
         st.markdown('</div>', unsafe_allow_html=True)
         
+    # --- RECHTE BOX: GLOBALE MÄRKTE & INDIZES (2er-Spalten in Reihen aufgeteilt) ---
     with col_box2:
         st.markdown('<div class="terminal-box">', unsafe_allow_html=True)
         st.markdown('<div class="box-title">📊 Globale Märkte & Indizes</div>', unsafe_allow_html=True)
+        
         index_data = get_index_performance()
-        for idx_name, val in index_data.items():
-            render_terminal_card(idx_name, f"{val['price']:,.2f}", val['pct'])
+        idx_items = list(index_data.items()) # Alle Indizes
+        
+        # Indizes paarweise (in Reihen zu je 2 Elementen) durchgehen
+        for i in range(0, len(idx_items), 2):
+            row_c1, row_c2 = st.columns(2)
+            
+            with row_c1:
+                name, val = idx_items[i]
+                render_terminal_card(name, f"{val['price']:,.2f}", val['pct'])
+                
+            if i + 1 < len(idx_items):
+                with row_c2:
+                    name, val = idx_items[i + 1]
+                    render_terminal_card(name, f"{val['price']:,.2f}", val['pct'])
+                    
         st.markdown('</div>', unsafe_allow_html=True)
 
     # --- SEKTOR-PERFORMANCE ---
