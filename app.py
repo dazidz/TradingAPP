@@ -7,62 +7,68 @@ import yfinance as yf
 # Seiteneinstellungen
 st.set_page_config(layout="wide", page_title="VisionDZ - Terminal", page_icon="⚡")
 
-# --- KOMPROMISSLOSES HYPER-MODERNES TERMINAL CSS ---
+# --- ULTRA-KOMPAKTES TERMINAL CSS & GRID ---
 st.markdown("""
     <style>
-    /* Globales Layout & Abstände straffen */
     .block-container {
-        padding-top: 1.2rem;
+        padding-top: 1rem;
         padding-bottom: 2rem;
-        padding-left: 2rem;
-        padding-right: 2rem;
+        padding-left: 1.5rem;
+        padding-right: 1.5rem;
         background-color: #0d1117;
     }
-    /* Benutzerdefinierte Terminal-Karte */
+    /* Responsives Terminal-Grid für ultrakompakte Karten */
+    .terminal-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+        gap: 6px;
+        margin-bottom: 0.8rem;
+    }
     .t-card {
         background-color: #161b22;
         border: 1px solid #30363d;
-        border-radius: 6px;
-        padding: 10px 14px;
-        margin-bottom: 8px;
+        border-radius: 4px;
+        padding: 8px 10px;
         transition: border-color 0.2s ease;
     }
     .t-card:hover {
         border-color: #58a6ff;
     }
     .t-title {
-        font-size: 0.72rem;
+        font-size: 0.68rem;
         color: #8b949e;
         text-transform: uppercase;
         letter-spacing: 0.05em;
         margin-bottom: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .t-value {
-        font-size: 1.2rem;
+        font-size: 1.05rem;
         font-weight: 600;
         color: #f0f6fc;
     }
     .t-pos {
         color: #3fb950;
         font-weight: 600;
-        font-size: 0.85rem;
+        font-size: 0.75rem;
     }
     .t-neg {
         color: #da3633;
         font-weight: 600;
-        font-size: 0.85rem;
+        font-size: 0.75rem;
     }
-    /* Sektions-Überschriften im Terminal-Stil */
     .section-header {
-        font-size: 0.85rem;
+        font-size: 0.8rem;
         font-weight: 600;
         color: #8b949e;
         text-transform: uppercase;
         letter-spacing: 0.1em;
-        margin-top: 1.2rem;
-        margin-bottom: 0.6rem;
+        margin-top: 1rem;
+        margin-bottom: 0.4rem;
         border-bottom: 1px solid #21262d;
-        padding-bottom: 4px;
+        padding-bottom: 3px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -104,15 +110,15 @@ def check_password():
                 st.error("Passwort falsch.")
     return False
 
-# --- Hilfsfunktion für Custom Terminal Cards ---
-def render_card(title, value, pct=None, unit=""):
+# --- HTML Renderer für Grid-Karten ---
+def render_html_card(title, value, pct=None, unit=""):
     pct_html = ""
     if pct is not None:
         cls = "t-pos" if pct >= 0 else "t-neg"
         sign = "+" if pct > 0 else ""
         pct_html = f'<span class="{cls}">{sign}{pct:.2f}%</span>'
     
-    st.markdown(f"""
+    return f"""
         <div class="t-card">
             <div class="t-title">{title}</div>
             <div style="display: flex; justify-content: space-between; align-items: baseline;">
@@ -120,9 +126,9 @@ def render_card(title, value, pct=None, unit=""):
                 {pct_html}
             </div>
         </div>
-    """, unsafe_allow_html=True)
+    """
 
-# --- Makro- & Rohstoff-Daten ---
+# --- Datenabrufe ---
 @st.cache_data(ttl=60)
 def get_macro_commodities():
     symbols = {"Gold": "GC=F", "Rohöl (WTI)": "CL=F", "US 10Y Zins": "^TNX"}
@@ -145,7 +151,6 @@ def get_macro_commodities():
         results[name] = {"price": 0.0, "pct": 0.0, "unit": ""}
     return results
 
-# Robuste Index-Daten
 @st.cache_data(ttl=60)
 def get_index_performance():
     indices = {
@@ -178,7 +183,6 @@ def get_index_performance():
             results[name] = {"price": 0.0, "pct": 0.0}
     return results
 
-# Sektor-Performance
 @st.cache_data(ttl=60)
 def get_sector_performance():
     try:
@@ -218,7 +222,6 @@ def get_sector_performance():
     except Exception:
         return pd.Series(dtype=float)
 
-# Watchlist-Performance
 @st.cache_data(ttl=60)
 def get_watchlist_performance():
     try:
@@ -251,16 +254,16 @@ def get_watchlist_performance():
 
 # --- HAUPTPROGRAMM ---
 if check_password():
-    # Header Bereich
+    # Header
     col_head1, col_head2 = st.columns([3, 1])
     with col_head1:
-        st.markdown("<h2 style='color: #f0f6fc; margin: 0; font-family: monospace;'>⚡ V I S I O N D Z // TERMINAL</h2>", unsafe_allow_html=True)
+        st.markdown("<h3 style='color: #f0f6fc; margin: 0; font-family: monospace;'>⚡ V I S I O N D Z // TERMINAL</h3>", unsafe_allow_html=True)
     with col_head2:
-        st.markdown(f"<div style='text-align: right; color: #8b949e; font-size: 0.75rem; font-family: monospace;'>SYS: <span style='color: #3fb950;'>ONLINE</span> | {date.today().strftime('%d.%m.%Y')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align: right; color: #8b949e; font-size: 0.7rem; font-family: monospace;'>SYS: <span style='color: #3fb950;'>ONLINE</span> | {date.today().strftime('%d.%m.%Y')}</div>", unsafe_allow_html=True)
 
-    st.markdown("<div style='height: 1px; background-color: #30363d; margin: 0.6rem 0 1rem 0;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height: 1px; background-color: #30363d; margin: 0.5rem 0 0.8rem 0;'></div>", unsafe_allow_html=True)
 
-    # --- EARNINGS WARNER FÜR DAS SWING DEPOT (2 Tage vorher bis zum Tag selbst) ---
+    # --- EARNINGS WARNER (Exakt 2 Tage vorher bis zum Tag selbst: 0 <= days_until <= 2) ---
     try:
         sup_client = _get_supabase_client()
         swing_res = sup_client.table("swing_depot").select("ticker, unternehmen").execute()
@@ -289,7 +292,6 @@ if check_password():
 
                     if earnings_date:
                         days_until = (earnings_date - date.today()).days
-                        # Exakter Filter: 2 Tage vorher bis zum Tag des Earnings (0, 1, 2)
                         if 0 <= days_until <= 2:
                             upcoming_earnings.append({
                                 "Ticker": t,
@@ -314,12 +316,12 @@ if check_password():
                         badge_color = "#d29922"
 
                     st.markdown(
-                        f"""<div class="t-card" style="border-left: 3px solid {badge_color}; display: flex; justify-content: space-between; align-items: center;">
+                        f"""<div class="t-card" style="border-left: 3px solid {badge_color}; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                             <div>
-                                <span style="font-weight: 600; color: #f0f6fc; font-size: 0.9rem;">{row['Unternehmen']} ({row['Ticker']})</span><br>
-                                <span style="color: #8b949e; font-size: 0.75rem;">Quartalszahlen am <b>{row['Earnings Datum'].strftime('%d.%m.%Y')}</b></span>
+                                <span style="font-weight: 600; color: #f0f6fc; font-size: 0.85rem;">{row['Unternehmen']} ({row['Ticker']})</span><br>
+                                <span style="color: #8b949e; font-size: 0.7rem;">Quartalszahlen am <b>{row['Earnings Datum'].strftime('%d.%m.%Y')}</b></span>
                             </div>
-                            <div style="background-color: {badge_color}; color: #ffffff; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.7rem;">
+                            <div style="background-color: {badge_color}; color: #ffffff; padding: 2px 6px; border-radius: 3px; font-weight: bold; font-size: 0.65rem;">
                                 {timing_text}
                             </div>
                         </div>""",
@@ -328,48 +330,39 @@ if check_password():
     except Exception:
         pass
 
-    # 1. Makro & Rohstoffe
-    st.markdown('<div class="section-header">🌍 Makro & Rohstoffe</div>', unsafe_allow_html=True)
+    # --- 1. & 2. GEMEINSAME EBENE: MÄRKTE & ROHSTOFFE (CSS GRID) ---
+    st.markdown('<div class="section-header">🌍 Märkte, Indizes & Rohstoffe</div>', unsafe_allow_html=True)
+    
     macro_data = get_macro_commodities()
-    if macro_data:
-        cols_macro = st.columns(len(macro_data))
-        for idx, (m_name, m_val) in enumerate(macro_data.items()):
-            with cols_macro[idx]:
-                render_card(m_name, f"{m_val['price']:,.2f}", m_val['pct'], m_val['unit'])
-        
-    # 2. Globale Indizes
-    st.markdown('<div class="section-header">📊 Globale Märkte</div>', unsafe_allow_html=True)
     index_data = get_index_performance()
-    keys = list(index_data.keys())
     
-    for r in range(2):
-        cols = st.columns(4)
-        for i in range(4):
-            idx_idx = r * 4 + i
-            if idx_idx < len(keys):
-                idx_name = keys[idx_idx]
-                val = index_data[idx_name]
-                with cols[i]:
-                    render_card(idx_name, f"{val['price']:,.2f}", val['pct'])
+    grid_html = '<div class="terminal-grid">'
     
-    # 3. Sektor-Performance
+    # Rohstoffe einfügen
+    for m_name, m_val in macro_data.items():
+        grid_html += render_html_card(m_name, f"{m_val['price']:,.2f}", m_val['pct'], m_val['unit'])
+        
+    # Indizes einfügen
+    for idx_name, val in index_data.items():
+        grid_html += render_html_card(idx_name, f"{val['price']:,.2f}", val['pct'])
+        
+    grid_html += '</div>'
+    st.markdown(grid_html, unsafe_allow_html=True)
+
+    # --- 3. SEKTOR-PERFORMANCE ---
     st.markdown('<div class="section-header">🏛️ Sektor-Übersicht (Tagesperformance)</div>', unsafe_allow_html=True)
     sector_perf = get_sector_performance()
     
     if not sector_perf.empty:
-        sectors = list(sector_perf.items())
-        num_sectors = len(sectors)
-        cols_per_row = min(num_sectors, 4)
-        for i in range(0, num_sectors, cols_per_row):
-            row_sectors = sectors[i:i + cols_per_row]
-            cols = st.columns(len(row_sectors))
-            for col_idx, (sec_name, sec_val) in enumerate(row_sectors):
-                with cols[col_idx]:
-                    render_card(sec_name, f"{sec_val:.2f}%", sec_val)
+        sec_grid = '<div class="terminal-grid">'
+        for sec_name, sec_val in sector_perf.items():
+            sec_grid += render_html_card(sec_name, f"{sec_val:.2f}%", sec_val)
+        sec_grid += '</div>'
+        st.markdown(sec_grid, unsafe_allow_html=True)
     else:
         st.info("Keine Sektor-Daten verfügbar.")
-        
-    # 4. Top Gewinner & Verlierer
+
+    # --- 4. TOP GEWINNER & VERLIERER ---
     st.markdown('<div class="section-header">⚡ Top Performance Watchlist</div>', unsafe_allow_html=True)
     df_perf = get_watchlist_performance()
 
@@ -383,10 +376,10 @@ if check_password():
         }
         
         with col_win:
-            st.markdown("<span style='color: #3fb950; font-weight: 600; font-size: 0.8rem;'>🟢 TOP GEWINNER</span>", unsafe_allow_html=True)
+            st.markdown("<span style='color: #3fb950; font-weight: 600; font-size: 0.75rem;'>🟢 TOP GEWINNER</span>", unsafe_allow_html=True)
             st.dataframe(df_sorted.head(10), column_config=conf, hide_index=True, use_container_width=True)
         with col_loss:
-            st.markdown("<span style='color: #da3633; font-weight: 600; font-size: 0.8rem;'>🔴 TOP VERLIERER</span>", unsafe_allow_html=True)
+            st.markdown("<span style='color: #da3633; font-weight: 600; font-size: 0.75rem;'>🔴 TOP VERLIERER</span>", unsafe_allow_html=True)
             st.dataframe(df_sorted.tail(10).sort_values(by="Tageschange (%)"), column_config=conf, hide_index=True, use_container_width=True)
     else:
         st.info("Keine Watchlist-Daten verfügbar.")
