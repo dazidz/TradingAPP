@@ -58,6 +58,7 @@ def fritz_run_daily_prep():
 
         preis = db_preis
         wachstum = 5.0
+        analyst_target = 0.0  # Neu: Platzhalter für Analysten-Konsens
 
         try:
             stock = yf.Ticker(str(ticker).strip())
@@ -70,6 +71,9 @@ def fritz_run_daily_prep():
             live_eps = clean_float(info.get("trailingEps") or info.get("forwardEps"), 0.0)
             if live_eps != 0:
                 eps = live_eps
+
+            # Neu: Analysten-Kursziel (targetMeanPrice) von yfinance abgreifen
+            analyst_target = clean_float(info.get("targetMeanPrice"), 0.0)
 
             # Free Cash Flow je Aktie berechnen
             try:
@@ -100,10 +104,18 @@ def fritz_run_daily_prep():
         if preis <= 0:
             continue
 
-        # Graham-Formel & Buffett Owner Earnings berechnen
+        # Modelle berechnen
         graham = eps * (8.5 + (2 * max(0.0, wachstum))) if eps > 0 else preis
         buffett = (fcf_per_share / 0.10) if fcf_per_share > 0 else graham
-        fair_value = (graham * 0.6) + (buffett * 0.4)
+        
+        # Hybrid-Ansatz: Wenn analyst_target vorhanden ist, fließt es mit 20% Gewichtung ein
+        if analyst_target > 0:
+            fundamentaler_wert = (graham * 0.6) + (buffett * 0.4)
+            fair_value = (fundamentaler_wert * 0.8) + (analyst_target * 0.2)
+        else:
+            # Fallback auf reines Fundamentalmodell, falls Wall Street keine Daten hat
+            fair_value = (graham * 0.6) + (buffett * 0.4)
+
         potential = ((fair_value - preis) / preis) * 100
 
         # Werte final absichern gegen NaN / inf
