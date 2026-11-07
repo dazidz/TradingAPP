@@ -57,8 +57,8 @@ def fritz_run_daily_prep():
         fcf_per_share = clean_float(row.get("fcf_je_aktie"), 0.0)
 
         preis = db_preis
-        wachstum = 5.0
-        analyst_target = 0.0  # Neu: Platzhalter für Analysten-Konsens
+        analyst_target = 0.0
+        raw_growth = 0.05  # Standard: 5%
 
         try:
             stock = yf.Ticker(str(ticker).strip())
@@ -72,7 +72,7 @@ def fritz_run_daily_prep():
             if live_eps != 0:
                 eps = live_eps
 
-            # Neu: Analysten-Kursziel (targetMeanPrice) von yfinance abgreifen
+            # Analysten-Kursziel (targetMeanPrice) von yfinance abgreifen
             analyst_target = clean_float(info.get("targetMeanPrice"), 0.0)
 
             # Free Cash Flow je Aktie berechnen
@@ -95,7 +95,7 @@ def fritz_run_daily_prep():
                     fcf_per_share = fc_flow / shares_out
 
             if info.get("earningsGrowth"):
-                wachstum = clean_float(info.get("earningsGrowth"), 0.08) * 100
+                raw_growth = clean_float(info.get("earningsGrowth"), 0.05)
 
         except Exception as e:
             # yfinance HTTP Errors (wie bei ungültigen Tickern) leise abfangen
@@ -104,17 +104,30 @@ def fritz_run_daily_prep():
         if preis <= 0:
             continue
 
-        # Modelle berechnen
-        graham = eps * (8.5 + (2 * max(0.0, wachstum))) if eps > 0 else preis
+        # --- 1. WACHSTUM SAUBER DECKELN (CAP BEI MAX 12% p.a.) ---
+        # Verhindert, dass z.B. 900% YoY-Quartalssprünge die Formel sprengen
+        wachstum = max(0.0, min(raw_growth * 100, 12.0))
+
+        # --- 2. GRAHAM-FORMEL MIT KGV-CAP ---
+        # Multiplikator (8.5 + 2*g) bei KGV 30 deckeln
+        graham_multiplier = min(8.5 + (2 * wachstum), 30.0)
+        graham = eps * graham_multiplier if eps > 0 else preis
+
+        # --- 3. BUFFETT OWNER EARNINGS (FCF-Ansatz) ---
         buffett = (fcf_per_share / 0.10) if fcf_per_share > 0 else graham
-        
-        # Hybrid-Ansatz: Wenn analyst_target vorhanden ist, fließt es mit 20% Gewichtung ein
+
+        # --- 4. HYBRID-MODELLVERSCHMELZUNG ---
         if analyst_target > 0:
             fundamentaler_wert = (graham * 0.6) + (buffett * 0.4)
-            fair_value = (fundamentaler_wert * 0.8) + (analyst_target * 0.2)
+            fair_value = (fundamentaler_wert * 0.7) + (analyst_target * 0.3)
         else:
-            # Fallback auf reines Fundamentalmodell, falls Wall Street keine Daten hat
             fair_value = (graham * 0.6) + (buffett * 0.4)
+
+        # --- 5. EXTREMA-SCHUTZ GEGEN MODELLAUSREISSER ---
+        # Fair Value darf maximal zwischen dem 0.3-fachen und 2.5-fachen des aktuellen Kurses liegen
+        max_allowed_fv = preis * 2.5
+        min_allowed_fv = preis * 0.3
+        fair_value = max(min_allowed_fv, min(fair_value, max_allowed_fv))
 
         potential = ((fair_value - preis) / preis) * 100
 
@@ -125,6 +138,7 @@ def fritz_run_daily_prep():
         eps = clean_float(eps, 0.0)
         fcf_per_share = clean_float(fcf_per_share, 0.0)
 
+        # Status festlegen
         if potential >= 30:
             status = "🟢 Stark Unterbewertet"
         elif potential >= 10:
@@ -147,14 +161,13 @@ def fritz_run_daily_prep():
             "updated_at": datetime.now().isoformat(),
         })
 
-    # 2. In die separate Cache-Tabelle schreiben (in Chunks, falls die Liste groß ist)
+    # 2. In die Supabase-Cache-Tabelle schreiben (in Chunks von 500)
     if processed_results:
         try:
             supabase.table("fair_value_cache").delete().neq(
                 "ticker", "DUMMY"
             ).execute()
             
-            # In Batches von je 500 Einträgen schreiben, um Payload-Limits zu umgehen
             chunk_size = 500
             for i in range(0, len(processed_results), chunk_size):
                 chunk = processed_results[i:i + chunk_size]
