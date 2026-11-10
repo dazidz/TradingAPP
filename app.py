@@ -45,19 +45,22 @@ st.markdown("""
         padding: 6px 8px;
         margin-bottom: 6px;
     }
+    /* BESCHRIFTUNG GROSS & FETT */
     .t-title {
-        font-size: 0.62rem;
-        color: #8b949e;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #f0f6fc;
         text-transform: uppercase;
         letter-spacing: 0.05em;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
     }
+    /* KURS دېZENTER / KLEINER */
     .t-value {
-        font-size: 0.9rem;
-        font-weight: 600;
-        color: #f0f6fc;
+        font-size: 0.75rem;
+        font-weight: 400;
+        color: #c9d1d9;
     }
     .t-pos {
         color: #3fb950;
@@ -83,6 +86,7 @@ def _get_supabase_client():
         url = os.environ.get("SUPABASE_URL")
     if not key:
         key = os.environ.get("SUPABASE_KEY")
+    from supabase import create_client
     return create_client(url, key)
 
 def check_password():
@@ -131,7 +135,15 @@ def render_card(title, value, pct=None, unit=""):
 # --- Datenabrufe ---
 @st.cache_data(ttl=60)
 def get_macro_commodities():
-    symbols = {"Gold": "GC=F", "Rohöl (WTI)": "CL=F", "US 10Y Zins": "^TNX", "Bitcoin": "BTC-USD"}
+    # Um Silber und Kupfer erweitert
+    symbols = {
+        "Gold": "GC=F", 
+        "Silber": "SI=F", 
+        "Kupfer": "HG=F", 
+        "Rohöl (WTI)": "CL=F", 
+        "US 10Y Zins": "^TNX", 
+        "Bitcoin": "BTC-USD"
+    }
     results = {}
     for name, symbol in symbols.items():
         try:
@@ -187,12 +199,18 @@ def get_index_performance():
 def get_sector_performance():
     try:
         sup_client = _get_supabase_client()
-        response = sup_client.table("watchlist").select("ticker, sector").execute()
+        response = sup_client.table("watchlist").select("*").execute()
         df = pd.DataFrame(response.data)
-        if df.empty or 'sector' not in df.columns or 'ticker' not in df.columns:
+        if df.empty:
             return pd.Series(dtype=float)
         
-        tickers = df['ticker'].dropna().unique().tolist()
+        ticker_col = next((c for c in ['ticker', 'symbol', 'aktie'] if c in df.columns), None)
+        sector_col = next((c for c in ['sector', 'sektor', 'strategy_kategorie'] if c in df.columns), None)
+        
+        if not ticker_col or not sector_col:
+            return pd.Series(dtype=float)
+        
+        tickers = df[ticker_col].dropna().astype(str).str.strip().unique().tolist()
         if not tickers:
             return pd.Series(dtype=float)
             
@@ -209,14 +227,14 @@ def get_sector_performance():
             df_close = data[['Close']] if 'Close' in data.columns else data
             
         if len(df_close) >= 2:
-            pct_changes = df_close.iloc[-1] / df_close.iloc[-2] - 1
-            pct_changes = pct_changes * 100
+            pct_changes = (df_close.iloc[-1] / df_close.iloc[-2] - 1) * 100
+            perf_df = pd.DataFrame({'ticker_clean': pct_changes.index, 'daily_return_pct': pct_changes.values})
             
-            perf_df = pd.DataFrame({'ticker': pct_changes.index, 'daily_return_pct': pct_changes.values})
-            merged = pd.merge(df, perf_df, on='ticker', how='inner')
+            df['ticker_clean'] = df[ticker_col].astype(str).str.strip()
+            merged = pd.merge(df, perf_df, on='ticker_clean', how='inner')
             
             if not merged.empty and 'daily_return_pct' in merged.columns:
-                sector_perf = merged.groupby('sector')['daily_return_pct'].mean().sort_values(ascending=False)
+                sector_perf = merged.groupby(sector_col)['daily_return_pct'].mean().sort_values(ascending=False)
                 return sector_perf
         return pd.Series(dtype=float)
     except Exception:
@@ -226,23 +244,32 @@ def get_sector_performance():
 def get_watchlist_performance():
     try:
         sup_client = _get_supabase_client()
-        response = sup_client.table("watchlist").select("ticker, company_name, gettex_ticker, sector").execute()
+        response = sup_client.table("watchlist").select("*").execute()
         df = pd.DataFrame(response.data)
         if df.empty: return pd.DataFrame()
         
+        ticker_col = next((c for c in ['ticker', 'symbol', 'aktie'] if c in df.columns), None)
+        name_col = next((c for c in ['company_name', 'name', 'unternehmen'] if c in df.columns), ticker_col)
+        sector_col = next((c for c in ['sector', 'sektor', 'strategy_kategorie'] if c in df.columns), None)
+        gettex_col = next((c for c in ['gettex_ticker', 'gettex'] if c in df.columns), None)
+        
+        if not ticker_col: return pd.DataFrame()
+        
         performances = []
         for _, row in df.iterrows():
+            t_str = str(row[ticker_col]).strip()
             try:
-                ticker = yf.Ticker(row['ticker'])
-                info = ticker.info
+                ticker_obj = yf.Ticker(t_str)
+                info = ticker_obj.info
                 curr = info.get('currentPrice') or info.get('regularMarketPrice')
                 prev = info.get('previousClose')
                 
                 if curr and prev:
+                    gt_tick = row[gettex_col] if gettex_col and pd.notna(row[gettex_col]) else t_str
                     performances.append({
-                        "Firma": row['company_name'],
-                        "Sektor": row.get('sector', 'N/A'),
-                        "Chart": f"https://www.tradingview.com/chart/?symbol={row['gettex_ticker']}" if row['gettex_ticker'] else f"https://www.tradingview.com/chart/?symbol={row['ticker']}",
+                        "Firma": row[name_col] if name_col else t_str,
+                        "Sektor": row[sector_col] if sector_col and pd.notna(row[sector_col]) else "N/A",
+                        "Chart": f"https://www.tradingview.com/chart/?symbol={gt_tick}",
                         "Aktuell": round(float(curr), 2),
                         "Tageschange (%)": round(((curr - prev) / prev) * 100, 2)
                     })
@@ -266,14 +293,15 @@ if check_password():
     # --- EARNINGS WARNER (0 <= days_until <= 2) ---
     try:
         sup_client = _get_supabase_client()
-        swing_res = sup_client.table("swing_depot").select("ticker, unternehmen").execute()
+        swing_res = sup_client.table("swing_depot").select("*").execute()
         swing_positions = swing_res.data if swing_res.data else []
         
         if swing_positions:
             upcoming_earnings = []
             for pos in swing_positions:
-                t = pos["ticker"]
-                comp_name = pos.get("unternehmen", t)
+                t = pos.get("ticker") or pos.get("symbol")
+                comp_name = pos.get("unternehmen") or pos.get("name") or t
+                if not t: continue
                 try:
                     ticker_obj = yf.Ticker(t)
                     cal = ticker_obj.calendar
@@ -338,25 +366,16 @@ if check_password():
         with st.container(border=True):
             st.markdown('<div class="box-title">🌍 Makro, Rohstoffe & Crypto</div>', unsafe_allow_html=True)
             macro_data = get_macro_commodities()
-            items = list(macro_data.items()) # Gold, Rohöl, Zins, Bitcoin
+            items = list(macro_data.items()) # Gold, Silber, Kupfer, Rohöl, Zins, Bitcoin
             
-            # Reihe 1: Gold & Rohöl
-            r1_c1, r1_c2 = st.columns(2)
-            if len(items) > 0:
-                with r1_c1:
-                    render_card(items[0][0], f"{items[0][1]['price']:,.2f}", items[0][1]['pct'], items[0][1]['unit'])
-            if len(items) > 1:
-                with r1_c2:
-                    render_card(items[1][0], f"{items[1][1]['price']:,.2f}", items[1][1]['pct'], items[1][1]['unit'])
-                    
-            # Reihe 2: US 10Y Zins & Bitcoin
-            r2_c1, r2_c2 = st.columns(2)
-            if len(items) > 2:
-                with r2_c1:
-                    render_card(items[2][0], f"{items[2][1]['price']:,.2f}", items[2][1]['pct'], items[2][1]['unit'])
-            if len(items) > 3:
-                with r2_c2:
-                    render_card(items[3][0], f"{items[3][1]['price']:,.2f}", items[3][1]['pct'], items[3][1]['unit'])
+            # Dynamisch paarweise in Reihen aufteilen
+            for i in range(0, len(items), 2):
+                r_c1, r_c2 = st.columns(2)
+                with r_c1:
+                    render_card(items[i][0], f"{items[i][1]['price']:,.2f}", items[i][1]['pct'], items[i][1]['unit'])
+                if i + 1 < len(items):
+                    with r_c2:
+                        render_card(items[i+1][0], f"{items[i+1][1]['price']:,.2f}", items[i+1][1]['pct'], items[i+1][1]['unit'])
         
     # --- RECHTE BOX: GLOBALE MÄRKTE & INDIZES ---
     with col_box2:
@@ -365,7 +384,6 @@ if check_password():
             index_data = get_index_performance()
             idx_items = list(index_data.items())
             
-            # Indizes paarweise in Reihen zu je 2 Elementen aufteilen
             for i in range(0, len(idx_items), 2):
                 row_c1, row_c2 = st.columns(2)
                 with row_c1:
