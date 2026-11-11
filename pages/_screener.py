@@ -31,139 +31,6 @@ supabase = create_client(URL, KEY)
 # Irma initialisieren
 irma = IrmaSectorAssistant(supabase)
 
-# --- IRMA SEKTOR FILTER & MODUS-AUSWAHL ---
-col_filter1, col_filter2, col_filter3 = st.columns([2, 2, 2])
-with col_filter1:
-    signal_choice = st.selectbox(
-        "🎯 Filter für Irma Sektor-Analyse:",
-        options=["ALL", "ELITE", "ELITE_EMA", "KAUF", "KAUF_EMA"],
-        format_func=lambda x: {
-            "ALL": "Alle Signale",
-            "ELITE": "Elite Signale",
-            "ELITE_EMA": "Elite + Über EMA20",
-            "KAUF": "Kauf Signale",
-            "KAUF_EMA": "Kauf + Über EMA20"
-        }[x]
-    )
-
-with col_filter2:
-    sector_view_mode = st.selectbox(
-        "🏛️ Sektor-Ansicht:",
-        options=["🎯 Chancen-Score (Standard)", "📊 Prozentuale Signal-Quote (Alt)"],
-    )
-
-# --- ERWEITERTE SEKTOR-BERECHNUNG FÜR CHANCEN-SCORE ---
-@st.cache_data(ttl=60)
-def get_opportunity_sectors(signal_filter):
-    try:
-        # Rohdaten über Irma holen (liefert Basisquoten & Signalanzahl)
-        df_base = irma.get_top_sector_quotas(signal_filter=signal_filter)
-        if df_base.empty:
-            return pd.DataFrame()
-
-        sectors = df_base['sector'].tolist()
-        
-        # Watchlist / Signale laden, um die Performance (Exhaustion-Check) zu berechnen
-        response = supabase.table("signals").select("ticker, sector").execute()
-        df_sig = pd.DataFrame(response.data)
-        
-        if df_sig.empty:
-            return df_base
-
-        unique_tickers = df_sig['ticker'].dropna().unique().tolist()
-        if not unique_tickers:
-            return df_base
-
-        data = yf.download(unique_tickers, period="5d", interval="1d", progress=False, auto_adjust=True)
-        if data.empty:
-            return df_base
-
-        if isinstance(data.columns, pd.MultiIndex):
-            if 'Close' in data.columns.levels[0]:
-                df_close = data['Close']
-            else:
-                df_close = data.iloc[:, :len(unique_tickers)]
-        else:
-            df_close = data[['Close']] if 'Close' in data.columns else data
-
-        if len(df_close) >= 2:
-            period_pct = (df_close.iloc[-1] / df_close.iloc[0] - 1) * 100
-            perf_df = pd.DataFrame({'ticker': period_pct.index, 'period_return': period_pct.values})
-            
-            merged = pd.merge(df_sig, perf_df, on='ticker', how='inner')
-            if not merged.empty:
-                perf_agg = merged.groupby('sector')['period_return'].mean().reset_index()
-                
-                df_merged = pd.merge(df_base, perf_agg, on='sector', how='left').fillna(0)
-                
-                def calc_score(row):
-                    perf = row['period_return']
-                    count = row.get('signal_tickers', row.get('signal_count', 1))
-                    # Malus wenn Sektor in den letzten Tagen bereits > 12% gelaufen ist (Überhitzung)
-                    exhaustion_penalty = 0.3 if perf > 12.0 else (0.7 if perf > 8.0 else 1.0)
-                    score = (count * 10) * exhaustion_penalty
-                    if perf < 0:
-                        score += abs(perf) * 1.5
-                    return score
-
-                df_merged['opportunity_score'] = df_merged.apply(calc_score, axis=1)
-                return df_merged.sort_values(by='opportunity_score', ascending=False).head(10)
-
-        return df_base.head(10)
-    except Exception:
-        return irma.get_top_sector_quotas(signal_filter=signal_filter)
-
-
-# Sektor-Daten entsprechend der gewählten Ansicht laden
-if "Chancen-Score" in sector_view_mode:
-    sector_df = get_opportunity_sectors(signal_filter=signal_choice)
-    st.markdown(f"### 🎯 Irma: Top 10 Sektoren nach Chancen-Score ({signal_choice})")
-    
-    if not sector_df.empty and 'opportunity_score' in sector_df.columns:
-        chart = (
-            alt.Chart(sector_df)
-            .mark_bar(color="#3b82f6")
-            .encode(
-                x=alt.X("opportunity_score:Q", title="Chancen-Score (Frische & Signale)", axis=alt.Axis(format=".1f")),
-                y=alt.Y("sector:N", sort="-x", title="Sektor"),
-                tooltip=[
-                    "sector",
-                    alt.Tooltip("opportunity_score:Q", format=".1f", title="Score"),
-                    alt.Tooltip("signal_tickers:Q", title="Ticker mit Signal"),
-                    alt.Tooltip("total_tickers:Q", title="Gesamt Ticker"),
-                ],
-            )
-            .properties(height=420)
-        )
-        st.altair_chart(chart, use_container_width=True)
-    else:
-        st.info("Keine Daten für den Chancen-Score verfügbar.")
-else:
-    sector_df = irma.get_top_sector_quotas(signal_filter=signal_choice)
-    st.markdown(f"### 🏆 Irma: Top 10 Sektoren nach Signal-Quote ({signal_choice})")
-    
-    if not sector_df.empty:
-        chart = (
-            alt.Chart(sector_df)
-            .mark_bar(color="#10b981")
-            .encode(
-                x=alt.X("signal_quota_percent:Q", title="Signal-Quote (%)", axis=alt.Axis(format=".1f")),
-                y=alt.Y("sector:N", sort="-x", title="Sektor"),
-                tooltip=[
-                    "sector",
-                    alt.Tooltip("signal_quota_percent:Q", format=".1f", title="Quote (%)"),
-                    alt.Tooltip("signal_tickers:Q", title="Ticker mit Signal"),
-                    alt.Tooltip("total_tickers:Q", title="Gesamt Ticker im Sektor"),
-                ],
-            )
-            .properties(height=420)
-        )
-        st.altair_chart(chart, use_container_width=True)
-    else:
-        st.info("Irma konnte für diese Filterkombination keine Sektor-Daten berechnen.")
-
-st.markdown("---")
-
 
 # Caching für Daten & Exchange-Informationen
 @st.cache_data(ttl=3600)
@@ -212,13 +79,15 @@ def get_ema_stats_bulk(tickers):
     return stats
 
 
-# --- SCREENER LOGIK ---
+def is_elite(sig):
+    return "elite" in str(sig).lower()
+
+
+# --- DATEN LADEN & VORBEREITEN (Basis für Diagramm & Tabellen) ---
 try:
-    # 1. Aktive Signale laden
     response = supabase.table("signals").select("*").execute()
     df = pd.DataFrame(response.data)
 
-    # 2. Favoriten aus der separaten Tabelle laden
     fav_response = supabase.table("favorites").select("ticker").execute()
     fav_tickers = (
         [row["ticker"] for row in fav_response.data] if fav_response.data else []
@@ -230,7 +99,6 @@ try:
         ).reset_index(drop=True)
 
         if "meta_data" in df.columns:
-
             def parse_meta(x):
                 if isinstance(x, dict):
                     return x
@@ -262,9 +130,7 @@ try:
             if col not in df.columns:
                 df[col] = ""
 
-        # Status direkt über die Favoriten-Tabelle setzen
         df["is_favorite"] = df["ticker"].isin(fav_tickers)
-
         df["Chart"] = df["gettex_ticker"].apply(
             lambda x: f"https://www.tradingview.com/chart/?symbol={x}" if x else ""
         )
@@ -275,14 +141,195 @@ try:
 
         df["current_price"] = df["ticker"].map(prices)
         df["exchange"] = df["ticker"].map(exchanges)
-
         df["entry_price_num"] = pd.to_numeric(df["entry_price"], errors="coerce")
+        
+        # Exakte Performance seit Candle Time (Entry Price)
         df["Performance (%)"] = (
             (df["current_price"] - df["entry_price_num"]) / df["entry_price_num"]
         ) * 100
         df["EMA20_Dist_%"] = df["ticker"].map(ema_stats)
 
-        # Tabs für die einzelnen Kategorien inklusive Gesamtliste
+        # --- IRMA SEKTOR FILTER & MODUS-AUSWAHL ---
+        col_filter1, col_filter2, _ = st.columns([2, 2, 2])
+        with col_filter1:
+            signal_choice = st.selectbox(
+                "🎯 Filter für Irma Sektor-Analyse:",
+                options=["ALL", "ELITE", "ELITE_EMA", "KAUF", "KAUF_EMA"],
+                format_func=lambda x: {
+                    "ALL": "Alle Signale",
+                    "ELITE": "Elite Signale",
+                    "ELITE_EMA": "Elite + Über EMA20",
+                    "KAUF": "Kauf Signale",
+                    "KAUF_EMA": "Kauf + Über EMA20",
+                }[x],
+            )
+
+        with col_filter2:
+            sector_view_mode = st.selectbox(
+                "🏛️ Sektor-Ansicht:",
+                options=[
+                    "🎯 Chancen-Score (Seit Signal)",
+                    "📊 Prozentuale Signal-Quote (Alt)",
+                ],
+            )
+
+        # Passendes Subset für den gewählten Filter ziehen (damit nur relevante Signale gewichtet werden)
+        df_filtered = df.copy()
+        if signal_choice == "ELITE":
+            df_filtered = df_filtered[df_filtered["signal_type"].apply(is_elite)]
+        elif signal_choice == "ELITE_EMA":
+            df_filtered = df_filtered[
+                df_filtered["signal_type"].apply(is_elite)
+                & (df_filtered["EMA20_Dist_%"].notna())
+                & (df_filtered["EMA20_Dist_%"] >= 0)
+            ]
+        elif signal_choice == "KAUF":
+            df_filtered = df_filtered[~df_filtered["signal_type"].apply(is_elite)]
+        elif signal_choice == "KAUF_EMA":
+            df_filtered = df_filtered[
+                (~df_filtered["signal_type"].apply(is_elite))
+                & (df_filtered["EMA20_Dist_%"].notna())
+                & (df_filtered["EMA20_Dist_%"] >= 0)
+            ]
+
+        # Basis-Quoten von Irma holen
+        sector_base = irma.get_top_sector_quotas(signal_filter=signal_choice)
+
+        if "Chancen-Score" in sector_view_mode:
+            st.markdown(
+                f"### 🎯 Irma: Top 10 Sektoren nach Chancen-Score ({signal_choice})"
+            )
+
+            if not sector_base.empty and not df_filtered.empty:
+                # Durchschnittliche Performance seit Candle Time pro Sektor (ohne NaNs!)
+                valid_perf = df_filtered.dropna(subset=["Performance (%)", "sector"])
+                valid_perf = valid_perf[valid_perf["sector"] != ""]
+                
+                perf_agg = (
+                    valid_perf.groupby("sector")["Performance (%)"]
+                    .mean()
+                    .reset_index()
+                    .rename(columns={"Performance (%)": "avg_perf_since_signal"})
+                )
+
+                # Striktes Inner Merge: Sektoren ohne valide Performance fliegen raus
+                df_valid = pd.merge(sector_base, perf_agg, on="sector", how="inner")
+
+                valid_sectors = set(df_valid["sector"])
+                ignored_sectors = [
+                    s for s in sector_base["sector"] if s not in valid_sectors
+                ]
+
+                if ignored_sectors:
+                    st.warning(
+                        f"⚠️ Ignorierte Sektoren (keine validen Kurs-/Entry-Daten): **{', '.join(ignored_sectors)}**"
+                    )
+
+                def calc_score(row):
+                    perf = row["avg_perf_since_signal"]
+                    quota = row.get("signal_quota_percent", 0)
+
+                    # Erschöpfungs-Malus basierend auf Lauf seit Candle Time
+                    if perf > 15.0:
+                        exhaustion_penalty = 0.2  # Schon extrem gelaufen (>15%)
+                    elif perf > 8.0:
+                        exhaustion_penalty = 0.5  # Gut angelaufen (8-15%)
+                    else:
+                        exhaustion_penalty = 1.0  # Frisch (<8%)
+
+                    score = quota * exhaustion_penalty
+                    # Leichter Bonus, wenn Signale noch leicht im Minus / am Einstieg liegen
+                    if -10.0 <= perf < 0:
+                        score += abs(perf) * 1.2
+                    return score
+
+                df_valid["opportunity_score"] = df_valid.apply(calc_score, axis=1)
+                df_chart = df_valid.sort_values(
+                    by="opportunity_score", ascending=False
+                ).head(10)
+
+                if not df_chart.empty:
+                    chart = (
+                        alt.Chart(df_chart)
+                        .mark_bar(color="#3b82f6")
+                        .encode(
+                            x=alt.X(
+                                "opportunity_score:Q",
+                                title="Chancen-Score (Quote × Frische)",
+                                axis=alt.Axis(format=".1f"),
+                            ),
+                            y=alt.Y("sector:N", sort="-x", title="Sektor"),
+                            tooltip=[
+                                "sector",
+                                alt.Tooltip(
+                                    "opportunity_score:Q", format=".1f", title="Score"
+                                ),
+                                alt.Tooltip(
+                                    "avg_perf_since_signal:Q",
+                                    format=".2f",
+                                    title="Ø Perf seit Signal (%)",
+                                ),
+                                alt.Tooltip(
+                                    "signal_quota_percent:Q",
+                                    format=".1f",
+                                    title="Signal-Quote (%)",
+                                ),
+                                alt.Tooltip(
+                                    "signal_tickers:Q", title="Ticker mit Signal"
+                                ),
+                            ],
+                        )
+                        .properties(height=420)
+                    )
+                    st.altair_chart(chart, use_container_width=True)
+                else:
+                    st.info("Keine validen Sektordaten für den Chancen-Score.")
+            else:
+                st.info("Keine Daten für diesen Filter vorhanden.")
+
+        else:
+            # Alte Logik: Reine Signal-Quote
+            st.markdown(
+                f"### 🏆 Irma: Top 10 Sektoren nach Signal-Quote ({signal_choice})"
+            )
+            if not sector_base.empty:
+                chart = (
+                    alt.Chart(sector_base)
+                    .mark_bar(color="#10b981")
+                    .encode(
+                        x=alt.X(
+                            "signal_quota_percent:Q",
+                            title="Signal-Quote (%)",
+                            axis=alt.Axis(format=".1f"),
+                        ),
+                        y=alt.Y(
+                            "sector:N",
+                            sort="-x",
+                            title="Sektor",
+                            axis=alt.Axis(values=sector_base["sector"].tolist()),
+                        ),
+                        tooltip=[
+                            "sector",
+                            alt.Tooltip(
+                                "signal_quota_percent:Q", format=".1f", title="Quote (%)"
+                            ),
+                            alt.Tooltip("signal_tickers:Q", title="Ticker mit Signal"),
+                            alt.Tooltip(
+                                "total_tickers:Q", title="Gesamt Ticker im Sektor"
+                            ),
+                        ],
+                    )
+                    .properties(height=420)
+                )
+                st.altair_chart(chart, use_container_width=True)
+            else:
+                st.info(
+                    "Irma konnte für diese Filterkombination keine Sektor-Daten berechnen."
+                )
+
+        st.markdown("---")
+
+        # --- TABS FÜR DIE EINZELNEN KATEGORIEN ---
         (
             tab_favs,
             tab_ema20_elite,
@@ -312,7 +359,7 @@ try:
             def get_company_prefix(row):
                 sig = str(row.get("signal_type", "")).strip().lower()
                 dist = row.get("EMA20_Dist_%", None)
-                
+
                 is_above_ema = False if pd.isna(dist) else (dist >= 0)
                 is_el = "elite" in sig
 
@@ -423,9 +470,6 @@ try:
                             {"ticker": t_symbol}, on_conflict="ticker"
                         ).execute()
                 st.rerun()
-
-        def is_elite(sig):
-            return "elite" in str(sig).lower()
 
         # Tab 1: Favoriten
         with tab_favs:
