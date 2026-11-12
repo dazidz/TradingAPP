@@ -46,7 +46,6 @@ st.markdown("""
         padding: 6px 8px;
         margin-bottom: 6px;
     }
-    /* BESCHRIFTUNG OHNE ABSCHNITTEN (Wrapping erlaubt) */
     .t-title {
         font-size: 0.78rem;
         font-weight: 600;
@@ -206,7 +205,11 @@ def get_sector_performance():
         if not ticker_col or not sector_col:
             return pd.Series(dtype=float)
         
-        tickers = df[ticker_col].dropna().astype(str).str.strip().unique().tolist()
+        # Bereinigen und ungültige Sektoren (#BEZUG!, leer etc.) direkt ausschließen
+        df = df.dropna(subset=[sector_col, ticker_col])
+        df = df[~df[sector_col].astype(str).str.contains("#BEZUG|nan|None", case=False, na=True)]
+        
+        tickers = df[ticker_col].astype(str).str.strip().unique().tolist()
         if not tickers:
             return pd.Series(dtype=float)
             
@@ -355,7 +358,7 @@ if check_password():
         pass
 
     # --- DREITEILIGES LAYOUT: MAKRO (LINKS) // SEKTOR-DIAGRAMM (MITTE) // INDIZES (RECHTS) ---
-    col_macro, col_sector, col_indices = st.columns([1, 1.3, 1])
+    col_macro, col_sector, col_indices = st.columns([1, 1.4, 1])
     
     # 1. LINKE SPALTE: MAKRO, ROHSTOFFE & CRYPTO
     with col_macro:
@@ -379,7 +382,8 @@ if check_password():
                 
                 chart = alt.Chart(df_chart).mark_bar().encode(
                     x=alt.X('performance:Q', title="Performance (%)", axis=alt.Axis(format=".2f")),
-                    y=alt.Y('sector:N', sort='-x', title=None, axis=alt.Axis(ticks=False, labels=True)),
+                    # labelLimit auf 150 erhöht, damit Sektoren-Namen nicht abgeschnitten werden
+                    y=alt.Y('sector:N', sort='-x', title=None, axis=alt.Axis(ticks=False, labels=True, labelLimit=150)),
                     color=alt.condition(
                         alt.datum.performance >= 0,
                         alt.value('#3fb950'),  # Grün für Plus
