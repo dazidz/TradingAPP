@@ -390,8 +390,7 @@ if check_password():
                         alt.Tooltip('performance:Q', format=".2f", title="Performance (%)")
                     ]
                 ).properties(
-                    height=295,
-                    background='#0d1117'
+                    height=295
                 ).configure_view(
                     strokeWidth=0
                 ).configure_axis(
@@ -399,8 +398,6 @@ if check_password():
                     domainColor='#30363d',
                     labelColor='#8b949e',
                     titleColor='#8b949e'
-                ).configure_background(
-                    fill='#0d1117'
                 )
                 
                 st.altair_chart(chart, use_container_width=True)
