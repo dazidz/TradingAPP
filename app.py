@@ -1,5 +1,6 @@
 from datetime import datetime, date
 import os
+import altair as alt
 import pandas as pd
 import streamlit as st
 import yfinance as yf
@@ -45,18 +46,16 @@ st.markdown("""
         padding: 6px 8px;
         margin-bottom: 6px;
     }
-    /* BESCHRIFTUNG GROSS & FETT */
+    /* BESCHRIFTUNG OHNE ABSCHNITTEN (Wrapping erlaubt) */
     .t-title {
-        font-size: 0.85rem;
+        font-size: 0.78rem;
         font-weight: 600;
         color: #f0f6fc;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        letter-spacing: 0.04em;
+        line-height: 1.2;
+        margin-bottom: 2px;
     }
-    /* KURS دېZENTER / KLEINER */
     .t-value {
         font-size: 0.75rem;
         font-weight: 400;
@@ -113,7 +112,6 @@ def check_password():
                 st.error("Passwort falsch.")
     return False
 
-# --- Sichere Render-Funktion für ein einzelnes Kästchen ---
 def render_card(title, value, pct=None, unit=""):
     pct_html = ""
     if pct is not None:
@@ -132,10 +130,8 @@ def render_card(title, value, pct=None, unit=""):
     """
     st.markdown(html, unsafe_allow_html=True)
 
-# --- Datenabrufe ---
 @st.cache_data(ttl=60)
 def get_macro_commodities():
-    # Um Silber und Kupfer erweitert
     symbols = {
         "Gold": "GC=F", 
         "Silber": "SI=F", 
@@ -290,7 +286,7 @@ if check_password():
 
     st.markdown("<div style='height: 1px; background-color: #30363d; margin: 0.5rem 0 0.8rem 0;'></div>", unsafe_allow_html=True)
 
-    # --- EARNINGS WARNER (0 <= days_until <= 2) ---
+    # --- EARNINGS WARNER ---
     try:
         sup_client = _get_supabase_client()
         swing_res = sup_client.table("swing_depot").select("*").execute()
@@ -358,55 +354,66 @@ if check_password():
     except Exception:
         pass
 
-    # --- ZWEI HAUPTBOXEN NEBENEINANDER (Mit nativen st.container Rahmen) ---
-    col_box1, col_box2 = st.columns(2)
+    # --- DREITEILIGES LAYOUT: MAKRO (LINKS) // SEKTOR-DIAGRAMM (MITTE) // INDIZES (RECHTS) ---
+    col_macro, col_sector, col_indices = st.columns([1, 1.3, 1])
     
-    # --- LINKE BOX: MAKRO, ROHSTOFFE & CRYPTO ---
-    with col_box1:
+    # 1. LINKE SPALTE: MAKRO, ROHSTOFFE & CRYPTO
+    with col_macro:
         with st.container(border=True):
             st.markdown('<div class="box-title">🌍 Makro, Rohstoffe & Crypto</div>', unsafe_allow_html=True)
             macro_data = get_macro_commodities()
-            items = list(macro_data.items()) # Gold, Silber, Kupfer, Rohöl, Zins, Bitcoin
-            
-            # Dynamisch paarweise in Reihen aufteilen
-            for i in range(0, len(items), 2):
-                r_c1, r_c2 = st.columns(2)
-                with r_c1:
-                    render_card(items[i][0], f"{items[i][1]['price']:,.2f}", items[i][1]['pct'], items[i][1]['unit'])
-                if i + 1 < len(items):
-                    with r_c2:
-                        render_card(items[i+1][0], f"{items[i+1][1]['price']:,.2f}", items[i+1][1]['pct'], items[i+1][1]['unit'])
+            for name, val in macro_data.items():
+                render_card(name, f"{val['price']:,.2f}", val['pct'], val['unit'])
         
-    # --- RECHTE BOX: GLOBALE MÄRKTE & INDIZES ---
-    with col_box2:
+    # 2. MITTLERE SPALTE: SEKTOR-PERFORMANCE ALS DIVERGIERENDES BALKENDIAGRAMM
+    with col_sector:
+        with st.container(border=True):
+            st.markdown('<div class="box-title">🏛️ Sektor-Performance (Tagesbasis)</div>', unsafe_allow_html=True)
+            sector_perf = get_sector_performance()
+            
+            if not sector_perf.empty:
+                df_chart = pd.DataFrame({
+                    'sector': sector_perf.index,
+                    'performance': sector_perf.values
+                })
+                
+                chart = alt.Chart(df_chart).mark_bar().encode(
+                    x=alt.X('performance:Q', title="Performance (%)", axis=alt.Axis(format=".2f")),
+                    y=alt.Y('sector:N', sort='-x', title=None, axis=alt.Axis(ticks=False, labels=True)),
+                    color=alt.condition(
+                        alt.datum.performance >= 0,
+                        alt.value('#3fb950'),  # Grün für Plus
+                        alt.value('#da3633')   # Rot für Minus
+                    ),
+                    tooltip=[
+                        alt.Tooltip('sector:N', title="Sektor"),
+                        alt.Tooltip('performance:Q', format=".2f", title="Performance (%)")
+                    ]
+                ).properties(
+                    height=295,
+                    background='#0d1117'
+                ).configure_view(
+                    strokeWidth=0
+                ).configure_axis(
+                    gridColor='#21262d',
+                    domainColor='#30363d',
+                    labelColor='#8b949e',
+                    titleColor='#8b949e'
+                ).configure_background(
+                    fill='#0d1117'
+                )
+                
+                st.altair_chart(chart, use_container_width=True)
+            else:
+                st.info("Keine Sektor-Daten verfügbar.")
+
+    # 3. RECHTE SPALTE: GLOBALE MÄRKTE & INDIZES
+    with col_indices:
         with st.container(border=True):
             st.markdown('<div class="box-title">📊 Globale Märkte & Indizes</div>', unsafe_allow_html=True)
             index_data = get_index_performance()
-            idx_items = list(index_data.items())
-            
-            for i in range(0, len(idx_items), 2):
-                row_c1, row_c2 = st.columns(2)
-                with row_c1:
-                    name, val = idx_items[i]
-                    render_card(name, f"{val['price']:,.2f}", val['pct'])
-                if i + 1 < len(idx_items):
-                    with row_c2:
-                        name, val = idx_items[i + 1]
-                        render_card(name, f"{val['price']:,.2f}", val['pct'])
-
-    # --- SEKTOR-PERFORMANCE ---
-    st.markdown('<div class="section-header">🏛️ Sektor-Übersicht (Tagesperformance)</div>', unsafe_allow_html=True)
-    sector_perf = get_sector_performance()
-    
-    if not sector_perf.empty:
-        sectors = list(sector_perf.items())
-        cols_sec = st.columns(min(len(sectors), 6))
-        for idx, (sec_name, sec_val) in enumerate(sectors):
-            col_idx = idx % len(cols_sec)
-            with cols_sec[col_idx]:
-                render_card(sec_name, f"{sec_val:.2f}%", sec_val)
-    else:
-        st.info("Keine Sektor-Daten verfügbar.")
+            for name, val in index_data.items():
+                render_card(name, f"{val['price']:,.2f}", val['pct'])
 
     # --- TOP GEWINNER & VERLIERER ---
     st.markdown('<div class="section-header">⚡ Top Performance Watchlist</div>', unsafe_allow_html=True)
